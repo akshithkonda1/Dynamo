@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
+        registry.register(ChecklistPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry)

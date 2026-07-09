@@ -13,7 +13,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Media Controls widget | **Live** (MediaRemote + AppleScript fallback) |
 | Calendar widget | **Live** (EventKit; permission-gated) |
 | Clipboard / Snippets | **Live** (history + pinned, Application Support JSON) |
-| Checklist | Not started |
+| Checklist | **Live** (Application Support JSON) |
 | Stocks | Not started |
 | Settings (reorder / toggle) | Placeholder window only |
 | Visual polish (vibrancy, theme, spring) | Not started |
@@ -61,7 +61,7 @@ Reasons:
 
 1. ~~Real Now Playing data via MediaRemote~~
 2. ~~Clipboard / Snippets widget~~
-3. Checklist widget
+3. ~~Checklist widget~~
 4. Stocks widget (free-tier quote API + local API key)
 5. Full Settings window (reorder + toggle, UserDefaults)
 6. Visual polish pass (vibrancy, shared theme, spring animation)
