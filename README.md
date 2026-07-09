@@ -15,7 +15,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Clipboard / Snippets | **Live** (history + pinned, Application Support JSON) |
 | Checklist | **Live** (Application Support JSON) |
 | Stocks | **Live** (Finnhub; needs local API key) |
-| Settings (reorder / toggle) | Placeholder window only |
+| Settings (reorder / toggle) | **Live** (UserDefaults, instant tray update) |
 | Visual polish (vibrancy, theme, spring) | Not started |
 
 ## Requirements
@@ -63,7 +63,7 @@ Reasons:
 2. ~~Clipboard / Snippets widget~~
 3. ~~Checklist widget~~
 4. ~~Stocks widget (Finnhub free-tier + local API key)~~
-5. Full Settings window (reorder + toggle, UserDefaults)
+5. ~~Full Settings window (reorder + toggle, UserDefaults)~~
 6. Visual polish pass (vibrancy, shared theme, spring animation)
 
 `MockNowPlayingProvider` remains in the tree for previews/tests; the app wires `MediaRemoteNowPlayingProvider` at launch.
