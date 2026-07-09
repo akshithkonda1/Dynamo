@@ -50,18 +50,18 @@ private struct CollapsedClipboardView: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "doc.on.clipboard")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
             if let latest = store.history.first {
                 Text(latest.text)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
                     .frame(maxWidth: 90, alignment: .leading)
             } else {
                 Text("Clipboard")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
         }
     }
@@ -96,7 +96,7 @@ private struct ExpandedClipboardView: View {
                 .foregroundStyle(.white.opacity(0.75))
             }
 
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().overlay(NotchTheme.separator)
 
             HStack {
                 sectionHeader("History")
@@ -128,8 +128,8 @@ private struct ExpandedClipboardView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.5))
+            .font(NotchTheme.section)
+            .foregroundStyle(NotchTheme.textTertiary)
             .textCase(.uppercase)
     }
 

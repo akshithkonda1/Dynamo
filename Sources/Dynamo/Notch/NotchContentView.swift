@@ -8,19 +8,25 @@ struct NotchContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black
+            VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
+                .overlay(Color.black.opacity(0.28)) // legibility scrim over blur
 
             if controller.isExpanded {
                 expandedBody
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                            removal: .opacity
+                        )
+                    )
             } else {
                 collapsedBody
                     .transition(.opacity)
             }
         }
-        .clipShape(NotchShape(cornerRadius: controller.isExpanded ? 18 : 10))
-        .animation(.easeOut(duration: 0.22), value: controller.isExpanded)
-        .animation(.easeOut(duration: 0.18), value: registry.activePluginID)
+        .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
+        .animation(NotchTheme.expandSpring, value: controller.isExpanded)
+        .animation(NotchTheme.contentSpring, value: registry.activePluginID)
     }
 
     private var collapsedBody: some View {
@@ -43,8 +49,7 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Tray of plugin icons — selection only, no name-based branching.
-            HStack(spacing: 12) {
+            HStack(spacing: NotchTheme.spaceMD) {
                 ForEach(registry.plugins, id: \.id) { plugin in
                     let isActive = registry.activePluginID == plugin.id
                     Button {
@@ -52,11 +57,11 @@ struct NotchContentView: View {
                     } label: {
                         Image(systemName: plugin.systemImage)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.45))
+                            .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
                             .frame(width: 28, height: 28)
                             .background(
                                 Circle()
-                                    .fill(isActive ? Color.white.opacity(0.15) : Color.clear)
+                                    .fill(isActive ? NotchTheme.chipFillActive : Color.clear)
                             )
                     }
                     .buttonStyle(.plain)
@@ -64,14 +69,14 @@ struct NotchContentView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, NotchTheme.spaceLG)
             .padding(.top, 10)
             .padding(.bottom, 6)
 
             if let active = registry.activePlugin {
                 active.expandedView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, NotchTheme.spaceLG)
                     .padding(.bottom, 14)
             }
         }

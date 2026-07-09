@@ -64,20 +64,20 @@ private struct CollapsedStocksView: View {
             if let primary = quotes.first, primary.price > 0 {
                 MiniSparkline(values: primary.history.isEmpty ? [primary.price - primary.change, primary.price] : primary.history)
                     .frame(width: 28, height: 12)
-                    .foregroundStyle(primary.isPositive ? Color.green : Color.red)
+                    .foregroundStyle(primary.isPositive ? NotchTheme.positive : NotchTheme.negative)
                 Text(primary.symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(NotchTheme.caption.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
                 Text(String(format: "%@%.2f%%", primary.percentChange >= 0 ? "+" : "", primary.percentChange))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(primary.isPositive ? Color.green.opacity(0.9) : Color.red.opacity(0.9))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(primary.isPositive ? NotchTheme.positive : NotchTheme.negative)
             } else {
                 Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(NotchTheme.caption.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
                 Text("Stocks")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
         }
     }
@@ -98,8 +98,8 @@ private struct ExpandedStocksView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Watchlist")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(NotchTheme.section)
+                    .foregroundStyle(NotchTheme.textTertiary)
                     .textCase(.uppercase)
                 Spacer()
                 Button {
@@ -115,15 +115,15 @@ private struct ExpandedStocksView: View {
 
             if let error = plugin.lastError {
                 Text(error)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange.opacity(0.9))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.caution)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if plugin.quotes.isEmpty {
                 Text("No symbols yet.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -160,16 +160,16 @@ private struct ExpandedStocksView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(quote.symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(NotchTheme.body.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
                 if quote.price > 0 {
                     Text(Self.priceFormatter.string(from: NSNumber(value: quote.price)) ?? "—")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(NotchTheme.caption.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textSecondary)
                 } else {
                     Text("—")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textQuaternary)
                 }
             }
 
@@ -179,11 +179,11 @@ private struct ExpandedStocksView: View {
                           ? [quote.price - quote.change, quote.price]
                           : quote.history)
                 .frame(width: 48, height: 18)
-                .foregroundStyle(quote.isPositive ? Color.green : Color.red)
+                .foregroundStyle(quote.isPositive ? NotchTheme.positive : NotchTheme.negative)
 
             Text(String(format: "%@%.2f%%", quote.percentChange >= 0 ? "+" : "", quote.percentChange))
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                .foregroundStyle(quote.isPositive ? Color.green.opacity(0.9) : Color.red.opacity(0.9))
+                .font(NotchTheme.caption.weight(.medium).monospacedDigit())
+                .foregroundStyle(quote.isPositive ? NotchTheme.positive : NotchTheme.negative)
                 .frame(width: 64, alignment: .trailing)
 
             Button {

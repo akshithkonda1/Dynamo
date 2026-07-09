@@ -55,18 +55,18 @@ private struct CollapsedCalendarView: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "calendar")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
             if let next = events.first {
                 Text(next.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
                     .frame(maxWidth: 90, alignment: .leading)
             } else {
                 Text("No events")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
         }
     }
@@ -91,8 +91,9 @@ private struct ExpandedCalendarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Upcoming")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(NotchTheme.section)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .textCase(.uppercase)
 
             switch plugin.authState {
             case .notDetermined:
@@ -101,17 +102,17 @@ private struct ExpandedCalendarView: View {
                     .controlSize(.small)
             case .denied:
                 Text("Calendar access denied. Enable it in System Settings → Privacy & Security → Calendars.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .authorized:
                 if plugin.events.isEmpty {
                     Text("No events in the next few days.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .font(NotchTheme.body)
+                        .foregroundStyle(NotchTheme.textTertiary)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
                             ForEach(plugin.events) { event in
                                 eventRow(event)
                             }
@@ -124,19 +125,19 @@ private struct ExpandedCalendarView: View {
     }
 
     private func eventRow(_ event: CalendarEventItem) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(color(for: event))
                 .frame(width: 3, height: 28)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(NotchTheme.body)
+                    .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
                 Text(subtitle(for: event))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
             Spacer(minLength: 0)
         }

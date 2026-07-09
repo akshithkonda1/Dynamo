@@ -52,11 +52,11 @@ private struct CollapsedMediaView: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: info.isPlaying ? "music.note" : "music.note.list")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
             Text(info.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textPrimary)
                 .lineLimit(1)
                 .frame(maxWidth: 90, alignment: .leading)
         }
@@ -67,24 +67,24 @@ private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: NotchTheme.spaceMD) {
+            HStack(spacing: NotchTheme.spaceMD) {
                 artwork
                 VStack(alignment: .leading, spacing: 3) {
                     Text(plugin.info.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(NotchTheme.title)
+                        .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                     if !plugin.info.artist.isEmpty {
                         Text(plugin.info.artist)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .font(NotchTheme.body)
+                            .foregroundStyle(NotchTheme.textSecondary)
                             .lineLimit(1)
                     }
                     if !plugin.info.album.isEmpty {
                         Text(plugin.info.album)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.45))
+                            .font(NotchTheme.caption)
+                            .foregroundStyle(NotchTheme.textTertiary)
                             .lineLimit(1)
                     }
                 }
@@ -100,14 +100,14 @@ private struct ExpandedMediaView: View {
                 controlButton(systemName: "forward.fill") { plugin.nextTrack() }
                 Spacer()
             }
-            .padding(.top, 4)
+            .padding(.top, NotchTheme.spaceXS)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
     private var artwork: some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: NotchTheme.radiusIcon, style: .continuous)
         if let data = plugin.info.artworkData, let image = NSImage(data: data) {
             Image(nsImage: image)
                 .resizable()
@@ -116,11 +116,11 @@ private struct ExpandedMediaView: View {
                 .clipShape(shape)
         } else {
             shape
-                .fill(Color.white.opacity(0.08))
+                .fill(NotchTheme.chipFill)
                 .frame(width: 56, height: 56)
                 .overlay(
                     Image(systemName: "music.note")
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(NotchTheme.textTertiary)
                 )
         }
     }
@@ -129,7 +129,7 @@ private struct ExpandedMediaView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(NotchTheme.textPrimary)
                 .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }

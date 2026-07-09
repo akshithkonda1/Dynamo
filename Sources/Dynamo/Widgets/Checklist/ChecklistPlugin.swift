@@ -40,11 +40,11 @@ private struct CollapsedChecklistView: View {
         let remaining = store.items.filter { !$0.isDone }.count
         HStack(spacing: 6) {
             Image(systemName: "checklist")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
             Text(remaining == 0 ? "All done" : "\(remaining) left")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textPrimary)
         }
     }
 }
@@ -55,14 +55,14 @@ private struct ExpandedChecklistView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Checklist")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
+                .font(NotchTheme.section)
+                .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
 
             if plugin.store.items.isEmpty {
                 Text("Add a task below.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -107,8 +107,8 @@ private struct ExpandedChecklistView: View {
             .buttonStyle(.plain)
 
             Text(item.text)
-                .font(.system(size: 12))
-                .foregroundStyle(item.isDone ? Color.white.opacity(0.4) : Color.white.opacity(0.9))
+                .font(NotchTheme.body)
+                .foregroundStyle(item.isDone ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
                 .strikethrough(item.isDone)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -14,8 +14,8 @@ final class NotchWindowController: ObservableObject {
     private var localMonitor: Any?
     private weak var registry: WidgetRegistry?
 
-    private let collapsedSize = NSSize(width: 220, height: 34)
-    private let expandedSize = NSSize(width: 420, height: 220)
+    private let collapsedSize = NSSize(width: 320, height: 36)
+    private let expandedSize = NSSize(width: 460, height: 260)
 
     func attach(registry: WidgetRegistry) {
         self.registry = registry
@@ -100,9 +100,11 @@ final class NotchWindowController: ObservableObject {
         guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
         let origin = topCenterOrigin(size: size, on: screen)
         let target = NSRect(origin: origin, size: size)
+        // Spring-like AppKit timing (slightly underdamped ease) to match SwiftUI spring.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = 0.38
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
+            context.allowsImplicitAnimation = true
             panel.animator().setFrame(target, display: true)
         }
     }
