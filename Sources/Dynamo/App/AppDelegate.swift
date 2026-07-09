@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
+        registry.register(StocksPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry)

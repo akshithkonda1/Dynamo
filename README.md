@@ -14,7 +14,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Calendar widget | **Live** (EventKit; permission-gated) |
 | Clipboard / Snippets | **Live** (history + pinned, Application Support JSON) |
 | Checklist | **Live** (Application Support JSON) |
-| Stocks | Not started |
+| Stocks | **Live** (Finnhub; needs local API key) |
 | Settings (reorder / toggle) | Placeholder window only |
 | Visual polish (vibrancy, theme, spring) | Not started |
 
@@ -62,11 +62,23 @@ Reasons:
 1. ~~Real Now Playing data via MediaRemote~~
 2. ~~Clipboard / Snippets widget~~
 3. ~~Checklist widget~~
-4. Stocks widget (free-tier quote API + local API key)
+4. ~~Stocks widget (Finnhub free-tier + local API key)~~
 5. Full Settings window (reorder + toggle, UserDefaults)
 6. Visual polish pass (vibrancy, shared theme, spring animation)
 
 `MockNowPlayingProvider` remains in the tree for previews/tests; the app wires `MediaRemoteNowPlayingProvider` at launch.
+
+### Stocks API key setup (Finnhub)
+
+**Why Finnhub:** free tier is ~60 calls/minute — enough for a 60s refresh of a small watchlist. Alpha Vantage free is ~25 calls/day (too tight). Twelve Data free is 8/min and 800/day (usable, but Finnhub is more headroom).
+
+1. Register at [finnhub.io/register](https://finnhub.io/register) and copy your free API key.
+2. Store it **outside git** in one of these places:
+   - File: `~/Library/Application Support/Dynamo/finnhub_api_key` (single line, no quotes), or
+   - Environment variable: `FINNHUB_API_KEY=...` when launching Dynamo.
+3. Relaunch Dynamo. Default watchlist is `AAPL`, `MSFT`, `GOOGL`; edit it from the expanded Stocks widget.
+
+Never commit the key. `.gitignore` already excludes `Secrets.local.swift`, `.env*`, and `*.local.json`.
 
 ## License
 
