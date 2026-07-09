@@ -100,6 +100,24 @@ final class WidgetRegistry: ObservableObject {
         }
     }
 
+    /// Forwards file drops to every enabled widget that opts into `FileDropAccepting`.
+    /// Returns true if at least one acceptor handled the drop.
+    @discardableResult
+    func dispatchFileDrop(urls: [URL]) -> Bool {
+        var firstAcceptorID: String?
+        var handled = false
+        for plugin in plugins {
+            guard let acceptor = plugin as? any FileDropAccepting else { continue }
+            acceptor.handleFileDrop(urls: urls)
+            if firstAcceptorID == nil { firstAcceptorID = plugin.id }
+            handled = true
+        }
+        if let firstAcceptorID {
+            activePluginID = firstAcceptorID
+        }
+        return handled
+    }
+
     private func rebuildVisible() {
         plugins = order.compactMap { id in
             guard enabled.contains(id) else { return nil }

@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Owns the single two-state hover model (`isExpanded`) and the notch panel.
 /// Keep expansion as one boolean so the animation stays coherent.
@@ -13,14 +14,18 @@ final class NotchWindowController: ObservableObject {
     private var mouseMonitor: Any?
     private var localMonitor: Any?
     private weak var registry: WidgetRegistry?
+    private weak var hud: SystemHUDController?
 
-    private let collapsedSize = NSSize(width: 320, height: 36)
-    private let expandedSize = NSSize(width: 460, height: 260)
+    private let collapsedSize = NSSize(width: 400, height: 36)
+    private let expandedSize = NSSize(width: 500, height: 300)
 
-    func attach(registry: WidgetRegistry) {
+    func attach(registry: WidgetRegistry, hud: SystemHUDController) {
         self.registry = registry
+        self.hud = hud
         if panel == nil {
-            installPanel(registry: registry)
+            installPanel(registry: registry, hud: hud)
+        } else if let hostingView {
+            hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud)
         }
         installMouseTracking()
         reposition()
@@ -54,13 +59,23 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Setup
 
-    private func installPanel(registry: WidgetRegistry) {
+    private func installPanel(registry: WidgetRegistry, hud: SystemHUDController) {
         let panel = NotchPanel(contentRect: NSRect(origin: .zero, size: collapsedSize))
-        let root = NotchContentView(registry: registry, controller: self)
-        let hosting = NSHostingView(rootView: root)
+        let root = NotchContentView(registry: registry, controller: self, hud: hud)
+        let hosting = DropHostingView(rootView: root)
         hosting.frame = NSRect(origin: .zero, size: collapsedSize)
         hosting.autoresizingMask = [.width, .height]
+        hosting.onFileDrop = { [weak self] urls in
+            guard let self, let registry = self.registry else { return false }
+            let handled = registry.dispatchFileDrop(urls: urls)
+            if handled {
+                self.expand()
+            }
+            return handled
+        }
         panel.contentView = hosting
+        // Register for file URL drags on the panel itself.
+        panel.registerForDraggedTypes([.fileURL])
         self.panel = panel
         self.hostingView = hosting
         reposition()
@@ -82,10 +97,11 @@ final class NotchWindowController: ObservableObject {
     }
 
     private func evaluateMouse() {
+        // Don't collapse while the user is interacting with a HUD pulse.
+        if hud?.state != nil { return }
         guard let panel else { return }
         let mouse = NSEvent.mouseLocation
         let frame = panel.frame
-        // Slightly inflated hit area so the tray is easy to re-enter while expanded.
         let hit = frame.insetBy(dx: -8, dy: -12)
         if hit.contains(mouse) {
             if !isExpanded {
@@ -100,7 +116,6 @@ final class NotchWindowController: ObservableObject {
         guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
         let origin = topCenterOrigin(size: size, on: screen)
         let target = NSRect(origin: origin, size: size)
-        // Spring-like AppKit timing (slightly underdamped ease) to match SwiftUI spring.
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.38
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
@@ -117,7 +132,6 @@ final class NotchWindowController: ObservableObject {
     }
 
     private func preferredScreen() -> NSScreen? {
-        // Prefer the screen that has a notch (safeAreaInsets.top > 0 on macOS 12+).
         if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
             return notched
         }
@@ -126,12 +140,40 @@ final class NotchWindowController: ObservableObject {
 
     private func topCenterOrigin(size: NSSize, on screen: NSScreen) -> NSPoint {
         let frame = screen.frame
-        // Anchor just under the menu bar / into the notch region.
         let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
         let notchInset = max(screen.safeAreaInsets.top, menuBarHeight)
         let x = frame.midX - size.width / 2
-        // Hang from the top of the screen so the panel occupies the notch area.
         let y = frame.maxY - size.height - max(0, (notchInset - collapsedSize.height) / 2)
         return NSPoint(x: x, y: y)
+    }
+}
+
+// MARK: - Drop-capable hosting view
+
+/// NSHostingView that accepts file URL drags and forwards them without
+/// knowing which widget will handle them.
+private final class DropHostingView: NSHostingView<NotchContentView> {
+    var onFileDrop: (([URL]) -> Bool)?
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        canAccept(sender) ? .copy : []
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        canAccept(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ]) as? [URL]) ?? []
+        guard !urls.isEmpty else { return false }
+        return onFileDrop?(urls) ?? false
+    }
+
+    private func canAccept(_ sender: NSDraggingInfo) -> Bool {
+        sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ])
     }
 }

@@ -5,13 +5,17 @@ import SwiftUI
 struct NotchContentView: View {
     @ObservedObject var registry: WidgetRegistry
     @ObservedObject var controller: NotchWindowController
+    @ObservedObject var hud: SystemHUDController
 
     var body: some View {
         ZStack(alignment: .top) {
             VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
-                .overlay(Color.black.opacity(0.28)) // legibility scrim over blur
+                .overlay(Color.black.opacity(0.28))
 
-            if controller.isExpanded {
+            if let hudState = hud.state {
+                SystemHUDView(state: hudState)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            } else if controller.isExpanded {
                 expandedBody
                     .transition(
                         .asymmetric(
@@ -27,6 +31,7 @@ struct NotchContentView: View {
         .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
+        .animation(NotchTheme.contentSpring, value: hud.state)
     }
 
     private var collapsedBody: some View {
