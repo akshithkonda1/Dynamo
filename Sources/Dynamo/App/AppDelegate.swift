@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Register widgets. Order here is the default tray order; Settings can
         // reorder without any host knowing widget names.
-        registry.register(MediaControlsPlugin())
+        registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
         registry.register(CalendarPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
