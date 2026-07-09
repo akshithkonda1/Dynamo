@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // reorder without any host knowing widget names.
         registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
         registry.register(CalendarPlugin())
+        registry.register(ClipboardPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry)
