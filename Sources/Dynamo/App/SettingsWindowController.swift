@@ -41,6 +41,13 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
 
+    private var aiKeyStatus: String {
+        if AIConfig.apiKey != nil {
+            return "AI: key found · model \(AIConfig.model)"
+        }
+        return "AI: no key — add ~/Library/Application Support/Dynamo/xai_api_key"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
@@ -52,6 +59,11 @@ struct SettingsView: View {
                         launchStatus = LaunchAtLogin.statusDescription
                     }
                 Text(launchStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(aiKeyStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

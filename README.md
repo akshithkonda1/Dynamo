@@ -29,6 +29,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Volume & brightness HUD | **Live** (media-key triggered notch meter) |
 | Launch at Login | **Live** (SMAppService; best with packaged `.app`) |
 | Ad-hoc `.app` packaging | **Live** (`scripts/package-app.sh`) |
+| AI assistant (xAI Grok) | **Live** (chat + clipboard quick actions; local API key) |
 
 ## Requirements
 
@@ -79,6 +80,24 @@ Reasons:
 
 **Revisit when:** shipping a proper app icon asset catalog, notarization, or entitlements that need a real Xcode app target.
 
+## AI setup (xAI Grok)
+
+The AI widget uses the **OpenAI-compatible Chat Completions** API and defaults to xAI:
+
+| Setting | Default | Override |
+|---------|---------|----------|
+| Base URL | `https://api.x.ai/v1` | env `DYNAMO_AI_BASE_URL` or file `ai_base_url` |
+| Model | `grok-3-mini` | env `DYNAMO_AI_MODEL` or file `ai_model` |
+| API key | — | env `XAI_API_KEY` (or `OPENAI_API_KEY`) or file `xai_api_key` |
+
+1. Create a key at [console.x.ai](https://console.x.ai/).
+2. Write it to `~/Library/Application Support/Dynamo/xai_api_key` (single line), **or** export `XAI_API_KEY=...`.
+3. Relaunch Dynamo. Expand the **AI** tray icon.
+
+**Quick actions** (expanded AI panel): Summarize / Rewrite / Explain / Fix grammar — each uses the current clipboard text.
+
+Point at OpenAI or a local server by setting `ai_base_url` + `ai_model` + the matching key file. Never commit keys.
+
 ## Stocks API key setup (Finnhub)
 
 **Why Finnhub:** free tier is ~60 calls/minute — enough for a 60s refresh of a small watchlist.
@@ -91,11 +110,11 @@ Reasons:
 
 ## Next steps (post Phase 2)
 
+- Optional: stream AI tokens into the notch response bubble
 - Optional: MediaRemoteAdapter helper process for macOS 15.4+ edge cases
 - Optional: AirDrop share action from File Shelf
 - Optional: app icon asset + DMG release pipeline
 - Optional: webcam mirror widget
-- Optional: notch width fine-tuning per display model
 
 ## License
 

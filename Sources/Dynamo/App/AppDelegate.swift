@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registry.register(StocksPlugin())
         registry.register(BatteryPlugin())
         registry.register(ShelfPlugin())
+        registry.register(AIPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry, hud: hudController)

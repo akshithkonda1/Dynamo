@@ -16,8 +16,8 @@ final class NotchWindowController: ObservableObject {
     private weak var registry: WidgetRegistry?
     private weak var hud: SystemHUDController?
 
-    private let collapsedSize = NSSize(width: 360, height: 36)
-    private let expandedSize = NSSize(width: 480, height: 280)
+    private let collapsedSize = NSSize(width: 400, height: 36)
+    private let expandedSize = NSSize(width: 500, height: 300)
 
     func attach(registry: WidgetRegistry, hud: SystemHUDController) {
         self.registry = registry
