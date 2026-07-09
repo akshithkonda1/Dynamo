@@ -60,17 +60,24 @@ private struct ExpandedChecklistView: View {
                 .textCase(.uppercase)
 
             if plugin.store.items.isEmpty {
-                Text("Add a task below.")
+                Text("Add a task below. Drag the handle to reorder.")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textTertiary)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(plugin.store.items) { item in
-                            row(item)
-                        }
+                // List + onMove enables drag reorder on macOS without an edit mode.
+                List {
+                    ForEach(plugin.store.items) { item in
+                        row(item)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                    }
+                    .onMove { indices, newOffset in
+                        plugin.store.move(fromOffsets: indices, toOffset: newOffset)
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(maxHeight: 140)
             }
 
             HStack(spacing: 8) {
@@ -97,6 +104,10 @@ private struct ExpandedChecklistView: View {
 
     private func row(_ item: ChecklistItem) -> some View {
         HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+
             Button {
                 plugin.store.toggle(id: item.id)
             } label: {
