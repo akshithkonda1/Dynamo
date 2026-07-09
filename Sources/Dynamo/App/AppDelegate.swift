@@ -4,6 +4,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var registry: WidgetRegistry?
     private var notchController: NotchWindowController?
+    private var hudController: SystemHUDController?
     private var statusItem: NSStatusItem?
     private var settingsController: SettingsWindowController?
 
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             registry?.stopAll()
+            hudController?.teardown()
             notchController?.teardown()
         }
     }
@@ -23,22 +25,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func bootstrap() {
         NSApp.setActivationPolicy(.accessory)
+        LaunchAtLogin.applyStoredPreference()
 
         let registry = WidgetRegistry()
         let notchController = NotchWindowController()
+        let hudController = SystemHUDController()
         self.registry = registry
         self.notchController = notchController
+        self.hudController = hudController
 
-        // Register widgets. Order here is the default tray order; Settings can
-        // reorder without any host knowing widget names.
+        // Default tray order. Settings can reorder without hosts knowing names.
         registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
         registry.register(StocksPlugin())
+        registry.register(BatteryPlugin())
+        registry.register(ShelfPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
-        notchController.attach(registry: registry)
+        notchController.attach(registry: registry, hud: hudController)
+        hudController.attach(notch: notchController)
 
         installStatusItem()
 
