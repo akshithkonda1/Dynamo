@@ -22,6 +22,11 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "DynamoTests",
+            dependencies: ["Dynamo"],
+            path: "Tests/DynamoTests"
         )
     ]
 )
