@@ -1,0 +1,61 @@
+# XcodeGen spec for the Dynamo macOS app target.
+#
+# Why this file exists (resolves the README's open architecture decision):
+# WeatherKit's entitlement needs a real App ID + provisioning profile, which is
+# managed far more naturally by a proper Xcode app target than by the linker
+# `-sectcreate __TEXT __info_plist` trick the Swift Package used for Calendar's
+# simple usage-description key. This spec is the source of truth for that target;
+# the generated `Dynamo.xcodeproj` is disposable (git-ignored) and regenerated
+# with `xcodegen generate`.
+#
+# On your Mac:
+#   brew install xcodegen
+#   xcodegen generate
+#   open Dynamo.xcodeproj
+#   → Signing & Capabilities: enable "Automatically manage signing" and select
+#     your paid team. The WeatherKit capability is carried by
+#     Sources/Dynamo/Dynamo.entitlements; Xcode registers the App ID service.
+#
+# The Swift Package (Package.swift) is kept for fast source-only compile
+# iteration and CI, but the shippable, WeatherKit-signed build comes from here.
+
+name: Dynamo
+
+options:
+  bundleIdPrefix: com.akshithkonda
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.38.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Set your paid team here, or leave blank and pick it in Xcode's
+    # Signing & Capabilities tab after generating.
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  Dynamo:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Dynamo
+        # Info.plist and entitlements are referenced by build settings below,
+        # not compiled or copied as loose resources.
+        excludes:
+          - "Info.plist"
+          - "Dynamo.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: Dynamo
+        PRODUCT_BUNDLE_IDENTIFIER: com.akshithkonda.Dynamo
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Sources/Dynamo/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/Dynamo/Dynamo.entitlements
+        # Accessory (menu-bar) app — no Dock icon. Mirrors LSUIElement in Info.plist.
+        LSUIElement: YES

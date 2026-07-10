@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  WeatherKit capability. With "Automatically manage signing" enabled and a
+	  paid team selected in Xcode, this entitlement is matched to an App ID that
+	  has the WeatherKit service turned on (Xcode registers it for you). The
+	  linker `-sectcreate __info_plist` trick used before this pass could not
+	  carry an entitlement — a real signed bundle can, which is why the app
+	  target now exists.
+	-->
+	<key>com.apple.developer.weatherkit</key>
+	<true/>
+</dict>
+</plist>
