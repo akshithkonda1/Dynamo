@@ -35,7 +35,16 @@ final class NotchWindowController: ObservableObject {
     /// Hidden mode, so the meter isn't swallowed.
     private var isShowingHUDContent = false
 
-    private let collapsedSize = NSSize(width: 400, height: 36)
+    /// The collapsed panel hugs the physical notch so it disappears into the
+    /// real cutout at rest. Sized from `NotchGeometry` (height from the screen's
+    /// `safeAreaInsets`, width an on-device-tuned approximation).
+    private var collapsedSize: NSSize {
+        let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
+        return NSSize(width: metrics.width, height: metrics.height)
+    }
+    /// A volume/brightness meter needs more room than the bare notch, so the
+    /// panel briefly widens (Dynamic-Island style) while a HUD is showing.
+    private let hudSize = NSSize(width: 320, height: 40)
     private let expandedSize = NSSize(width: 500, height: 300)
     /// Don't retreat the instant the cursor leaves — a short grace avoids a
     /// flickery, twitchy feel.
@@ -121,10 +130,14 @@ final class NotchWindowController: ObservableObject {
         isShowingHUDContent = true
         cancelRetreat()
         if !isVisible { showPanel() }
+        // Widen from the bare notch so the meter fits; leave an expanded panel
+        // alone (it already has room and the HUD draws on top).
+        if !isExpanded { animateFrame(to: hudSize) }
     }
 
     func hudDidHide() {
         isShowingHUDContent = false
+        if !isExpanded { animateFrame(to: collapsedSize) }
         if isHiddenModeEnabled {
             scheduleRetreat()
         }

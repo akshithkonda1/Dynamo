@@ -34,22 +34,15 @@ struct NotchContentView: View {
         .animation(NotchTheme.contentSpring, value: hud.state)
     }
 
+    // At rest the collapsed panel is sized to the physical notch (see
+    // `NotchGeometry`), so it disappears into the real black cutout. There's no
+    // room for the widget tray beside the camera at this size — and showing it
+    // here would force the panel wider than the notch — so the tray lives in the
+    // expanded state, revealed on hover. Keep this content empty so the shape
+    // reads as an extension of the notch itself.
     private var collapsedBody: some View {
-        HStack(spacing: 10) {
-            ForEach(registry.plugins, id: \.id) { plugin in
-                Button {
-                    registry.activePluginID = plugin.id
-                    controller.expand()
-                } label: {
-                    plugin.collapsedView()
-                }
-                .buttonStyle(.plain)
-                .help(plugin.displayName)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var expandedBody: some View {
