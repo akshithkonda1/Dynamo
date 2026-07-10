@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
-        registry.register(StocksPlugin())
+        registry.register(WeatherPlugin())
         registry.register(BatteryPlugin())
         registry.register(ShelfPlugin())
         registry.register(AIPlugin())

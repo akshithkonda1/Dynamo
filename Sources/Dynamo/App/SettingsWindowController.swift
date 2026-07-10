@@ -17,8 +17,8 @@ final class SettingsWindowController: NSObject {
             let root = SettingsView(registry: registry)
             let hosting = NSHostingController(rootView: root)
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 460),
-                styleMask: [.titled, .closable, .miniaturizable],
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
@@ -26,7 +26,7 @@ final class SettingsWindowController: NSObject {
             window.contentViewController = hosting
             window.center()
             window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: 460, height: 460))
+            window.setContentSize(NSSize(width: 460, height: 520))
             self.window = window
         }
         window?.makeKeyAndOrderFront(nil)
@@ -98,6 +98,26 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
+            .frame(maxHeight: 200)
+
+            // Per-widget configuration, discovered generically via
+            // `WidgetSettingsProviding` — Settings never names a widget.
+            let sections = registry.settingsSections()
+            if !sections.isEmpty {
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(sections, id: \.id) { section in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(section.name)
+                                    .font(.title3.weight(.semibold))
+                                section.view
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
 
             HStack {
                 Spacer()
@@ -107,7 +127,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 420, minHeight: 400)
+        .frame(minWidth: 420, minHeight: 420)
         .onAppear {
             launchAtLogin = LaunchAtLogin.isEnabled
             launchStatus = LaunchAtLogin.statusDescription

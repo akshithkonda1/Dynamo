@@ -100,6 +100,16 @@ final class WidgetRegistry: ObservableObject {
         }
     }
 
+    /// Widgets that expose their own configuration UI, in tray order. Generic
+    /// protocol cast — no name switch, mirroring `dispatchFileDrop`.
+    func settingsSections() -> [(id: String, name: String, view: AnyView)] {
+        order.compactMap { id in
+            guard let plugin = allPlugins[id],
+                  let configurable = plugin as? any WidgetSettingsProviding else { return nil }
+            return (id: id, name: plugin.displayName, view: configurable.settingsView())
+        }
+    }
+
     /// Forwards file drops to every enabled widget that opts into `FileDropAccepting`.
     /// Returns true if at least one acceptor handled the drop.
     @discardableResult

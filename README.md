@@ -16,7 +16,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Calendar | **Live** (EventKit) |
 | Clipboard / Snippets | **Live** |
 | Checklist | **Live** (with drag reorder) |
-| Stocks | **Live** (Finnhub; local API key) |
+| ~~Stocks~~ | Removed in Phase 3 — replaced by the Weather widget |
 | Settings (reorder / toggle) | **Live** |
 | Visual polish (vibrancy, theme, spring) | **Live** |
 
@@ -30,6 +30,14 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Launch at Login | **Live** (SMAppService; best with packaged `.app`) |
 | Ad-hoc `.app` packaging | **Live** (`scripts/package-app.sh`) |
 | AI assistant (xAI Grok) | **Live** (chat + clipboard quick actions; local API key) |
+
+### Phase 3 — WeatherKit & peek-a-boo
+
+| Area | State |
+|------|--------|
+| Xcode app target + WeatherKit signing (XcodeGen) | **Live** (`project.yml`; resolves the old build-wrapper decision) |
+| Weather widget (WeatherKit + CoreLocation) | **Live** (auto-location or manual city, today's H/L, severe-weather alerts, Apple attribution) |
+| Per-widget Settings (`WidgetSettingsProviding`) | **Live** (generic — Settings never names a widget) |
 
 ## Requirements
 
@@ -130,15 +138,25 @@ The AI widget uses the **OpenAI-compatible Chat Completions** API and defaults t
 
 Point at OpenAI or a local server by setting `ai_base_url` + `ai_model` + the matching key file. Never commit keys.
 
-## Stocks API key setup (Finnhub)
+## Weather setup (WeatherKit)
 
-**Why Finnhub:** free tier is ~60 calls/minute — enough for a 60s refresh of a small watchlist.
+The Weather widget uses Apple's **WeatherKit** through the native Swift API
+(`WeatherService.shared.weather(for:)`) — no REST/JWT keys to manage. It does
+require the **Xcode app target** and a **paid Apple Developer team** (see
+*Build & run*), because WeatherKit is entitlement-gated.
 
-1. Register at [finnhub.io/register](https://finnhub.io/register) and copy your free API key.
-2. Store it **outside git**:
-   - File: `~/Library/Application Support/Dynamo/finnhub_api_key` (single line), or
-   - Environment variable: `FINNHUB_API_KEY=...`
-3. Relaunch Dynamo. Default watchlist: `AAPL`, `MSFT`, `GOOGL`.
+- **Location:** automatic via CoreLocation by default — grant *Location* on
+  first launch. Prefer not to share location, or want a different place? Set a
+  city in **Settings → Weather**; Dynamo geocodes the name to coordinates and
+  never touches CoreLocation.
+- **Expanded view:** current conditions, today's high/low, and any severe-weather
+  alerts.
+- **Attribution:** Apple's "Weather" mark and a legal link appear in the expanded
+  panel. This is a **hard requirement** of the WeatherKit terms, not a polish item.
+
+**Why Weather replaced Stocks:** the same tray slot now leans on a first-party,
+key-free Apple framework instead of a third-party quote API that needed a
+manually-provisioned Finnhub key.
 
 ## Next steps (post Phase 2)
 
