@@ -6,15 +6,17 @@ import SwiftUI
 final class SettingsWindowController: NSObject {
     private var window: NSWindow?
     private let registry: WidgetRegistry
+    private let notch: NotchWindowController
 
-    init(registry: WidgetRegistry) {
+    init(registry: WidgetRegistry, notch: NotchWindowController) {
         self.registry = registry
+        self.notch = notch
         super.init()
     }
 
     func show() {
         if window == nil {
-            let root = SettingsView(registry: registry)
+            let root = SettingsView(registry: registry, notch: notch)
             let hosting = NSHostingController(rootView: root)
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
@@ -38,6 +40,7 @@ final class SettingsWindowController: NSObject {
 
 struct SettingsView: View {
     @ObservedObject var registry: WidgetRegistry
+    @ObservedObject var notch: NotchWindowController
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
 
@@ -59,6 +62,15 @@ struct SettingsView: View {
                         launchStatus = LaunchAtLogin.statusDescription
                     }
                 Text(launchStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Hidden mode (peek from the top edge)", isOn: Binding(
+                    get: { notch.isHiddenModeEnabled },
+                    set: { notch.setHiddenMode($0) }
+                ))
+                Text("When on, the notch stays hidden until you move the cursor to the top of the screen, then retreats when you move away.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

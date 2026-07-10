@@ -38,6 +38,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Xcode app target + WeatherKit signing (XcodeGen) | **Live** (`project.yml`; resolves the old build-wrapper decision) |
 | Weather widget (WeatherKit + CoreLocation) | **Live** (auto-location or manual city, today's H/L, severe-weather alerts, Apple attribution) |
 | Per-widget Settings (`WidgetSettingsProviding`) | **Live** (generic — Settings never names a widget) |
+| Peek-a-boo Hidden mode | **Live** (opt-in; top-edge `NSTrackingArea` sensor reveals the notch, retreats after a short delay) |
 
 ## Requirements
 
@@ -96,7 +97,7 @@ Calendar access is requested on first launch. Grant it under **System Settings �
 - **Optional capabilities** (e.g. `FileDropAccepting`) are discovered via protocol cast on the registry — still no name switches.
 - **One folder per widget** under `Sources/Dynamo/Widgets/<Name>/`.
 - **External data sources sit behind a small protocol** so mock and real implementations swap without touching UI.
-- **Two-state hover model** only: `NotchWindowController.isExpanded`. System HUD is a separate temporary overlay, not a third expansion state.
+- **Two-state hover model** for the tray: `NotchWindowController.isExpanded`, driven by an `NSTrackingArea` on the notch (not a global mouse-moved monitor). Hidden↔Peek (top-edge proximity) and the System HUD are separate layers stacked on top — not extra expansion states.
 - **Shared `NotchTheme`** for spacing, type, color roles, and spring motion; panel uses `NSVisualEffectView` vibrancy.
 
 ## Architecture decision: Swift Package vs `.xcodeproj` app target — **resolved**
@@ -158,12 +159,15 @@ require the **Xcode app target** and a **paid Apple Developer team** (see
 key-free Apple framework instead of a third-party quote API that needed a
 manually-provisioned Finnhub key.
 
-## Next steps (post Phase 2)
+## Next steps (post Phase 3)
 
+- Optional: event-driven peek — let a starting meeting or a severe-weather alert
+  peek the notch further or glow, layered on top of the proximity gesture
+- Optional: notarization + DMG release pipeline (now possible with a paid account)
 - Optional: stream AI tokens into the notch response bubble
 - Optional: MediaRemoteAdapter helper process for macOS 15.4+ edge cases
 - Optional: AirDrop share action from File Shelf
-- Optional: app icon asset + DMG release pipeline
+- Optional: app icon asset catalog
 - Optional: webcam mirror widget
 
 ## License

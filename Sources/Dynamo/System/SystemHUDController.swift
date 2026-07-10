@@ -89,9 +89,12 @@ final class SystemHUDController: ObservableObject {
 
     private func show(_ newState: SystemHUDState) {
         state = newState
+        // Ensure the notch is visible for the meter even in Hidden mode.
+        notch?.presentForHUD()
         hideWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             self?.state = nil
+            self?.notch?.hudDidHide()
         }
         hideWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: work)
