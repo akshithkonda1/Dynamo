@@ -40,6 +40,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Per-widget Settings (`WidgetSettingsProviding`) | **Live** (generic — Settings never names a widget) |
 | Peek-a-boo Hidden mode | **Live** (opt-in; top-edge `NSTrackingArea` sensor reveals the notch, retreats after a short delay) |
 | Collapsed state hugs the physical notch | **Live** (`NotchGeometry`: collapsed panel sized to `safeAreaInsets` + a tuned notch width so it disappears into the cutout at rest; HUD widens Dynamic-Island style) |
+| Settings window redesign | **Live** (larger, scrollable, card-sectioned — General / Widgets / per-widget config all visible at once) |
 
 ## Requirements
 
