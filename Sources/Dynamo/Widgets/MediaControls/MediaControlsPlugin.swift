@@ -66,72 +66,91 @@ private struct CollapsedMediaView: View {
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: NotchTheme.spaceMD) {
-            HStack(spacing: NotchTheme.spaceMD) {
-                artwork
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(plugin.info.title)
-                        .font(NotchTheme.title)
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                    if !plugin.info.artist.isEmpty {
-                        Text(plugin.info.artist)
-                            .font(NotchTheme.body)
-                            .foregroundStyle(NotchTheme.textSecondary)
-                            .lineLimit(1)
-                    }
-                    if !plugin.info.album.isEmpty {
-                        Text(plugin.info.album)
-                            .font(NotchTheme.caption)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
+    private var hasTrack: Bool {
+        plugin.info.isPlaying || plugin.info.title != NowPlayingInfo.empty.title
+    }
 
-            HStack(spacing: 28) {
-                Spacer()
-                controlButton(systemName: "backward.fill") { plugin.previousTrack() }
-                controlButton(systemName: plugin.info.isPlaying ? "pause.fill" : "play.fill", size: 22) {
-                    plugin.togglePlayPause()
-                }
-                controlButton(systemName: "forward.fill") { plugin.nextTrack() }
-                Spacer()
+    var body: some View {
+        HStack(alignment: .center, spacing: NotchTheme.spaceLG) {
+            artwork
+            VStack(alignment: .leading, spacing: 5) {
+                header
+                Text(hasTrack ? plugin.info.title : "Nothing playing")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(NotchTheme.body)
+                    .foregroundStyle(NotchTheme.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: NotchTheme.spaceSM)
+                transportRow
             }
-            .padding(.top, NotchTheme.spaceXS)
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private var subtitle: String {
+        if hasTrack {
+            return plugin.info.artist.isEmpty ? plugin.info.album : plugin.info.artist
+        }
+        return "Play something and it'll show up here."
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text(plugin.info.isPlaying ? "Now Playing" : "Media")
+                .font(NotchTheme.section)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .textCase(.uppercase)
+            if plugin.info.isPlaying {
+                MusicBarsView(isPlaying: true, maxHeight: 11)
+                    .fixedSize()
+            }
+        }
     }
 
     @ViewBuilder
     private var artwork: some View {
-        let shape = RoundedRectangle(cornerRadius: NotchTheme.radiusIcon, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         if let data = plugin.info.artworkData, let image = NSImage(data: data) {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(1, contentMode: .fill)
-                .frame(width: 56, height: 56)
+                .frame(width: 104, height: 104)
                 .clipShape(shape)
+                .shadow(color: .black.opacity(0.28), radius: 9, y: 3)
         } else {
             shape
                 .fill(NotchTheme.chipFill)
-                .frame(width: 56, height: 56)
+                .frame(width: 104, height: 104)
                 .overlay(
                     Image(systemName: "music.note")
+                        .font(.system(size: 30))
                         .foregroundStyle(NotchTheme.textTertiary)
                 )
         }
     }
 
-    private func controlButton(systemName: String, size: CGFloat = 16, action: @escaping () -> Void) -> some View {
+    private var transportRow: some View {
+        HStack(spacing: 14) {
+            softButton("backward.fill", size: 15) { plugin.previousTrack() }
+            softButton(plugin.info.isPlaying ? "pause.fill" : "play.fill", size: 18, prominent: true) {
+                plugin.togglePlayPause()
+            }
+            softButton("forward.fill", size: 15) { plugin.nextTrack() }
+        }
+    }
+
+    private func softButton(_ systemName: String, size: CGFloat, prominent: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(NotchTheme.textPrimary)
-                .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
+                .frame(width: prominent ? 44 : 38, height: prominent ? 44 : 38)
+                .background(Circle().fill(prominent ? NotchTheme.chipFillActive : NotchTheme.chipFill))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }

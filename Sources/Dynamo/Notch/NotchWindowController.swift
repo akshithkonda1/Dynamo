@@ -45,7 +45,9 @@ final class NotchWindowController: ObservableObject {
     /// A volume/brightness meter needs more room than the bare notch, so the
     /// panel briefly widens (Dynamic-Island style) while a HUD is showing.
     private let hudSize = NSSize(width: 320, height: 40)
-    private let expandedSize = NSSize(width: 500, height: 300)
+    /// Wider (Boring Notch uses ~640) with a little extra height for a roomier,
+    /// more welcoming feel than a tight media strip.
+    private let expandedSize = NSSize(width: 640, height: 215)
     /// Don't retreat the instant the cursor leaves — a short grace avoids a
     /// flickery, twitchy feel.
     private let retreatDelay: TimeInterval = 1.0
