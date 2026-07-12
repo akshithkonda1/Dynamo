@@ -8,10 +8,15 @@ import SwiftUI
 final class WidgetRegistry: ObservableObject {
     @Published private(set) var plugins: [any NotchWidgetPlugin] = []
     @Published var activePluginID: String?
+    /// Bumped whenever an ambient-capable widget's observable state changes, so
+    /// views observing the registry re-render the collapsed notch without the
+    /// registry (or the notch) knowing which widget is involved.
+    @Published private(set) var ambientRevision = 0
 
     private var allPlugins: [String: any NotchWidgetPlugin] = [:]
     private var order: [String] = []
     private var enabled: Set<String> = []
+    private var ambientCancellables = Set<AnyCancellable>()
 
     var activePlugin: (any NotchWidgetPlugin)? {
         guard let activePluginID else { return plugins.first }
@@ -25,7 +30,36 @@ final class WidgetRegistry: ObservableObject {
         }
         enabled.insert(plugin.id)
         rebuildVisible()
+        subscribeAmbient(plugin)
         plugin.start()
+    }
+
+    /// The first enabled widget that currently has ambient content to show in
+    /// the collapsed notch. Generic protocol cast — no name switch.
+    func activeAmbientProvider() -> (any NotchAmbientProviding)? {
+        for plugin in plugins {
+            if let ambient = plugin as? any NotchAmbientProviding, ambient.isAmbientActive {
+                return ambient
+            }
+        }
+        return nil
+    }
+
+    /// If a widget can present ambient content and is observable, mirror its
+    /// changes into `ambientRevision` so registry observers refresh.
+    private func subscribeAmbient(_ plugin: any NotchWidgetPlugin) {
+        guard plugin is any NotchAmbientProviding,
+              let observable = plugin as? any ObservableObject else { return }
+        observeAmbientChanges(observable)
+    }
+
+    private func observeAmbientChanges<O: ObservableObject>(_ object: O) {
+        object.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.ambientRevision &+= 1
+            }
+            .store(in: &ambientCancellables)
     }
 
     /// Replaces the visible set from persisted settings without knowing widget names.

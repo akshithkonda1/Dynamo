@@ -34,15 +34,20 @@ struct NotchContentView: View {
         .animation(NotchTheme.contentSpring, value: hud.state)
     }
 
-    // At rest the collapsed panel is sized to the physical notch (see
-    // `NotchGeometry`), so it disappears into the real black cutout. There's no
-    // room for the widget tray beside the camera at this size — and showing it
-    // here would force the panel wider than the notch — so the tray lives in the
-    // expanded state, revealed on hover. Keep this content empty so the shape
-    // reads as an extension of the notch itself.
+    // The collapsed panel is sized to the physical notch (see `NotchGeometry`).
+    // When a widget has ambient content to show (e.g. media playing → album art
+    // + visualizer either side of the camera), render it; otherwise stay empty
+    // so the shape disappears into the real black cutout. The widget tray lives
+    // in the expanded state, revealed on hover.
+    @ViewBuilder
     private var collapsedBody: some View {
-        Color.clear
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if let ambient = registry.activeAmbientProvider() {
+            ambient.ambientView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private var expandedBody: some View {

@@ -4,7 +4,7 @@ import SwiftUI
 /// Media controls widget. Talks only to `NowPlayingProvider` — never to a
 /// concrete data source. Swapping mock ↔ real happens at construction time.
 @MainActor
-final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin {
+final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding {
     let id = "media"
     let displayName = "Media"
     let systemImage = "music.note"
@@ -42,6 +42,12 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin {
     func togglePlayPause() { provider.togglePlayPause() }
     func nextTrack() { provider.nextTrack() }
     func previousTrack() { provider.previousTrack() }
+
+    // MARK: - NotchAmbientProviding
+
+    /// Show the ambient art + visualizer only while something is actually playing.
+    var isAmbientActive: Bool { info.isPlaying }
+    func ambientView() -> AnyView { AnyView(AmbientMediaView(plugin: self)) }
 }
 
 // MARK: - Views
@@ -59,6 +65,44 @@ private struct CollapsedMediaView: View {
                 .foregroundStyle(NotchTheme.textPrimary)
                 .lineLimit(1)
                 .frame(maxWidth: 90, alignment: .leading)
+        }
+    }
+}
+
+/// Ambient content for the collapsed notch: album art hugging the leading edge,
+/// a dancing-bars visualizer on the trailing edge, camera gap in between.
+private struct AmbientMediaView: View {
+    @ObservedObject var plugin: MediaControlsPlugin
+
+    var body: some View {
+        HStack(spacing: 0) {
+            artThumb
+            Spacer(minLength: 0)
+            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12)
+                .fixedSize()
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var artThumb: some View {
+        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(1, contentMode: .fill)
+                .frame(width: 20, height: 20)
+                .clipShape(shape)
+        } else {
+            shape
+                .fill(NotchTheme.chipFill)
+                .frame(width: 20, height: 20)
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NotchTheme.textSecondary)
+                )
         }
     }
 }
