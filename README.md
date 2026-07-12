@@ -39,7 +39,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Weather widget (WeatherKit + CoreLocation) | **Live** (auto-location or manual city, today's H/L, severe-weather alerts, Apple attribution) |
 | Per-widget Settings (`WidgetSettingsProviding`) | **Live** (generic — Settings never names a widget) |
 | Peek-a-boo Hidden mode | **Live** (opt-in; top-edge `NSTrackingArea` sensor reveals the notch, retreats after a short delay) |
-| Collapsed state hugs the physical notch | **Live** (`NotchGeometry`: collapsed panel sized to `safeAreaInsets` + a tuned notch width so it disappears into the cutout at rest; HUD widens Dynamic-Island style) |
+| Collapsed state hugs the physical notch | **Live** (`NotchGeometry`: collapsed panel sized to `safeAreaInsets` height + the real cutout width from `auxiliaryTop*Area`, so it disappears into the notch at rest; HUD widens Dynamic-Island style) |
 | Settings window redesign | **Live** (larger, scrollable, card-sectioned — General / Widgets / per-widget config all visible at once) |
 
 ## Requirements
@@ -101,7 +101,7 @@ Calendar access is requested on first launch. Grant it under **System Settings �
 - **External data sources sit behind a small protocol** so mock and real implementations swap without touching UI.
 - **Two-state hover model** for the tray: `NotchWindowController.isExpanded`, driven by an `NSTrackingArea` on the notch (not a global mouse-moved monitor). Hidden↔Peek (top-edge proximity) and the System HUD are separate layers stacked on top — not extra expansion states.
 - **Shared `NotchTheme`** for spacing, type, color roles, and spring motion; panel uses `NSVisualEffectView` vibrancy.
-- **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — a `collapsedView()` must fit within the notch, not push the panel wider. The width is an on-device-tuned approximation (no official Apple spec).
+- **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — a `collapsedView()` must fit within the notch, not push the panel wider. The width is derived from the screen's `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` (the real cutout), with an approximate fallback.
 
 ## Architecture decision: Swift Package vs `.xcodeproj` app target — **resolved**
 
