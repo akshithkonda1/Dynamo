@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import XCTest
 @testable import Dynamo
@@ -38,6 +39,25 @@ final class WidgetRegistryTests: XCTestCase {
         func collapsedView() -> AnyView { AnyView(EmptyView()) }
         func expandedView() -> AnyView { AnyView(EmptyView()) }
         func settingsView() -> AnyView { AnyView(EmptyView()) }
+    }
+
+    private final class SneakPeekMockPlugin: NotchWidgetPlugin, NotchSneakPeekProviding {
+        let id: String
+        let displayName: String
+        let systemImage = "bell"
+        var onSneakPeek: ((NotchSneakPeek) -> Void)?
+
+        init(id: String) {
+            self.id = id
+            self.displayName = id
+        }
+
+        func collapsedView() -> AnyView { AnyView(EmptyView()) }
+        func expandedView() -> AnyView { AnyView(EmptyView()) }
+
+        func fire(_ content: NotchSneakPeek) {
+            onSneakPeek?(content)
+        }
     }
 
     // MARK: - Tests
@@ -104,5 +124,20 @@ final class WidgetRegistryTests: XCTestCase {
         registry.register(ConfigurableMockPlugin(id: "cfg"))
 
         XCTAssertEqual(registry.settingsSections().map(\.id), ["cfg"])
+    }
+
+    func testSneakPeekRequestsAreForwardedThroughRegistry() {
+        let registry = WidgetRegistry()
+        let plugin = SneakPeekMockPlugin(id: "peeker")
+        registry.register(plugin)
+
+        var received: [NotchSneakPeek] = []
+        let cancellable = registry.sneakPeekPublisher.sink { received.append($0) }
+        defer { cancellable.cancel() }
+
+        let content = NotchSneakPeek(systemImage: "music.note", title: "Song", subtitle: "Artist")
+        plugin.fire(content)
+
+        XCTAssertEqual(received, [content])
     }
 }

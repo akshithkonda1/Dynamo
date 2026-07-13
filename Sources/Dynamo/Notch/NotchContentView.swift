@@ -6,6 +6,7 @@ struct NotchContentView: View {
     @ObservedObject var registry: WidgetRegistry
     @ObservedObject var controller: NotchWindowController
     @ObservedObject var hud: SystemHUDController
+    @ObservedObject var sneakPeek: NotchSneakPeekController
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -14,6 +15,11 @@ struct NotchContentView: View {
 
             if let hudState = hud.state {
                 SystemHUDView(state: hudState)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            } else if let peek = sneakPeek.peek, !controller.isExpanded {
+                // Only peek while collapsed — if the panel's already expanded
+                // the user is already looking at it, no need for a pill.
+                NotchSneakPeekView(peek: peek)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             } else if controller.isExpanded {
                 expandedBody
@@ -32,6 +38,7 @@ struct NotchContentView: View {
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
         .animation(NotchTheme.contentSpring, value: hud.state)
+        .animation(NotchTheme.contentSpring, value: sneakPeek.peek)
     }
 
     // The collapsed panel is sized to the physical notch (see `NotchGeometry`).

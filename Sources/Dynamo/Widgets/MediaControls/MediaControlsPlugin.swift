@@ -4,31 +4,61 @@ import SwiftUI
 /// Media controls widget. Talks only to `NowPlayingProvider` — never to a
 /// concrete data source. Swapping mock ↔ real happens at construction time.
 @MainActor
-final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding {
+final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding {
     let id = "media"
     let displayName = "Media"
     let systemImage = "music.note"
 
     @Published private(set) var info: NowPlayingInfo = .empty
+    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: NowPlayingProvider
+    private var lastTrackKey: String
+    /// The onChange right after (re)start reports whatever's already playing —
+    /// that's not a "track change" worth a peek, just Dynamo catching up.
+    private var suppressNextPeek = true
 
     init(provider: NowPlayingProvider? = nil) {
         let resolved = provider ?? MockNowPlayingProvider()
         self.provider = resolved
         self.info = resolved.current
+        self.lastTrackKey = Self.trackKey(resolved.current)
         resolved.onChange = { [weak self] newValue in
-            self?.info = newValue
+            self?.handleInfoChange(newValue)
         }
     }
 
     func start() {
+        suppressNextPeek = true
         provider.start()
         info = provider.current
     }
 
     func stop() {
         provider.stop()
+    }
+
+    private func handleInfoChange(_ newValue: NowPlayingInfo) {
+        info = newValue
+        let key = Self.trackKey(newValue)
+        let shouldSuppress = suppressNextPeek
+        suppressNextPeek = false
+        defer { lastTrackKey = key }
+        guard !shouldSuppress,
+              newValue.isPlaying,
+              key != lastTrackKey,
+              !newValue.title.isEmpty,
+              newValue.title != NowPlayingInfo.empty.title
+        else { return }
+        onSneakPeek?(NotchSneakPeek(
+            systemImage: "music.note",
+            title: newValue.title,
+            subtitle: newValue.artist.isEmpty ? newValue.album : newValue.artist
+        ))
+    }
+
+    private static func trackKey(_ info: NowPlayingInfo) -> String {
+        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)"
     }
 
     func collapsedView() -> AnyView {

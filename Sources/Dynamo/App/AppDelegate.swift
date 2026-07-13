@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var registry: WidgetRegistry?
     private var notchController: NotchWindowController?
     private var hudController: SystemHUDController?
+    private var sneakPeekController: NotchSneakPeekController?
     private var statusItem: NSStatusItem?
     private var settingsController: SettingsWindowController?
     private var hiddenModeMenuItem: NSMenuItem?
@@ -19,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated {
             registry?.stopAll()
             hudController?.teardown()
+            sneakPeekController?.teardown()
             notchController?.teardown()
         }
     }
@@ -31,9 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let registry = WidgetRegistry()
         let notchController = NotchWindowController()
         let hudController = SystemHUDController()
+        let sneakPeekController = NotchSneakPeekController()
         self.registry = registry
         self.notchController = notchController
         self.hudController = hudController
+        self.sneakPeekController = sneakPeekController
 
         // Default tray order. Settings can reorder without hosts knowing names.
         registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
@@ -45,8 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(ShelfPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
-        notchController.attach(registry: registry, hud: hudController)
+        notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
+        sneakPeekController.attach(registry: registry, notch: notchController)
 
         installStatusItem()
 

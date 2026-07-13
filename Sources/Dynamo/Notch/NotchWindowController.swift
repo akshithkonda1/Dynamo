@@ -25,15 +25,18 @@ final class NotchWindowController: ObservableObject {
     private var peekSensor: PeekSensorPanel?
     private weak var registry: WidgetRegistry?
     private weak var hud: SystemHUDController?
+    private weak var sneakPeek: NotchSneakPeekController?
 
     /// Whether the notch panel is currently on screen. In non-hidden mode this
     /// is always true; in hidden mode it's true only while peeking / expanded /
     /// showing a HUD.
     private var isVisible = false
     private var retreatWorkItem: DispatchWorkItem?
-    /// Keeps the notch visible while a volume/brightness HUD is showing, even in
-    /// Hidden mode, so the meter isn't swallowed.
-    private var isShowingHUDContent = false
+    /// Number of transient overlays (volume/brightness HUD, now-playing sneak
+    /// peek, ...) currently keeping the notch visible/widened, even in Hidden
+    /// mode. A counter rather than a bool so two independent overlays can't
+    /// clobber each other if they happen to overlap.
+    private var activeOverlayCount = 0
 
     /// The collapsed panel hugs the physical notch so it disappears into the
     /// real cutout at rest. Sized from `NotchGeometry` (height from the screen's
@@ -42,9 +45,10 @@ final class NotchWindowController: ObservableObject {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    /// A volume/brightness meter needs more room than the bare notch, so the
-    /// panel briefly widens (Dynamic-Island style) while a HUD is showing.
-    private let hudSize = NSSize(width: 320, height: 40)
+    /// A transient overlay (volume/brightness HUD, sneak peek) needs more room
+    /// than the bare notch, so the panel briefly widens (Dynamic-Island style)
+    /// while one is showing.
+    private let overlaySize = NSSize(width: 320, height: 40)
     /// Wider (Boring Notch uses ~640) with a little extra height for a roomier,
     /// more welcoming feel than a tight media strip.
     private let expandedSize = NSSize(width: 640, height: 215)
@@ -54,13 +58,14 @@ final class NotchWindowController: ObservableObject {
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
 
-    func attach(registry: WidgetRegistry, hud: SystemHUDController) {
+    func attach(registry: WidgetRegistry, hud: SystemHUDController, sneakPeek: NotchSneakPeekController) {
         self.registry = registry
         self.hud = hud
+        self.sneakPeek = sneakPeek
         if panel == nil {
-            installPanel(registry: registry, hud: hud)
+            installPanel(registry: registry, hud: hud, sneakPeek: sneakPeek)
         } else if let hostingView {
-            hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud)
+            hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
         isHiddenModeEnabled = UserDefaults.standard.bool(forKey: Self.hiddenModeKey)
         reposition()
@@ -126,19 +131,21 @@ final class NotchWindowController: ObservableObject {
         }
     }
 
-    // MARK: - HUD visibility (keeps the meter visible even when hidden)
+    // MARK: - Transient overlay visibility (HUD, sneak peek — keeps the notch
+    // visible even in Hidden mode so the overlay isn't swallowed)
 
-    func presentForHUD() {
-        isShowingHUDContent = true
+    func presentForOverlay() {
+        activeOverlayCount += 1
         cancelRetreat()
         if !isVisible { showPanel() }
-        // Widen from the bare notch so the meter fits; leave an expanded panel
-        // alone (it already has room and the HUD draws on top).
-        if !isExpanded { animateFrame(to: hudSize) }
+        // Widen from the bare notch so the overlay fits; leave an expanded panel
+        // alone (it already has room and the overlay draws on top).
+        if !isExpanded { animateFrame(to: overlaySize) }
     }
 
-    func hudDidHide() {
-        isShowingHUDContent = false
+    func overlayDidHide() {
+        activeOverlayCount = max(0, activeOverlayCount - 1)
+        guard activeOverlayCount == 0 else { return }
         if !isExpanded { animateFrame(to: collapsedSize) }
         if isHiddenModeEnabled {
             scheduleRetreat()
@@ -163,7 +170,7 @@ final class NotchWindowController: ObservableObject {
     }
 
     private func hidePanel() {
-        guard !isShowingHUDContent else { return }
+        guard activeOverlayCount == 0 else { return }
         collapse()
         panel?.orderOut(nil)
         isVisible = false
@@ -173,7 +180,7 @@ final class NotchWindowController: ObservableObject {
         cancelRetreat()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            guard self.isHiddenModeEnabled, !self.isShowingHUDContent else { return }
+            guard self.isHiddenModeEnabled, self.activeOverlayCount == 0 else { return }
             self.hidePanel()
         }
         retreatWorkItem = work
@@ -218,9 +225,9 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Setup
 
-    private func installPanel(registry: WidgetRegistry, hud: SystemHUDController) {
+    private func installPanel(registry: WidgetRegistry, hud: SystemHUDController, sneakPeek: NotchSneakPeekController) {
         let panel = NotchPanel(contentRect: NSRect(origin: .zero, size: collapsedSize))
-        let root = NotchContentView(registry: registry, controller: self, hud: hud)
+        let root = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         let hosting = DropHostingView(rootView: root)
         hosting.frame = NSRect(origin: .zero, size: collapsedSize)
         hosting.autoresizingMask = [.width, .height]

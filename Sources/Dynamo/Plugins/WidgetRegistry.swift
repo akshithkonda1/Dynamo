@@ -18,6 +18,12 @@ final class WidgetRegistry: ObservableObject {
     private var enabled: Set<String> = []
     private var ambientCancellables = Set<AnyCancellable>()
 
+    /// Forwards sneak-peek requests from any capable widget. The registry
+    /// doesn't own presentation/timing — `NotchSneakPeekController` subscribes
+    /// and owns that, mirroring how `SystemHUDController` owns the volume/
+    /// brightness overlay.
+    let sneakPeekPublisher = PassthroughSubject<NotchSneakPeek, Never>()
+
     var activePlugin: (any NotchWidgetPlugin)? {
         guard let activePluginID else { return plugins.first }
         return plugins.first { $0.id == activePluginID } ?? plugins.first
@@ -31,7 +37,17 @@ final class WidgetRegistry: ObservableObject {
         enabled.insert(plugin.id)
         rebuildVisible()
         subscribeAmbient(plugin)
+        wireSneakPeek(plugin)
         plugin.start()
+    }
+
+    /// If a widget can request sneak peeks, forward its requests into
+    /// `sneakPeekPublisher` — no name switch.
+    private func wireSneakPeek(_ plugin: any NotchWidgetPlugin) {
+        guard let sneakPeekCapable = plugin as? any NotchSneakPeekProviding else { return }
+        sneakPeekCapable.onSneakPeek = { [weak self] content in
+            self?.sneakPeekPublisher.send(content)
+        }
     }
 
     /// The first enabled widget that currently has ambient content to show in
