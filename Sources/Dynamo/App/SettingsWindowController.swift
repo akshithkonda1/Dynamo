@@ -45,13 +45,6 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
 
-    private var aiKeyStatus: String {
-        if AIConfig.apiKey != nil {
-            return "AI key found · model \(AIConfig.model)"
-        }
-        return "No AI key — add ~/Library/Application Support/Dynamo/xai_api_key"
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -107,13 +100,6 @@ struct SettingsView: View {
                 set: { notch.setHiddenMode($0) }
             ))
             Text("When on, the notch stays hidden until you move the cursor to the top of the screen, then retreats when you move away.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
-            Label(aiKeyStatus, systemImage: AIConfig.apiKey != nil ? "checkmark.seal" : "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

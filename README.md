@@ -29,7 +29,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Volume & brightness HUD | **Live** (media-key triggered notch meter) |
 | Launch at Login | **Live** (SMAppService; best with packaged `.app`) |
 | Ad-hoc `.app` packaging | **Live** (`scripts/package-app.sh`) |
-| AI assistant (xAI Grok) | **Live** (chat + clipboard quick actions; local API key) |
+| ~~AI assistant (xAI Grok)~~ | Removed in Phase 3 — didn't earn its tray slot |
 
 ### Phase 3 — WeatherKit & peek-a-boo
 
@@ -125,24 +125,6 @@ trigger**, so as of Phase 3 there is a real Xcode app target.
 a paid account exists, but out of scope for the WeatherKit pass) and an app
 icon asset catalog.
 
-## AI setup (xAI Grok)
-
-The AI widget uses the **OpenAI-compatible Chat Completions** API and defaults to xAI:
-
-| Setting | Default | Override |
-|---------|---------|----------|
-| Base URL | `https://api.x.ai/v1` | env `DYNAMO_AI_BASE_URL` or file `ai_base_url` |
-| Model | `grok-3-mini` | env `DYNAMO_AI_MODEL` or file `ai_model` |
-| API key | — | env `XAI_API_KEY` (or `OPENAI_API_KEY`) or file `xai_api_key` |
-
-1. Create a key at [console.x.ai](https://console.x.ai/).
-2. Write it to `~/Library/Application Support/Dynamo/xai_api_key` (single line), **or** export `XAI_API_KEY=...`.
-3. Relaunch Dynamo. Expand the **AI** tray icon.
-
-**Quick actions** (expanded AI panel): Summarize / Rewrite / Explain / Fix grammar — each uses the current clipboard text.
-
-Point at OpenAI or a local server by setting `ai_base_url` + `ai_model` + the matching key file. Never commit keys.
-
 ## Weather setup (WeatherKit)
 
 The Weather widget uses Apple's **WeatherKit** through the native Swift API
@@ -168,7 +150,6 @@ manually-provisioned Finnhub key.
 - Optional: event-driven peek — let a starting meeting or a severe-weather alert
   peek the notch further or glow, layered on top of the proximity gesture
 - Optional: notarization + DMG release pipeline (now possible with a paid account)
-- Optional: stream AI tokens into the notch response bubble
 - Optional: MediaRemoteAdapter helper process for macOS 15.4+ edge cases
 - Optional: AirDrop share action from File Shelf
 - Optional: app icon asset catalog
