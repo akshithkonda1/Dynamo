@@ -25,8 +25,10 @@ final class MediaRemoteHelperProcess {
     private var buffer = Data()
 
     /// Locates the helper binary next to the running executable. The Xcode
-    /// target (`project.yml`) embeds it into `Contents/MacOS/` alongside the
-    /// main binary; `scripts/package-app.sh` copies it there too for the
+    /// target (`project.yml`) copies and signs it into `Contents/MacOS/`
+    /// alongside the main binary via an explicit postbuild script (not
+    /// XcodeGen's `embed: true`, which doesn't sign it — see the comment
+    /// there); `scripts/package-app.sh` copies it there too for the
     /// ad-hoc-packaged `.app`.
     private var helperURL: URL? {
         guard let exeDir = Bundle.main.executableURL?.deletingLastPathComponent() else { return nil }
@@ -49,6 +51,18 @@ final class MediaRemoteHelperProcess {
             guard !chunk.isEmpty else { return }
             Task { @MainActor in
                 self?.consume(chunk)
+            }
+        }
+        // If the helper crashes or is killed, clear our state so a later
+        // start() (e.g. the widget being disabled and re-enabled) can relaunch
+        // it — without this, `process` stays non-nil forever and `guard
+        // process == nil` above would permanently block relaunching.
+        task.terminationHandler = { [weak self] finishedTask in
+            Task { @MainActor in
+                guard let self, self.process === finishedTask else { return }
+                self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+                self.process = nil
+                self.stdoutPipe = nil
             }
         }
         do {

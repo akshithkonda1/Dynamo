@@ -42,10 +42,7 @@ settings:
 targets:
   # Standalone MediaRemote helper binary — see Sources/DynamoMediaRemoteHelper/
   # main.swift and Widgets/MediaControls/MediaRemoteHelperProcess.swift for why
-  # it exists as a separate process. `embed: true` below (unverified — confirm
-  # after `xcodegen generate` + a real build) is meant to place it in
-  # Contents/MacOS/ next to the main binary, which is where
-  # MediaRemoteHelperProcess looks for it.
+  # it exists as a separate process.
   DynamoMediaRemoteHelper:
     type: tool
     platform: macOS
@@ -66,9 +63,34 @@ targets:
           - "Info.plist"
           - "Dynamo.entitlements"
     dependencies:
+      # Build-order dependency only (no `embed: true`): XcodeGen's automatic
+      # embed destination for a `tool` product isn't something this repo can
+      # verify without Xcode, and — the bigger issue — Xcode's automatic
+      # app-level codesign does NOT re-sign arbitrary embedded loose
+      # executables by default (no `--deep`), so a copied-but-unsigned helper
+      # would silently fail Apple's notarization check even if it ran fine
+      # locally. The postbuildScripts phase below does the copy AND the
+      # signing explicitly instead, so nothing is left to inference.
       - target: DynamoMediaRemoteHelper
-        embed: true
-        codeSign: true
+    postbuildScripts:
+      - name: "Embed & sign DynamoMediaRemoteHelper"
+        script: |
+          set -euo pipefail
+          SRC="${BUILT_PRODUCTS_DIR}/DynamoMediaRemoteHelper"
+          DEST_DIR="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}"
+          DEST="${DEST_DIR}/DynamoMediaRemoteHelper"
+          if [ ! -f "$SRC" ]; then
+            echo "warning: DynamoMediaRemoteHelper product not found at $SRC — skipping embed" >&2
+            exit 0
+          fi
+          mkdir -p "$DEST_DIR"
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST"
+          if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY}" != "-" ]; then
+            codesign --force --options runtime --timestamp --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "$DEST"
+          else
+            codesign --force --sign - "$DEST"
+          fi
     settings:
       base:
         PRODUCT_NAME: Dynamo
