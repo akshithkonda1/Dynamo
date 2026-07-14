@@ -1,15 +1,21 @@
 import SwiftUI
 
 @MainActor
-final class CalendarPlugin: ObservableObject, NotchWidgetPlugin {
+final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
     let id = "calendar"
     let displayName = "Calendar"
     let systemImage = "calendar"
 
     @Published private(set) var events: [CalendarEventItem] = []
     @Published private(set) var authState: CalendarAuthState = .notDetermined
+    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: CalendarProvider
+    /// Event IDs already peeked, so the ~60s refresh doesn't re-fire while an
+    /// event is still inside the "starting soon" window.
+    private var notifiedEventIDs: Set<String> = []
+    /// How far ahead of an event's start to peek.
+    private let leadTime: TimeInterval = 5 * 60
 
     init(provider: CalendarProvider? = nil) {
         let resolved = provider ?? EventKitCalendarProvider()
@@ -18,6 +24,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin {
             guard let self else { return }
             self.events = self.provider.upcoming
             self.authState = self.provider.authorizationState
+            self.checkUpcomingEvents()
         }
     }
 
@@ -40,6 +47,29 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin {
 
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
+    }
+
+    /// Peek once for any event that's about to start (or started within the
+    /// last minute, to cover the refresh interval), skipping all-day events.
+    private func checkUpcomingEvents() {
+        notifiedEventIDs.formIntersection(Set(events.map(\.id)))
+        for event in events {
+            guard !event.isAllDay, !notifiedEventIDs.contains(event.id) else { continue }
+            let interval = event.start.timeIntervalSinceNow
+            guard interval <= leadTime, interval > -60 else { continue }
+            notifiedEventIDs.insert(event.id)
+            onSneakPeek?(NotchSneakPeek(
+                systemImage: "calendar",
+                title: event.title,
+                subtitle: startingSoonLabel(interval)
+            ))
+        }
+    }
+
+    private func startingSoonLabel(_ interval: TimeInterval) -> String {
+        if interval <= 0 { return "Starting now" }
+        let minutes = max(1, Int((interval / 60).rounded()))
+        return minutes == 1 ? "Starts in 1 minute" : "Starts in \(minutes) minutes"
     }
 }
 
