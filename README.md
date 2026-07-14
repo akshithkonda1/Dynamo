@@ -52,6 +52,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Event-driven peek: meeting reminder | **Live** (Calendar peeks ~5 min before a non-all-day event starts, once per event) |
 | Event-driven peek: severe weather | **Live** (Weather peeks on a new severe/extreme alert — `.critical` emphasis: warning-colored glow, longer dwell time) |
 | AirDrop share action (File Shelf) | **Live** (per-item share button via `NSSharingService(named: .sendViaAirDrop)`) |
+| Webcam mirror widget | **Live** (`AVCaptureSession` + `AVCaptureVideoPreviewLayer`; camera runs only while the Webcam tab is actually visible — started/stopped by the view's appear/disappear, never by app launch or plugin registration) |
 
 ## Requirements
 

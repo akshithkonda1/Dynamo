@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(WeatherPlugin())
         registry.register(BatteryPlugin())
         registry.register(ShelfPlugin())
+        registry.register(WebcamPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
