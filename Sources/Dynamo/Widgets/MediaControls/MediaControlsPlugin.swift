@@ -61,10 +61,6 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)"
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedMediaView(info: info))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedMediaView(plugin: self))
     }
@@ -81,23 +77,6 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 }
 
 // MARK: - Views
-
-private struct CollapsedMediaView: View {
-    let info: NowPlayingInfo
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: info.isPlaying ? "music.note" : "music.note.list")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            Text(info.title)
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textPrimary)
-                .lineLimit(1)
-                .frame(maxWidth: 90, alignment: .leading)
-        }
-    }
-}
 
 /// Ambient content for the collapsed notch: album art hugging the leading edge,
 /// a dancing-bars visualizer on the trailing edge, camera gap in between.

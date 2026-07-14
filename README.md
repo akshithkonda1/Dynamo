@@ -103,7 +103,7 @@ Calendar access is requested on first launch. Grant it under **System Settings �
 - **External data sources sit behind a small protocol** so mock and real implementations swap without touching UI.
 - **Two-state hover model** for the tray: `NotchWindowController.isExpanded`, driven by an `NSTrackingArea` on the notch (not a global mouse-moved monitor). Hidden↔Peek (top-edge proximity) and transient overlays (System HUD, now-playing sneak peek — both via `presentForOverlay()`/`overlayDidHide()`) are separate layers stacked on top — not extra expansion states.
 - **Shared `NotchTheme`** for spacing, type, color roles, and spring motion; panel uses `NSVisualEffectView` vibrancy.
-- **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — a `collapsedView()` must fit within the notch, not push the panel wider. The width is derived from the screen's `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` (the real cutout), with an approximate fallback.
+- **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — an `ambientView()` (see `NotchAmbientProviding`) must fit within the notch, not push the panel wider. The width is derived from the screen's `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` (the real cutout), with an approximate fallback.
 
 ## Architecture decision: Swift Package vs `.xcodeproj` app target — **resolved**
 

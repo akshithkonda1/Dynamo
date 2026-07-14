@@ -95,7 +95,6 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
         }
     }
 
-    func collapsedView() -> AnyView { AnyView(CollapsedWeatherView(snapshot: snapshot)) }
     func expandedView() -> AnyView { AnyView(ExpandedWeatherView(plugin: self)) }
     func settingsView() -> AnyView { AnyView(WeatherSettingsView(plugin: self)) }
 }
@@ -118,30 +117,6 @@ enum TemperatureFormat {
 }
 
 // MARK: - Views
-
-private struct CollapsedWeatherView: View {
-    let snapshot: WeatherSnapshot?
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let snapshot {
-                Image(systemName: snapshot.symbolName)
-                    .symbolRenderingMode(.multicolor)
-                    .font(NotchTheme.caption.weight(.semibold))
-                Text(TemperatureFormat.short(snapshot.temperature))
-                    .font(NotchTheme.caption.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-            } else {
-                Image(systemName: "cloud.sun")
-                    .font(NotchTheme.caption.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text("Weather")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            }
-        }
-    }
-}
 
 private struct ExpandedWeatherView: View {
     @ObservedObject var plugin: WeatherPlugin

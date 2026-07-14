@@ -27,57 +27,12 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin {
         provider.stop()
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedBatteryView(snapshot: snapshot))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedBatteryView(snapshot: snapshot))
     }
 }
 
 // MARK: - Views
-
-private struct CollapsedBatteryView: View {
-    let snapshot: BatterySnapshot
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbolName)
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(color)
-            if snapshot.isPresent {
-                Text("\(snapshot.percent)%")
-                    .font(NotchTheme.caption.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textPrimary)
-            } else {
-                Text("Battery")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            }
-        }
-    }
-
-    private var symbolName: String {
-        guard snapshot.isPresent else { return "battery.0" }
-        if snapshot.isCharging { return "battery.100.bolt" }
-        switch snapshot.percent {
-        case 76...100: return "battery.100"
-        case 51...75: return "battery.75"
-        case 26...50: return "battery.50"
-        case 11...25: return "battery.25"
-        default: return "battery.0"
-        }
-    }
-
-    private var color: Color {
-        guard snapshot.isPresent else { return NotchTheme.textTertiary }
-        if snapshot.isCharging { return NotchTheme.positive }
-        if snapshot.percent <= 15 { return NotchTheme.negative }
-        if snapshot.percent <= 25 { return NotchTheme.caution }
-        return NotchTheme.textPrimary
-    }
-}
 
 private struct ExpandedBatteryView: View {
     let snapshot: BatterySnapshot

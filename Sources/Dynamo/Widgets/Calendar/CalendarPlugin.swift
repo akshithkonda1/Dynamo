@@ -38,39 +38,12 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin {
         Task { await provider.requestAccess() }
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedCalendarView(events: events))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
     }
 }
 
 // MARK: - Views
-
-private struct CollapsedCalendarView: View {
-    let events: [CalendarEventItem]
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "calendar")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            if let next = events.first {
-                Text(next.title)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                    .frame(maxWidth: 90, alignment: .leading)
-            } else {
-                Text("No events")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            }
-        }
-    }
-}
 
 private struct ExpandedCalendarView: View {
     @ObservedObject var plugin: CalendarPlugin

@@ -20,10 +20,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
         store.stop()
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedClipboardView(store: store))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedClipboardView(plugin: self))
     }
@@ -43,29 +39,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 }
 
 // MARK: - Views
-
-private struct CollapsedClipboardView: View {
-    @ObservedObject var store: ClipboardStore
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "doc.on.clipboard")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            if let latest = store.history.first {
-                Text(latest.text)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                    .frame(maxWidth: 90, alignment: .leading)
-            } else {
-                Text("Clipboard")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            }
-        }
-    }
-}
 
 private struct ExpandedClipboardView: View {
     @ObservedObject var plugin: ClipboardPlugin

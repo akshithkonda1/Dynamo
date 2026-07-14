@@ -17,10 +17,6 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
         store.stop()
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedChecklistView(store: store))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedChecklistView(plugin: self))
     }
@@ -32,22 +28,6 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
 }
 
 // MARK: - Views
-
-private struct CollapsedChecklistView: View {
-    @ObservedObject var store: ChecklistStore
-
-    var body: some View {
-        let remaining = store.items.filter { !$0.isDone }.count
-        HStack(spacing: 6) {
-            Image(systemName: "checklist")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            Text(remaining == 0 ? "All done" : "\(remaining) left")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textPrimary)
-        }
-    }
-}
 
 private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin

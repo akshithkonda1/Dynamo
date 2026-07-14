@@ -21,7 +21,6 @@ final class WidgetRegistryTests: XCTestCase {
             self.displayName = id
         }
 
-        func collapsedView() -> AnyView { AnyView(EmptyView()) }
         func expandedView() -> AnyView { AnyView(EmptyView()) }
         // start()/stop() use the protocol's default no-op implementations.
     }
@@ -36,7 +35,6 @@ final class WidgetRegistryTests: XCTestCase {
             self.displayName = id
         }
 
-        func collapsedView() -> AnyView { AnyView(EmptyView()) }
         func expandedView() -> AnyView { AnyView(EmptyView()) }
         func settingsView() -> AnyView { AnyView(EmptyView()) }
     }
@@ -52,7 +50,6 @@ final class WidgetRegistryTests: XCTestCase {
             self.displayName = id
         }
 
-        func collapsedView() -> AnyView { AnyView(EmptyView()) }
         func expandedView() -> AnyView { AnyView(EmptyView()) }
 
         func fire(_ content: NotchSneakPeek) {
