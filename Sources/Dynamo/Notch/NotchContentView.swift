@@ -61,21 +61,13 @@ struct NotchContentView: View {
         VStack(spacing: 0) {
             HStack(spacing: NotchTheme.spaceMD) {
                 ForEach(registry.plugins, id: \.id) { plugin in
-                    let isActive = registry.activePluginID == plugin.id
-                    Button {
+                    TrayIconButton(
+                        systemImage: plugin.systemImage,
+                        displayName: plugin.displayName,
+                        isActive: registry.activePluginID == plugin.id
+                    ) {
                         registry.activePluginID = plugin.id
-                    } label: {
-                        Image(systemName: plugin.systemImage)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                Circle()
-                                    .fill(isActive ? NotchTheme.chipFillActive : Color.clear)
-                            )
                     }
-                    .buttonStyle(.plain)
-                    .help(plugin.displayName)
                 }
                 Spacer(minLength: 0)
             }
@@ -91,5 +83,37 @@ struct NotchContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// A tray-row widget selector icon. Filled while active (selected); on top of
+/// that, a hover highlight previews the icon before you click it, so the row
+/// feels responsive rather than only reacting after the fact.
+private struct TrayIconButton: View {
+    let systemImage: String
+    let displayName: String
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(fillColor))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(displayName)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private var fillColor: Color {
+        if isActive { return NotchTheme.chipFillActive }
+        return isHovering ? NotchTheme.chipFill : .clear
     }
 }

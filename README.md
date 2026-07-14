@@ -43,6 +43,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Settings window redesign | **Live** (larger, scrollable, card-sectioned — General / Widgets / per-widget config all visible at once) |
 | Now-playing notch (Boring Notch–style) | **Live** (idle: album art + dancing-bars visualizer either side of the camera when playing, via a generic `NotchAmbientProviding` capability; expanded: wider ~640pt welcoming media player) |
 | Now-playing sneak peek | **Live** (brief title/artist pill on track change, via a generic `NotchSneakPeekProviding` capability; reuses the volume/brightness HUD's transient-overlay mechanic) |
+| Frontend polish pass | **Live** (removed dead `collapsedView()` across every widget; unified all widgets onto `NotchTheme` color/type tokens; shared `NotchIconButtonStyle` hover+press treatment on every utility button and the tray selector row) |
 
 ## Requirements
 
@@ -103,6 +104,7 @@ Calendar access is requested on first launch. Grant it under **System Settings �
 - **External data sources sit behind a small protocol** so mock and real implementations swap without touching UI.
 - **Two-state hover model** for the tray: `NotchWindowController.isExpanded`, driven by an `NSTrackingArea` on the notch (not a global mouse-moved monitor). Hidden↔Peek (top-edge proximity) and transient overlays (System HUD, now-playing sneak peek — both via `presentForOverlay()`/`overlayDidHide()`) are separate layers stacked on top — not extra expansion states.
 - **Shared `NotchTheme`** for spacing, type, color roles, and spring motion; panel uses `NSVisualEffectView` vibrancy.
+- **Shared `NotchIconButtonStyle`** (`.buttonStyle(.notchIcon(...))`) for every small utility button (delete, pin, reveal, clear, transport, refresh) — one hover-highlight + press-scale treatment, not each widget hand-rolling its own.
 - **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — an `ambientView()` (see `NotchAmbientProviding`) must fit within the notch, not push the panel wider. The width is derived from the screen's `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` (the real cutout), with an approximate fallback.
 
 ## Architecture decision: Swift Package vs `.xcodeproj` app target — **resolved**

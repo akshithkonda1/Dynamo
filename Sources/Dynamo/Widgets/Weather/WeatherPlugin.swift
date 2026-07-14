@@ -146,10 +146,10 @@ private struct ExpandedWeatherView: View {
             }
             Button { plugin.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(NotchTheme.textTertiary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 22))
             .help("Refresh weather")
         }
     }

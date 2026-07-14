@@ -101,6 +101,6 @@ private struct ExpandedBatteryView: View {
         if snapshot.isCharging { return NotchTheme.positive }
         if snapshot.percent <= 15 { return NotchTheme.negative }
         if snapshot.percent <= 25 { return NotchTheme.caution }
-        return Color.white.opacity(0.85)
+        return NotchTheme.textPrimary
     }
 }

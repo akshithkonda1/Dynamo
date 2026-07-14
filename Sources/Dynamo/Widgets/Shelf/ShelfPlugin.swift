@@ -108,20 +108,20 @@ private struct ExpandedShelfView: View {
                 store.revealInFinder(item)
             } label: {
                 Image(systemName: "folder")
-                    .font(.system(size: 10))
+                    .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
             .help("Reveal in Finder")
 
             Button {
                 store.remove(id: item.id)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
         }
         .padding(.vertical, 2)
     }

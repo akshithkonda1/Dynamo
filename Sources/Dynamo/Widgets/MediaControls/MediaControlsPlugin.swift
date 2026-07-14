@@ -188,23 +188,29 @@ private struct ExpandedMediaView: View {
 
     private var transportRow: some View {
         HStack(spacing: 14) {
-            softButton("backward.fill", size: 15) { plugin.previousTrack() }
-            softButton(plugin.info.isPlaying ? "pause.fill" : "play.fill", size: 18, prominent: true) {
-                plugin.togglePlayPause()
-            }
-            softButton("forward.fill", size: 15) { plugin.nextTrack() }
+            transportButton("backward.fill", size: 15, diameter: 38) { plugin.previousTrack() }
+            transportButton(
+                plugin.info.isPlaying ? "pause.fill" : "play.fill",
+                size: 18,
+                diameter: 44,
+                prominent: true
+            ) { plugin.togglePlayPause() }
+            transportButton("forward.fill", size: 15, diameter: 38) { plugin.nextTrack() }
         }
     }
 
-    private func softButton(_ systemName: String, size: CGFloat, prominent: Bool = false, action: @escaping () -> Void) -> some View {
+    private func transportButton(
+        _ systemName: String,
+        size: CGFloat,
+        diameter: CGFloat,
+        prominent: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(NotchTheme.textPrimary)
-                .frame(width: prominent ? 44 : 38, height: prominent ? 44 : 38)
-                .background(Circle().fill(prominent ? NotchTheme.chipFillActive : NotchTheme.chipFill))
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
     }
 }

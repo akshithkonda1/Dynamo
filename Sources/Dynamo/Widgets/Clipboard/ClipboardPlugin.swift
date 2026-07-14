@@ -48,8 +48,8 @@ private struct ExpandedClipboardView: View {
             sectionHeader("Pinned")
             if plugin.store.snippets.isEmpty && !plugin.isAddingSnippet {
                 Text("No pinned snippets yet.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             } else {
                 ForEach(plugin.store.snippets) { snippet in
                     snippetRow(snippet)
@@ -63,10 +63,10 @@ private struct ExpandedClipboardView: View {
                     plugin.isAddingSnippet = true
                 } label: {
                     Label("Add snippet", systemImage: "plus")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(NotchTheme.caption)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(NotchTheme.textSecondary)
             }
 
             Divider().overlay(NotchTheme.separator)
@@ -77,15 +77,15 @@ private struct ExpandedClipboardView: View {
                 if !plugin.store.history.isEmpty {
                     Button("Clear") { plugin.store.clearHistory() }
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
                 }
             }
 
             if plugin.store.history.isEmpty {
                 Text("Copy anything system-wide — it shows up here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -107,18 +107,18 @@ private struct ExpandedClipboardView: View {
     }
 
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             Button {
                 plugin.copy(snippet.text)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snippet.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(NotchTheme.body.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                     Text(snippet.text)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,23 +130,23 @@ private struct ExpandedClipboardView: View {
                 plugin.store.deleteSnippet(id: snippet.id)
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
             .help("Delete snippet")
         }
         .padding(.vertical, 2)
     }
 
     private func historyRow(_ item: ClipboardHistoryItem) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             Button {
                 plugin.copy(item.text)
             } label: {
                 Text(item.text)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -157,10 +157,10 @@ private struct ExpandedClipboardView: View {
                 plugin.store.pinCurrentOrText(item.text)
             } label: {
                 Image(systemName: "pin")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
             .help("Pin as snippet")
         }
     }
@@ -187,11 +187,11 @@ private struct ExpandedClipboardView: View {
                     plugin.draftBody = ""
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
             }
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous).fill(NotchTheme.chipFill))
     }
 }
