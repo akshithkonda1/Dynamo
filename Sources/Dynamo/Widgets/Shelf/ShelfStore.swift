@@ -74,6 +74,16 @@ final class ShelfStore: ObservableObject {
         pb.writeObjects([item.url as NSURL])
     }
 
+    /// Sends the item via AirDrop. No-ops if AirDrop isn't available on this
+    /// Mac (no Wi-Fi/Bluetooth, or unsupported hardware) — same "fail quiet"
+    /// style as `open`/`revealInFinder`, which don't surface errors either.
+    func airDrop(_ item: ShelfItem) {
+        guard let service = NSSharingService(named: .sendViaAirDrop),
+              service.canPerform(withItems: [item.url])
+        else { return }
+        service.perform(withItems: [item.url])
+    }
+
     // MARK: - Persistence
 
     private struct Payload: Codable {

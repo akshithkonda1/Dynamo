@@ -4,7 +4,7 @@ import SwiftUI
 /// Notch weather widget. Talks only to `WeatherProvider`, so the WeatherKit
 /// implementation can be swapped for a mock without touching any view.
 @MainActor
-final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding {
+final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding, NotchSneakPeekProviding {
     let id = "weather"
     let displayName = "Weather"
     let systemImage = "cloud.sun"
@@ -17,10 +17,14 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
     @Published private(set) var lastError: String?
     @Published private(set) var isGeocoding = false
     @Published var manualQuery: String = ""
+    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: WeatherProvider
     /// Held so an in-flight geocode isn't cancelled by the geocoder deallocating.
     private let geocoder = CLGeocoder()
+    /// Alert IDs already peeked, so a persisting alert doesn't re-peek on every
+    /// refresh — only genuinely new alerts do.
+    private var notifiedAlertIDs: Set<String> = []
 
     init(provider: WeatherProvider? = nil) {
         let resolved = provider ?? WeatherKitWeatherProvider()
@@ -40,6 +44,23 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
             isManualLocation = true
         } else {
             isManualLocation = false
+        }
+        checkNewAlerts()
+    }
+
+    /// Peek once per genuinely new severe/extreme alert. Minor/moderate
+    /// advisories still show in the expanded view but don't interrupt.
+    private func checkNewAlerts() {
+        notifiedAlertIDs.formIntersection(Set(alerts.map(\.id)))
+        for alert in alerts where !notifiedAlertIDs.contains(alert.id) {
+            notifiedAlertIDs.insert(alert.id)
+            guard alert.severity == .severe || alert.severity == .extreme else { continue }
+            onSneakPeek?(NotchSneakPeek(
+                systemImage: "exclamationmark.triangle.fill",
+                title: "Severe Weather Alert",
+                subtitle: alert.summary,
+                emphasis: .critical
+            ))
         }
     }
 

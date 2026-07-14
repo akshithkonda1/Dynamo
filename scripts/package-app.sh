@@ -34,6 +34,14 @@ cp "${BIN_DIR}/Dynamo" "${MACOS}/Dynamo"
 chmod +x "${MACOS}/Dynamo"
 cp "${ROOT}/Sources/Dynamo/Info.plist" "${CONTENTS}/Info.plist"
 
+# Optional MediaRemote helper process, if the target built (swift build with
+# no --product flag builds every target, so it's already sitting in BIN_DIR
+# alongside Dynamo). See MediaRemoteHelperProcess.swift for why it exists.
+if [[ -f "${BIN_DIR}/DynamoMediaRemoteHelper" ]]; then
+  cp "${BIN_DIR}/DynamoMediaRemoteHelper" "${MACOS}/DynamoMediaRemoteHelper"
+  chmod +x "${MACOS}/DynamoMediaRemoteHelper"
+fi
+
 # Optional app icon if present.
 if [[ -f "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" ]]; then
   cp "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"

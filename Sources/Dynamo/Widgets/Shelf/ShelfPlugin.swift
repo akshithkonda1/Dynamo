@@ -105,6 +105,16 @@ private struct ExpandedShelfView: View {
             .buttonStyle(.plain)
 
             Button {
+                store.airDrop(item)
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.notchIcon(diameter: 24))
+            .help("Share via AirDrop")
+
+            Button {
                 store.revealInFinder(item)
             } label: {
                 Image(systemName: "folder")

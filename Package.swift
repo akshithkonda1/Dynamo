@@ -7,7 +7,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "Dynamo", targets: ["Dynamo"])
+        .executable(name: "Dynamo", targets: ["Dynamo"]),
+        .executable(name: "DynamoMediaRemoteHelper", targets: ["DynamoMediaRemoteHelper"])
     ],
     targets: [
         // The Swift Package builds the same sources for fast compile iteration
@@ -22,6 +23,14 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        // Standalone MediaRemote helper process — see its own doc comment and
+        // MediaRemoteHelperProcess.swift for why it's a separate binary.
+        // Deliberately has no dependency on the Dynamo target; it's meant to
+        // stay a minimal, independent binary.
+        .executableTarget(
+            name: "DynamoMediaRemoteHelper",
+            path: "Sources/DynamoMediaRemoteHelper"
         ),
         .testTarget(
             name: "DynamoTests",

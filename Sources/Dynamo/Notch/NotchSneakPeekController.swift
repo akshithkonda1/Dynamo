@@ -17,8 +17,15 @@ final class NotchSneakPeekController: ObservableObject {
     private weak var notch: NotchWindowController?
     private var cancellable: AnyCancellable?
 
-    /// How long the pill stays up before auto-hiding.
-    private let displayDuration: TimeInterval = 2.6
+    /// How long the pill stays up before auto-hiding. Critical peeks (e.g. a
+    /// severe weather alert) linger longer than a routine one (a track change,
+    /// a meeting reminder) since they're worth actually reading.
+    private func displayDuration(for emphasis: NotchSneakPeekEmphasis) -> TimeInterval {
+        switch emphasis {
+        case .normal: return 2.6
+        case .critical: return 5.5
+        }
+    }
 
     func attach(registry: WidgetRegistry, notch: NotchWindowController) {
         self.notch = notch
@@ -45,6 +52,6 @@ final class NotchSneakPeekController: ObservableObject {
             self?.notch?.overlayDidHide()
         }
         hideWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + displayDuration, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + displayDuration(for: content.emphasis), execute: work)
     }
 }
