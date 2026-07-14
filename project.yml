@@ -40,6 +40,21 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
 
 targets:
+  # Standalone MediaRemote helper binary — see Sources/DynamoMediaRemoteHelper/
+  # main.swift and Widgets/MediaControls/MediaRemoteHelperProcess.swift for why
+  # it exists as a separate process. `embed: true` below (unverified — confirm
+  # after `xcodegen generate` + a real build) is meant to place it in
+  # Contents/MacOS/ next to the main binary, which is where
+  # MediaRemoteHelperProcess looks for it.
+  DynamoMediaRemoteHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/DynamoMediaRemoteHelper
+    settings:
+      base:
+        PRODUCT_NAME: DynamoMediaRemoteHelper
+
   Dynamo:
     type: application
     platform: macOS
@@ -50,6 +65,10 @@ targets:
         excludes:
           - "Info.plist"
           - "Dynamo.entitlements"
+    dependencies:
+      - target: DynamoMediaRemoteHelper
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_NAME: Dynamo

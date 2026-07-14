@@ -20,8 +20,11 @@ private enum MRCommand: UInt32 {
 /// **Tested against:** macOS 15.x / 26.x toolchains (Xcode 27 beta). Behavior of
 /// private frameworks can shift between OS releases. Starting with macOS 15.4,
 /// some sandboxed / non-`com.apple.*` processes receive empty payloads from
-/// MediaRemote; when that happens this provider falls back to AppleScript for
-/// Music and Spotify so play/pause/skip still work for the common players.
+/// MediaRemote when called in-process. When that happens this provider tries,
+/// in order: (1) the `DynamoMediaRemoteHelper` standalone process — a fresh
+/// process sometimes succeeds where the long-running host doesn't — then
+/// (2) AppleScript for Music and Spotify, so now-playing info and
+/// play/pause/skip still work for the common players either way.
 ///
 /// Nothing outside this file (and the construction site in `AppDelegate`)
 /// should need to change when swapping providers — UI talks only to
@@ -40,6 +43,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     private var pollTimer: Timer?
     private var isStarted = false
 
+    /// Third fallback tier, tried before AppleScript when in-process
+    /// MediaRemote is empty. See `MediaRemoteHelperProcess`'s doc comment.
+    private let helperProcess = MediaRemoteHelperProcess()
+    private var latestHelperInfo: NowPlayingInfo?
+
     // Function types matching MediaRemote private C API (ObjC blocks via @convention(block)).
     private typealias MRMediaRemoteGetNowPlayingInfo =
         @convention(c) (DispatchQueue, @escaping @convention(block) (CFDictionary?) -> Void) -> Void
@@ -55,6 +63,7 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         isStarted = true
         loadFramework()
         registerForNotifications()
+        startHelperProcess()
         refresh()
         // Light poll as a safety net for players that don't emit every change.
         // Interval is long enough not to thrash; notifications remain primary.
@@ -82,6 +91,24 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         sendCommand = nil
         registerNotifications = nil
         getNowPlayingApplicationIsPlaying = nil
+        helperProcess.stop()
+        latestHelperInfo = nil
+    }
+
+    /// No-ops if the helper binary isn't bundled in this build — see
+    /// `MediaRemoteHelperProcess.isAvailable`.
+    private func startHelperProcess() {
+        guard helperProcess.isAvailable else { return }
+        helperProcess.onPayload = { [weak self] payload in
+            self?.latestHelperInfo = NowPlayingInfo(
+                title: payload.title.isEmpty ? NowPlayingInfo.empty.title : payload.title,
+                artist: payload.artist,
+                album: payload.album,
+                isPlaying: payload.isPlaying,
+                artworkData: payload.artworkBase64.flatMap { Data(base64Encoded: $0) }
+            )
+        }
+        helperProcess.start()
     }
 
     func togglePlayPause() {
@@ -229,7 +256,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     private func applyAppleScriptFallback() {
-        if let scripted = AppleScriptMedia.shared.currentInfo() {
+        if let helperInfo = latestHelperInfo, helperInfo.title != NowPlayingInfo.empty.title {
+            publish(helperInfo)
+        } else if let scripted = AppleScriptMedia.shared.currentInfo() {
             publish(scripted)
         } else if current != .empty {
             // Keep last known unless we know nothing is playing.

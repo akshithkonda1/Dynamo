@@ -54,6 +54,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | AirDrop share action (File Shelf) | **Live** (per-item share button via `NSSharingService(named: .sendViaAirDrop)`) |
 | Webcam mirror widget | **Live** (`AVCaptureSession` + `AVCaptureVideoPreviewLayer`; camera runs only while the Webcam tab is actually visible — started/stopped by the view's appear/disappear, never by app launch or plugin registration) |
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
+| MediaRemoteAdapter helper process | **Live, unverified** (`DynamoMediaRemoteHelper`: a standalone binary that reads MediaRemote in its own process, streaming JSON over stdout; wired as a third fallback tier in `MediaRemoteNowPlayingProvider`, before AppleScript. No-ops safely if the helper binary isn't present in a given build — the embed step in `project.yml` is the one piece of this genuinely unverifiable without a Mac) |
 
 ## Requirements
 
