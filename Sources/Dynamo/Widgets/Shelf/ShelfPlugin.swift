@@ -22,31 +22,12 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
         store.add(urls: urls)
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedShelfView(store: store))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedShelfView(store: store))
     }
 }
 
 // MARK: - Views
-
-private struct CollapsedShelfView: View {
-    @ObservedObject var store: ShelfStore
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "tray.and.arrow.down.fill")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            Text(store.items.isEmpty ? "Shelf" : "\(store.items.count)")
-                .font(NotchTheme.caption)
-                .foregroundStyle(store.items.isEmpty ? NotchTheme.textTertiary : NotchTheme.textPrimary)
-        }
-    }
-}
 
 private struct ExpandedShelfView: View {
     @ObservedObject var store: ShelfStore
@@ -127,20 +108,20 @@ private struct ExpandedShelfView: View {
                 store.revealInFinder(item)
             } label: {
                 Image(systemName: "folder")
-                    .font(.system(size: 10))
+                    .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
             .help("Reveal in Finder")
 
             Button {
                 store.remove(id: item.id)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 24))
         }
         .padding(.vertical, 2)
     }

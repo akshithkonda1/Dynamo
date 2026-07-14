@@ -11,7 +11,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.0</string>
+	<string>0.3.0</string>
 	<key>CFBundleExecutable</key>
 	<string>Dynamo</string>
 	<key>CFBundlePackageType</key>
@@ -24,6 +24,8 @@
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

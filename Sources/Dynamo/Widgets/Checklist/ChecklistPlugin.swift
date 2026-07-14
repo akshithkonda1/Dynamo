@@ -17,10 +17,6 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
         store.stop()
     }
 
-    func collapsedView() -> AnyView {
-        AnyView(CollapsedChecklistView(store: store))
-    }
-
     func expandedView() -> AnyView {
         AnyView(ExpandedChecklistView(plugin: self))
     }
@@ -32,22 +28,6 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
 }
 
 // MARK: - Views
-
-private struct CollapsedChecklistView: View {
-    @ObservedObject var store: ChecklistStore
-
-    var body: some View {
-        let remaining = store.items.filter { !$0.isDone }.count
-        HStack(spacing: 6) {
-            Image(systemName: "checklist")
-                .font(NotchTheme.caption.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            Text(remaining == 0 ? "All done" : "\(remaining) left")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textPrimary)
-        }
-    }
-}
 
 private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
@@ -93,7 +73,7 @@ private struct ExpandedChecklistView: View {
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(NotchTheme.textPrimary)
                 }
                 .buttonStyle(.plain)
                 .disabled(plugin.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -113,9 +93,9 @@ private struct ExpandedChecklistView: View {
             } label: {
                 Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(item.isDone ? Color.green.opacity(0.85) : Color.white.opacity(0.5))
+                    .foregroundStyle(item.isDone ? NotchTheme.positive : NotchTheme.textSecondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 22))
 
             Text(item.text)
                 .font(NotchTheme.body)
@@ -128,10 +108,10 @@ private struct ExpandedChecklistView: View {
                 plugin.store.remove(id: item.id)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.notchIcon(diameter: 22))
         }
         .padding(.vertical, 2)
     }

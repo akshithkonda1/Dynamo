@@ -16,9 +16,6 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
     /// SF Symbol name for the collapsed tray icon.
     var systemImage: String { get }
 
-    /// Compact content that lives in the collapsed notch strip.
-    func collapsedView() -> AnyView
-
     /// Full content shown when the notch is expanded and this widget is active.
     func expandedView() -> AnyView
 

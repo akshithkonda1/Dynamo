@@ -10,23 +10,23 @@ let package = Package(
         .executable(name: "Dynamo", targets: ["Dynamo"])
     ],
     targets: [
+        // The Swift Package builds the same sources for fast compile iteration
+        // and CI. The shippable, WeatherKit-signed app is built from the Xcode
+        // target described in `project.yml` (XcodeGen) — that real `.app` bundle
+        // carries `Info.plist` and `Dynamo.entitlements` properly, so the old
+        // linker `-sectcreate __TEXT __info_plist` trick is no longer needed.
         .executableTarget(
             name: "Dynamo",
             path: "Sources/Dynamo",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "Dynamo.entitlements"],
             resources: [
                 .process("Resources")
-            ],
-            linkerSettings: [
-                // Embed Info.plist so permission usage strings are present when
-                // launching the bare executable (SPM has no .app bundle by default).
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/Dynamo/Info.plist"
-                ], .when(platforms: [.macOS]))
             ]
+        ),
+        .testTarget(
+            name: "DynamoTests",
+            dependencies: ["Dynamo"],
+            path: "Tests/DynamoTests"
         )
     ]
 )
