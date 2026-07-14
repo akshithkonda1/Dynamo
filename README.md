@@ -55,6 +55,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Webcam mirror widget | **Live** (`AVCaptureSession` + `AVCaptureVideoPreviewLayer`; camera runs only while the Webcam tab is actually visible — started/stopped by the view's appear/disappear, never by app launch or plugin registration) |
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
 | MediaRemoteAdapter helper process | **Live, unverified** (`DynamoMediaRemoteHelper`: a standalone binary that reads MediaRemote in its own process, streaming JSON over stdout; wired as a third fallback tier in `MediaRemoteNowPlayingProvider`, before AppleScript. No-ops safely if the helper binary isn't present in a given build — the embed step in `project.yml` is the one piece of this genuinely unverifiable without a Mac) |
+| Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/notarize.sh`, `scripts/make-dmg.sh`, `.github/workflows/release.yml` — tooling only; nobody but you can supply the signing certificate + notary credentials it needs) |
 
 ## Requirements
 
@@ -135,9 +136,8 @@ trigger**, so as of Phase 3 there is a real Xcode app target.
   used for fast `swift build` compile checks and CI. The `-sectcreate` linker
   flag has been retired now that a real bundle exists.
 
-**Still deferred:** notarization + a DMG release pipeline (now *possible* since
-a paid account exists, but out of scope for the WeatherKit pass) and an app
-icon asset catalog.
+**Now resolved too:** notarization + a DMG release pipeline, and an app icon
+asset catalog — both landed in Phase 4 (see below).
 
 ## Weather setup (WeatherKit)
 
@@ -159,15 +159,51 @@ require the **Xcode app target** and a **paid Apple Developer team** (see
 key-free Apple framework instead of a third-party quote API that needed a
 manually-provisioned Finnhub key.
 
-## Next steps (post Phase 3)
+## Notarization & DMG releases
 
-- Optional: event-driven peek — let a starting meeting or a severe-weather alert
-  peek the notch further or glow, layered on top of the proximity gesture
-- Optional: notarization + DMG release pipeline (now possible with a paid account)
-- Optional: MediaRemoteAdapter helper process for macOS 15.4+ edge cases
-- Optional: AirDrop share action from File Shelf
-- Optional: app icon asset catalog
-- Optional: webcam mirror widget
+Three pieces, none of which carry any credentials — they're tooling that
+activates once **you** supply your own Apple Developer Program certificate and
+notary credentials:
+
+- **`scripts/notarize.sh`** — re-signs an ad-hoc `package-app.sh` build with a
+  `Developer ID Application` identity, submits it to Apple's notary service,
+  and staples the ticket. Reads `DEVELOPER_ID_IDENTITY` plus either a notary
+  API key (`NOTARY_KEY_ID`/`NOTARY_ISSUER_ID`/`NOTARY_KEY_PATH`) or an Apple ID
+  + app-specific password (`NOTARY_APPLE_ID`/`NOTARY_TEAM_ID`/`NOTARY_APP_PASSWORD`)
+  from your environment. Note: the ad-hoc build has no WeatherKit entitlement
+  (see *Build & run*) — for a release with a working Weather widget, notarize
+  an `.app` exported from the Xcode target instead (`xcodebuild -exportArchive`
+  with `method: developer-id`), which is what the CI workflow below does.
+- **`scripts/make-dmg.sh`** — packages a built `.app` into a `.dmg` with a
+  drag-to-`/Applications` symlink, via `hdiutil` (no third-party tools needed).
+- **`.github/workflows/release.yml`** — the full automated pipeline: builds the
+  Xcode target, imports a Developer ID certificate from repo secrets into a
+  temporary CI keychain, archives, exports, notarizes, staples, packages the
+  DMG, and attaches it to a GitHub Release. Fires on `v*` tags. Requires these
+  **repository secrets** (Settings → Secrets and variables → Actions) —
+  without them the workflow simply fails at the signing step, nothing
+  insecure or silently degraded:
+
+  | Secret | What it is |
+  |---|---|
+  | `DEVELOPER_ID_CERTIFICATE_P12` | base64 of your exported `Developer ID Application` cert (`base64 -i cert.p12 \| pbcopy`) |
+  | `DEVELOPER_ID_CERTIFICATE_PASSWORD` | the password set when exporting it |
+  | `DEVELOPER_ID_TEAM_ID` | your 10-character Apple Developer Team ID |
+  | `NOTARY_APPLE_ID` | Apple ID email for `notarytool` |
+  | `NOTARY_APP_PASSWORD` | an app-specific password (generate at appleid.apple.com) |
+
+**Unverified, like everything else Apple-credential-shaped in this repo:**
+written and pushed from an environment with no macOS, Xcode, or Apple account
+access. The individual steps mirror Apple's own documented codesign-import /
+archive / notarytool flow — treat the first real tag push as the test.
+
+## Next steps (post Phase 4)
+
+- Optional: tie event-driven peek into more sources (e.g. a Reminders due date)
+- Optional: real app icon design (the current one is a generated placeholder)
+- Optional: MediaRemoteAdapter helper process verification on a real Mac —
+  confirm `embed: true` actually lands the binary in `Contents/MacOS/`
+- Optional: multi-display picker for which screen hosts the notch panel
 
 ## License
 

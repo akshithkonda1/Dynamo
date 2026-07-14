@@ -1,0 +1,120 @@
+# Builds Dynamo from the Xcode target (the WeatherKit-capable one — see
+# project.yml and the README's "Build & run" section), signs it with a
+# Developer ID Application identity, notarizes it, staples the ticket, packages
+# a .dmg, and attaches it to a GitHub Release. Fires on version tags.
+#
+# Requires these repository secrets (Settings -> Secrets and variables ->
+# Actions) — none are provided by this repo, and this workflow does nothing
+# insecure or silently degraded without them: it simply fails at the signing
+# step until you've set up your own Apple Developer Program credentials.
+#
+#   DEVELOPER_ID_CERTIFICATE_P12       base64 of your exported "Developer ID
+#                                       Application" certificate (.p12).
+#                                       Export from Keychain Access, then:
+#                                         base64 -i cert.p12 | pbcopy
+#   DEVELOPER_ID_CERTIFICATE_PASSWORD  the password set when exporting it
+#   DEVELOPER_ID_TEAM_ID                your 10-character Apple Developer Team ID
+#   NOTARY_APPLE_ID                     Apple ID email for notarytool
+#   NOTARY_APP_PASSWORD                 an app-specific password
+#                                        (generate at appleid.apple.com)
+#
+# This workflow is unverified — written and pushed from an environment with no
+# macOS/Xcode/Apple-credential access. Treat the first real tag push as the
+# test; the individual steps mirror Apple's documented codesign-import /
+# archive / notarytool flow.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="${RUNNER_TEMP}/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          echo "${P12_BASE64}" | base64 --decode > "${RUNNER_TEMP}/cert.p12"
+          security import "${RUNNER_TEMP}/cert.p12" -k "${KEYCHAIN_PATH}" -P "${P12_PASSWORD}" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          EXISTING_KEYCHAINS="$(security list-keychains -d user | sed 's/"//g')"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" ${EXISTING_KEYCHAINS}
+          rm -f "${RUNNER_TEMP}/cert.p12"
+
+      - name: Archive
+        env:
+          TEAM_ID: ${{ secrets.DEVELOPER_ID_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project Dynamo.xcodeproj \
+            -scheme Dynamo \
+            -configuration Release \
+            -archivePath "${RUNNER_TEMP}/Dynamo.xcarchive" \
+            DEVELOPMENT_TEAM="${TEAM_ID}" \
+            CODE_SIGN_STYLE=Automatic
+
+      - name: Export Developer ID build
+        env:
+          TEAM_ID: ${{ secrets.DEVELOPER_ID_TEAM_ID }}
+        run: |
+          cat > "${RUNNER_TEMP}/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+          mkdir -p dist
+          xcodebuild -exportArchive \
+            -archivePath "${RUNNER_TEMP}/Dynamo.xcarchive" \
+            -exportOptionsPlist "${RUNNER_TEMP}/ExportOptions.plist" \
+            -exportPath dist
+
+      - name: Notarize and staple
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.DEVELOPER_ID_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/Dynamo.app dist/Dynamo-notarize.zip
+          xcrun notarytool submit dist/Dynamo-notarize.zip \
+            --apple-id "${NOTARY_APPLE_ID}" --team-id "${NOTARY_TEAM_ID}" --password "${NOTARY_APP_PASSWORD}" \
+            --wait
+          xcrun stapler staple dist/Dynamo.app
+          rm -f dist/Dynamo-notarize.zip
+
+      - name: Create DMG
+        run: ./scripts/make-dmg.sh dist/Dynamo.app
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Dynamo.dmg
