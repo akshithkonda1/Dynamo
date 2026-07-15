@@ -180,20 +180,23 @@ final class AppleScriptMedia {
     private func infoFromMusic() -> NowPlayingInfo? {
         guard isRunning(bundleID: Self.musicBundle) else { return nil }
         let s = Self.sep
+        // IMPORTANT: do not use short AppleScript locals like `st` — Music’s
+        // dictionary treats `st` as reserved ("Expected expression but found st"),
+        // which silently broke now-playing metadata while transport still worked.
         let script = """
         tell application id "\(Self.musicBundle)"
             try
-                set st to player state as string
-                if st is "stopped" then return ""
-                set t to name of current track
-                set a to artist of current track
-                set al to album of current track
-                set p to (st is "playing")
-                set pl to ""
+                set playerStateText to (player state as string)
+                if playerStateText is "stopped" then return ""
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                set isPlayingFlag to (playerStateText is "playing")
+                set playlistName to ""
                 try
-                    set pl to name of current playlist
+                    set playlistName to name of current playlist
                 end try
-                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p & "\(s)" & pl
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & playlistName
             on error
                 return ""
             end try
@@ -208,13 +211,13 @@ final class AppleScriptMedia {
         let script = """
         tell application id "\(Self.spotifyBundle)"
             try
-                set st to player state as string
-                if st is "stopped" then return ""
-                set t to name of current track
-                set a to artist of current track
-                set al to album of current track
-                set p to (st is "playing")
-                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p & "\(s)" & ""
+                set playerStateText to (player state as string)
+                if playerStateText is "stopped" then return ""
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                set isPlayingFlag to (playerStateText is "playing")
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & ""
             on error
                 return ""
             end try

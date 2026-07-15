@@ -161,15 +161,21 @@ private struct ExpandedMediaView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 header
-                Text(hasTrack ? plugin.info.title : "Nothing playing")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                    .onTapGesture { plugin.openConnectedApp() }
-                Text(subtitle)
-                    .font(NotchTheme.body)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                    .lineLimit(1)
+                MarqueeText(
+                    text: hasTrack ? plugin.info.title : "Nothing playing",
+                    font: .system(size: 17, weight: .semibold),
+                    foreground: NotchTheme.textPrimary,
+                    speed: 32
+                )
+                .frame(height: 22)
+                .onTapGesture { plugin.openConnectedApp() }
+                MarqueeText(
+                    text: subtitle,
+                    font: NotchTheme.body,
+                    foreground: NotchTheme.textSecondary,
+                    speed: 28
+                )
+                .frame(height: 18)
 
                 playlistRow
 
@@ -226,10 +232,13 @@ private struct ExpandedMediaView: View {
                 Image(systemName: "music.note.list")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchTheme.textQuaternary)
-                Text(plugin.info.playlistName ?? "No playlist")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .lineLimit(1)
+                MarqueeText(
+                    text: plugin.info.playlistName ?? "No playlist",
+                    font: NotchTheme.micro,
+                    foreground: NotchTheme.textTertiary,
+                    speed: 24
+                )
+                .frame(height: 14)
                 Spacer(minLength: 0)
                 if !plugin.playlists.isEmpty {
                     Menu {
