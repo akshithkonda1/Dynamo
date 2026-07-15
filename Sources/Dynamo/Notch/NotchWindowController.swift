@@ -74,6 +74,14 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Expansion (Collapsed ↔ Expanded)
 
+    /// Menu-bar / debug entry: ensure the panel is visible and expanded so the
+    /// tray is obvious even when collapsed into the physical notch.
+    func revealAndExpand() {
+        cancelRetreat()
+        if !isVisible { showPanel() }
+        expand()
+    }
+
     func expand() {
         if !isVisible { showPanel() }
         guard !isExpanded else { return }

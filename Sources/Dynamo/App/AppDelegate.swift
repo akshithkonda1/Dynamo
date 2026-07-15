@@ -103,6 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let menu = NSMenu()
         menu.delegate = self
+        menu.addItem(NSMenuItem(title: "Show Notch", action: #selector(showNotch), keyEquivalent: "n"))
+        menu.addItem(NSMenuItem.separator())
         let hiddenItem = NSMenuItem(title: "Hidden mode", action: #selector(toggleHiddenMode), keyEquivalent: "")
         hiddenItem.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
         menu.addItem(hiddenItem)
@@ -113,6 +115,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit Dynamo", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
+    }
+
+    /// Force the notch panel on-screen and expanded — useful when the collapsed
+    /// strip is easy to miss (it intentionally hugs the physical cutout).
+    @objc private func showNotch() {
+        MainActor.assumeIsolated {
+            notchController?.revealAndExpand()
+        }
     }
 
     // Keep the checkmark in sync if Hidden mode was toggled from Settings.
