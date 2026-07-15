@@ -1,43 +1,71 @@
+import AppKit
 import SwiftUI
 
-/// Webcam mirror widget. Unlike other widgets, the camera is intentionally
-/// *not* driven by `start()`/`stop()` (registry registration / enable-disable)
-/// — it's driven by the expanded view's own appear/disappear, so the camera
-/// only ever runs while you're actually looking at this tab. See
-/// `WebcamCaptureController`'s doc comment for the privacy reasoning.
+/// Webcam mirror widget. Camera runs only while this tab is active in the
+/// expanded notch (not on app launch). Mirror-on is the default and is
+/// **remembered** across relaunches via UserDefaults.
 @MainActor
-final class WebcamPlugin: ObservableObject, NotchWidgetPlugin {
+final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding {
     let id = "webcam"
     let displayName = "Webcam"
     let systemImage = "camera.fill"
 
     let controller = WebcamCaptureController()
 
+    func start() {
+        // Keep auth state warm; do not start the camera until the view appears.
+        controller.requestAccessIfNeeded()
+    }
+
+    func stop() {
+        controller.stopNow()
+    }
+
     func expandedView() -> AnyView {
         AnyView(ExpandedWebcamView(plugin: self))
     }
+
+    func settingsView() -> AnyView {
+        AnyView(WebcamSettingsView(plugin: self))
+    }
 }
 
-// MARK: - Views
+// MARK: - Expanded view
 
 private struct ExpandedWebcamView: View {
     @ObservedObject var plugin: WebcamPlugin
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-            Text("Webcam")
-                .font(NotchTheme.section)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .textCase(.uppercase)
+            HStack {
+                Text("Webcam")
+                    .font(NotchTheme.section)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .textCase(.uppercase)
+                Spacer()
+                if plugin.controller.authState == .authorized {
+                    Toggle(isOn: Binding(
+                        get: { plugin.controller.isMirrored },
+                        set: { plugin.controller.isMirrored = $0 }
+                    )) {
+                        Text("Mirror")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .help("Flip horizontally like a bathroom mirror. Preference is saved.")
+                }
+            }
 
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            plugin.controller.requestAccessIfNeeded()
             plugin.controller.start()
         }
         .onDisappear {
+            // Debounced inside the controller so animation churn doesn't cut the feed.
             plugin.controller.stop()
         }
         .onChange(of: plugin.controller.authState) { newValue in
@@ -54,19 +82,90 @@ private struct ExpandedWebcamView: View {
             Text("Requesting camera access…")
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textTertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .denied:
-            Text("Camera access denied. Enable it in System Settings → Privacy & Security → Camera.")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Camera access denied.")
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textSecondary)
+                Text("Enable it in System Settings → Privacy & Security → Camera, then reopen this tab.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Camera Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .unavailable:
-            Text("No camera available.")
+            Text("No camera available on this Mac.")
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textTertiary)
-        case .authorized:
-            WebcamPreviewView(session: plugin.controller.session)
-                .clipShape(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .authorized:
+            ZStack {
+                WebcamPreviewView(
+                    session: plugin.controller.session,
+                    isMirrored: plugin.controller.isMirrored,
+                    isRunning: plugin.controller.isRunning
+                )
+                .clipShape(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous))
+
+                if !plugin.controller.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+// MARK: - Settings
+
+private struct WebcamSettingsView: View {
+    @ObservedObject var plugin: WebcamPlugin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Mirror video (selfie flip)", isOn: Binding(
+                get: { plugin.controller.isMirrored },
+                set: { plugin.controller.isMirrored = $0 }
+            ))
+            Text("When on, the feed is flipped horizontally like a real mirror. This setting is remembered across relaunches. The camera only runs while the Webcam tab is open.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        switch plugin.controller.authState {
+        case .authorized: return plugin.controller.isRunning ? .green : .yellow
+        case .denied, .unavailable: return .red
+        case .notDetermined: return .orange
+        }
+    }
+
+    private var statusText: String {
+        switch plugin.controller.authState {
+        case .authorized:
+            return plugin.controller.isRunning ? "Camera running" : "Camera idle (open Webcam tab to start)"
+        case .denied: return "Camera access denied"
+        case .unavailable: return "No camera available"
+        case .notDetermined: return "Camera permission not requested yet"
         }
     }
 }
