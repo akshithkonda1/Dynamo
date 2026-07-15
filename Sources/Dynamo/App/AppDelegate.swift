@@ -27,6 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor
     private func bootstrap() {
+        // One instance only — multiple copies fight over the same notch strip
+        // and look like the UI is "intermittent" / vanishing.
+        if Self.activateExistingInstanceIfNeeded() {
+            NSApp.terminate(nil)
+            return
+        }
+
         NSApp.setActivationPolicy(.accessory)
         LaunchAtLogin.applyStoredPreference()
 
@@ -152,5 +159,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    /// If another Dynamo is already running (Xcode + package-app, two opens),
+    /// bring it forward and tell the new process to exit.
+    private static func activateExistingInstanceIfNeeded() -> Bool {
+        let mine = NSRunningApplication.current
+        let others = NSWorkspace.shared.runningApplications.filter { app in
+            guard app != mine else { return false }
+            if app.bundleIdentifier == "com.akshithkonda.Dynamo" { return true }
+            // Bare SPM / debug binary may lack a bundle id — match by name.
+            return app.localizedName == "Dynamo"
+                && app.bundleURL?.path.contains("Dynamo") == true
+        }
+        guard let existing = others.first else { return false }
+        existing.activate(options: [.activateIgnoringOtherApps])
+        return true
     }
 }

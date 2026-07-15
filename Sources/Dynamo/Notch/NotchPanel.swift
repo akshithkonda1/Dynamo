@@ -15,12 +15,22 @@ final class NotchPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
+        // Above the menu bar chrome so hover isn't stolen by system UI.
         level = .statusBar
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        collectionBehavior = [
+            .canJoinAllSpaces,
+            .stationary,
+            .fullScreenAuxiliary,
+            .ignoresCycle
+        ]
         isMovableByWindowBackground = false
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        // Critical: accessory apps often deactivate; keep the notch up.
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
+        isReleasedWhenClosed = false
+        // Don't let the system auto-reposition this as a normal window.
+        isFloatingPanel = true
     }
 }

@@ -5,19 +5,17 @@ import UniformTypeIdentifiers
 
 /// Owns the notch panel and two independent, stacked interaction layers:
 ///
-/// 1. **Hidden ↔ Peek** (only when Hidden mode is on): a top-of-screen
-///    `NSTrackingArea` sensor reveals the collapsed notch when the cursor nears
-///    the top edge, and retreats it after a short delay when the cursor leaves.
-/// 2. **Collapsed ↔ Expanded**: the existing hover mechanic, now driven by an
-///    `NSTrackingArea` on the notch itself instead of a global mouse-moved
-///    monitor (which was flagged as a battery-drain source).
+/// 1. **Hidden ↔ Peek** (only when Hidden mode is on): top-edge sensor.
+/// 2. **Collapsed ↔ Expanded**: hover on the notch panel.
 ///
-/// Expansion stays a single boolean (`isExpanded`) so the animation is coherent.
+/// Stability notes (why this file is careful about timers):
+/// - Expanding resizes the panel under the cursor; AppKit often fires a spurious
+///   `mouseExited` mid-animation. Collapsing immediately made the tray flicker.
+/// - The collapsed panel is only ~notch height; a few points of miss used to
+///   drop expand instantly. We debounce collapse and re-check mouse position.
 @MainActor
 final class NotchWindowController: ObservableObject {
     @Published private(set) var isExpanded: Bool = false
-    /// User preference: when on, the notch stays hidden until the cursor peeks
-    /// it out from the top edge. Default off — never forced on.
     @Published private(set) var isHiddenModeEnabled: Bool = false
 
     private var panel: NotchPanel?
@@ -27,34 +25,25 @@ final class NotchWindowController: ObservableObject {
     private weak var hud: SystemHUDController?
     private weak var sneakPeek: NotchSneakPeekController?
 
-    /// Whether the notch panel is currently on screen. In non-hidden mode this
-    /// is always true; in hidden mode it's true only while peeking / expanded /
-    /// showing a HUD.
     private var isVisible = false
     private var retreatWorkItem: DispatchWorkItem?
-    /// Number of transient overlays (volume/brightness HUD, now-playing sneak
-    /// peek, ...) currently keeping the notch visible/widened, even in Hidden
-    /// mode. A counter rather than a bool so two independent overlays can't
-    /// clobber each other if they happen to overlap.
+    private var collapseWorkItem: DispatchWorkItem?
     private var activeOverlayCount = 0
+    /// Ignore hover-exit events until this date (covers frame animation churn).
+    private var suppressHoverExitUntil: Date?
+    private var isAnimatingFrame = false
 
-    /// The collapsed panel hugs the physical notch so it disappears into the
-    /// real cutout at rest. Sized from `NotchGeometry` (height from the screen's
-    /// `safeAreaInsets`, width an on-device-tuned approximation).
     private var collapsedSize: NSSize {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    /// A transient overlay (volume/brightness HUD, sneak peek) needs more room
-    /// than the bare notch, so the panel briefly widens (Dynamic-Island style)
-    /// while one is showing.
-    private let overlaySize = NSSize(width: 320, height: 40)
-    /// Wider (Boring Notch uses ~640) with a little extra height for a roomier,
-    /// more welcoming feel than a tight media strip.
-    private let expandedSize = NSSize(width: 640, height: 215)
-    /// Don't retreat the instant the cursor leaves — a short grace avoids a
-    /// flickery, twitchy feel.
+    private let overlaySize = NSSize(width: 320, height: 44)
+    private let expandedSize = NSSize(width: 640, height: 220)
+    /// Grace before auto-collapse after the cursor leaves the panel.
+    private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
+    /// Extra padding around the panel when deciding if the mouse is "still near".
+    private let nearPadding: CGFloat = 14
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
 
@@ -72,11 +61,10 @@ final class NotchWindowController: ObservableObject {
         applyInitialVisibility()
     }
 
-    // MARK: - Expansion (Collapsed ↔ Expanded)
+    // MARK: - Expansion
 
-    /// Menu-bar / debug entry: ensure the panel is visible and expanded so the
-    /// tray is obvious even when collapsed into the physical notch.
     func revealAndExpand() {
+        cancelCollapse()
         cancelRetreat()
         if !isVisible { showPanel() }
         expand()
@@ -84,6 +72,10 @@ final class NotchWindowController: ObservableObject {
 
     func expand() {
         if !isVisible { showPanel() }
+        cancelCollapse()
+        // Frame animation under the cursor often synthesizes mouseExited — ignore
+        // those for a beat so the tray doesn't slam shut.
+        suppressHoverExitUntil = Date().addingTimeInterval(0.65)
         guard !isExpanded else { return }
         isExpanded = true
         animateFrame(to: expandedSize)
@@ -92,34 +84,70 @@ final class NotchWindowController: ObservableObject {
     func collapse() {
         guard isExpanded else { return }
         isExpanded = false
+        suppressHoverExitUntil = Date().addingTimeInterval(0.35)
         animateFrame(to: collapsedSize)
     }
 
-    // MARK: - Hover layer (driven by the notch's tracking area)
+    // MARK: - Hover
 
     private func hoverEntered() {
+        cancelCollapse()
         cancelRetreat()
         expand()
     }
 
     private func hoverExited() {
-        collapse()
-        if isHiddenModeEnabled {
-            scheduleRetreat()
+        if let until = suppressHoverExitUntil, Date() < until {
+            return
         }
+        // Debounce: give the user a chance to re-enter (and ignore resize noise).
+        scheduleCollapse()
     }
 
-    // MARK: - Peek layer (driven by the top-edge sensor)
+    private func scheduleCollapse() {
+        cancelCollapse()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.mouseIsNearPanel() {
+                // Still over/near us — stay expanded.
+                return
+            }
+            if self.activeOverlayCount > 0 {
+                return
+            }
+            self.collapse()
+            if self.isHiddenModeEnabled {
+                self.scheduleRetreat()
+            }
+        }
+        collapseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: work)
+    }
+
+    private func cancelCollapse() {
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
+    }
+
+    /// True if the cursor is inside the panel frame plus a small margin.
+    private func mouseIsNearPanel() -> Bool {
+        guard let panel else { return false }
+        let mouse = NSEvent.mouseLocation
+        return panel.frame.insetBy(dx: -nearPadding, dy: -nearPadding).contains(mouse)
+    }
+
+    // MARK: - Peek layer
 
     private func peekSensorEntered() {
         guard isHiddenModeEnabled else { return }
         cancelRetreat()
+        cancelCollapse()
         if !isVisible { showPanel() }
     }
 
     private func peekSensorExited() {
         guard isHiddenModeEnabled else { return }
-        // If the cursor moved onto the notch, hoverEntered cancels this.
+        if mouseIsNearPanel() { return }
         scheduleRetreat()
     }
 
@@ -135,32 +163,41 @@ final class NotchWindowController: ObservableObject {
         } else {
             removePeekSensor()
             cancelRetreat()
+            cancelCollapse()
             showPanel()
         }
     }
 
-    // MARK: - Transient overlay visibility (HUD, sneak peek — keeps the notch
-    // visible even in Hidden mode so the overlay isn't swallowed)
+    // MARK: - Transient overlays
 
     func presentForOverlay() {
         activeOverlayCount += 1
         cancelRetreat()
+        cancelCollapse()
         if !isVisible { showPanel() }
-        // Widen from the bare notch so the overlay fits; leave an expanded panel
-        // alone (it already has room and the overlay draws on top).
-        if !isExpanded { animateFrame(to: overlaySize) }
+        if !isExpanded {
+            suppressHoverExitUntil = Date().addingTimeInterval(0.5)
+            animateFrame(to: overlaySize)
+        }
     }
 
     func overlayDidHide() {
         activeOverlayCount = max(0, activeOverlayCount - 1)
         guard activeOverlayCount == 0 else { return }
-        if !isExpanded { animateFrame(to: collapsedSize) }
+        if mouseIsNearPanel() {
+            // Cursor still on the notch — keep or expand rather than snap shut.
+            if !isExpanded { expand() }
+            return
+        }
+        if !isExpanded {
+            animateFrame(to: collapsedSize)
+        }
         if isHiddenModeEnabled {
             scheduleRetreat()
         }
     }
 
-    // MARK: - Visibility helpers
+    // MARK: - Visibility
 
     private func applyInitialVisibility() {
         if isHiddenModeEnabled {
@@ -179,7 +216,10 @@ final class NotchWindowController: ObservableObject {
 
     private func hidePanel() {
         guard activeOverlayCount == 0 else { return }
-        collapse()
+        cancelCollapse()
+        if isExpanded {
+            isExpanded = false
+        }
         panel?.orderOut(nil)
         isVisible = false
     }
@@ -189,6 +229,7 @@ final class NotchWindowController: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard self.isHiddenModeEnabled, self.activeOverlayCount == 0 else { return }
+            if self.mouseIsNearPanel() { return }
             self.hidePanel()
         }
         retreatWorkItem = work
@@ -200,7 +241,7 @@ final class NotchWindowController: ObservableObject {
         retreatWorkItem = nil
     }
 
-    // MARK: - Sensor lifecycle
+    // MARK: - Sensor
 
     private func installPeekSensor() {
         guard peekSensor == nil, let screen = preferredScreen() else { return }
@@ -225,6 +266,7 @@ final class NotchWindowController: ObservableObject {
 
     func teardown() {
         cancelRetreat()
+        cancelCollapse()
         removePeekSensor()
         panel?.orderOut(nil)
         panel = nil
@@ -247,12 +289,9 @@ final class NotchWindowController: ObservableObject {
             }
             return handled
         }
-        // Collapsed ↔ Expanded hover, via a tracking area instead of a global
-        // mouse-moved monitor.
         hosting.onMouseEntered = { [weak self] in self?.hoverEntered() }
         hosting.onMouseExited = { [weak self] in self?.hoverExited() }
         panel.contentView = hosting
-        // Register for file URL drags on the panel itself.
         panel.registerForDraggedTypes([.fileURL])
         self.panel = panel
         self.hostingView = hosting
@@ -261,34 +300,54 @@ final class NotchWindowController: ObservableObject {
 
     func reposition() {
         guard let panel, let screen = preferredScreen() else { return }
-        let size = isExpanded ? expandedSize : collapsedSize
+        let size = targetSize
         let origin = topCenterOrigin(size: size, on: screen)
+        // Avoid fighting an in-flight hover animation with a hard setFrame.
+        if isAnimatingFrame {
+            return
+        }
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         peekSensor?.place(on: screen)
+    }
+
+    private var targetSize: NSSize {
+        if isExpanded { return expandedSize }
+        if activeOverlayCount > 0 { return overlaySize }
+        return collapsedSize
     }
 
     private func animateFrame(to size: NSSize) {
         guard let panel, let screen = panel.screen ?? preferredScreen() else { return }
         let origin = topCenterOrigin(size: size, on: screen)
         let target = NSRect(origin: origin, size: size)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.38
+        isAnimatingFrame = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.32
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
             context.allowsImplicitAnimation = true
             panel.animator().setFrame(target, display: true)
-        }
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in
+                self?.isAnimatingFrame = false
+                // If the cursor stayed over us, keep expanded; if it left mid-animation,
+                // the debounced collapse will handle it.
+                if let self, self.isExpanded, !self.mouseIsNearPanel(), self.activeOverlayCount == 0 {
+                    self.scheduleCollapse()
+                }
+            }
+        })
     }
 
     func preferredScreen() -> NSScreen? {
         DisplayPreference.resolveScreen()
     }
 
-    /// Public entry for Settings when the user picks another display.
     func applyPreferredDisplay() {
         if isHiddenModeEnabled {
             removePeekSensor()
             installPeekSensor()
         }
+        isAnimatingFrame = false
         reposition()
     }
 
@@ -297,16 +356,17 @@ final class NotchWindowController: ObservableObject {
         let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
         let notchInset = max(screen.safeAreaInsets.top, menuBarHeight)
         let x = frame.midX - size.width / 2
-        let y = frame.maxY - size.height - max(0, (notchInset - collapsedSize.height) / 2)
+        // Hang from the top of the screen into the notch band.
+        let y = frame.maxY - size.height
+        // When taller than the notch, still pin top edge to the screen top so
+        // the expanded tray drops downward (not upward into empty space).
+        _ = notchInset
         return NSPoint(x: x, y: y)
     }
 }
 
 // MARK: - Drop-capable hosting view
 
-/// NSHostingView that accepts file URL drags and reports hover enter/exit via a
-/// tracking area. It forwards drops without knowing which widget will handle
-/// them, and forwards hover so the controller can expand/collapse.
 private final class DropHostingView: NSHostingView<NotchContentView> {
     var onFileDrop: (([URL]) -> Bool)?
     var onMouseEntered: (() -> Void)?
@@ -317,9 +377,11 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        // `.mouseMoved` is intentionally omitted (battery). Enter/exit is enough
+        // when paired with debounced collapse on the controller.
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .assumeInside],
             owner: self,
             userInfo: nil
         )

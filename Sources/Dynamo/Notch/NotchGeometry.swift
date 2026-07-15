@@ -23,16 +23,22 @@ enum NotchGeometry {
     static let fallbackHeight: CGFloat = 32
 
     /// A few points of overhang so the panel fully covers the cutout edges.
-    private static let widthPadding: CGFloat = 4
+    private static let widthPadding: CGFloat = 6
+
+    /// Extra height below the physical notch so the hover target is usable.
+    /// Pure cutout height (~28pt) is too thin — the cursor slips off and the
+    /// tray collapses. Visual still reads as the notch; hit area is larger.
+    private static let interactionPadding: CGFloat = 10
 
     static func currentMetrics(for screen: NSScreen?) -> NotchMetrics {
         guard let screen else {
-            return NotchMetrics(width: fallbackWidth, height: fallbackHeight)
+            return NotchMetrics(width: fallbackWidth, height: fallbackHeight + interactionPadding)
         }
         let safeTop = screen.safeAreaInsets.top
         // On a notched display `safeAreaInsets.top` is the notch height; on a
         // plain display it's 0, so fall back to a slim menu-bar-height bar.
-        let height = safeTop > 0 ? safeTop : fallbackHeight
+        let base = safeTop > 0 ? safeTop : fallbackHeight
+        let height = base + interactionPadding
         return NotchMetrics(width: notchWidth(for: screen), height: height)
     }
 
