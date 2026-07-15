@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -17,7 +18,9 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     private let leadTime: TimeInterval = 5 * 60
 
     init(provider: CalendarProvider? = nil) {
-        let resolved = provider ?? EventKitCalendarProvider()
+        // Default: read-only snapshot of Calendar.app’s local SQLite store —
+        // no EventKit API, no write access. Click opens Calendar.app.
+        let resolved = provider ?? LocalCalendarDatabaseProvider()
         self.provider = resolved
         resolved.onChange = { [weak self] in
             guard let self else { return }
@@ -34,9 +37,10 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         events = provider.upcoming
         dueReminders = provider.dueReminders
         authState = provider.authorizationState
-        if authState == .notDetermined {
+        // Local DB path: requestAccess just re-checks file readability (no TCC).
+        if authState != .authorized {
             Task { await provider.requestAccess() }
-        } else if authState == .authorized {
+        } else {
             provider.refresh()
         }
     }
@@ -146,20 +150,31 @@ private struct ExpandedCalendarView: View {
 
             switch plugin.authState {
             case .notDetermined:
-                Button("Allow Calendar Access") { plugin.requestAccess() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                Text("Dynamo reads the same calendars as the Calendar app (iCloud, Google, Exchange, local).")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .denied:
-                Text("Calendar access denied. Enable it in System Settings → Privacy & Security → Calendars, then click Allow again.")
+                Text("Looking for Calendar data…")
                     .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Request Access Again") { plugin.requestAccess() }
+                    .foregroundStyle(NotchTheme.textTertiary)
+                Button("Retry") { plugin.requestAccess() }
                     .controlSize(.small)
+            case .denied:
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Can’t read Calendar’s local database.")
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textSecondary)
+                    Text("Dynamo reads Calendar.app’s files in read-only mode (no EventKit write). If blocked, grant Full Disk Access to Dynamo, then Retry.")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Open Full Disk Access") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .controlSize(.small)
+                        Button("Retry") { plugin.requestAccess() }
+                            .controlSize(.small)
+                    }
+                }
             case .authorized:
                 if plugin.events.isEmpty && plugin.dueReminders.isEmpty {
                     Text("No upcoming events in the next two weeks.")
