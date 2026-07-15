@@ -241,26 +241,53 @@ private struct ExpandedMediaView: View {
                 .frame(height: 14)
                 Spacer(minLength: 0)
                 if !plugin.playlists.isEmpty {
-                    Menu {
-                        ForEach(plugin.playlists, id: \.self) { name in
-                            Button(name) { plugin.playPlaylist(name) }
-                        }
+                    Button {
+                        plugin.showPlaylistPicker.toggle()
                     } label: {
-                        Text("Switch")
+                        Text(plugin.showPlaylistPicker ? "Hide" : "Switch")
                             .font(NotchTheme.micro.weight(.semibold))
                             .foregroundStyle(NotchTheme.textSecondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Capsule().fill(NotchTheme.chipFill))
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("Play a different Music playlist")
+                    .buttonStyle(.plain)
+                    .help("Show playlists")
                 }
             }
-            .onTapGesture {
-                // Tapping the playlist name also opens the player at context.
-                plugin.openConnectedApp()
+
+            if plugin.showPlaylistPicker, !plugin.playlists.isEmpty {
+                // Inline list with scrollbar (menus hide overflow awkwardly in the notch).
+                NotchScrollView(axes: .vertical) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(plugin.playlists, id: \.self) { name in
+                            Button {
+                                plugin.playPlaylist(name)
+                            } label: {
+                                Text(name)
+                                    .font(NotchTheme.caption)
+                                    .foregroundStyle(
+                                        name == plugin.info.playlistName
+                                            ? NotchTheme.textPrimary
+                                            : NotchTheme.textSecondary
+                                    )
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(name == plugin.info.playlistName
+                                                  ? NotchTheme.chipFillActive
+                                                  : Color.clear)
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 88)
             }
         }
     }

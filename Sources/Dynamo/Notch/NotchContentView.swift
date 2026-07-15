@@ -59,40 +59,48 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ForEach(registry.plugins, id: \.id) { plugin in
-                    TrayIconButton(
-                        systemImage: plugin.systemImage,
-                        displayName: plugin.displayName,
-                        isActive: registry.activePluginID == plugin.id
-                    ) {
-                        // Re-tap an already-active player widget → open Music/Spotify.
-                        if registry.activePluginID == plugin.id,
-                           let opener = plugin as? any PlayerAppOpening {
-                            opener.openPlayerApp()
-                        } else {
-                            registry.activePluginID = plugin.id
+            // Tray can overflow when many widgets are enabled — horizontal scroll bar.
+            NotchScrollView(axes: .horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(registry.plugins, id: \.id) { plugin in
+                        TrayIconButton(
+                            systemImage: plugin.systemImage,
+                            displayName: plugin.displayName,
+                            isActive: registry.activePluginID == plugin.id
+                        ) {
+                            // Re-tap an already-active player widget → open Music/Spotify.
+                            if registry.activePluginID == plugin.id,
+                               let opener = plugin as? any PlayerAppOpening {
+                                opener.openPlayerApp()
+                            } else {
+                                registry.activePluginID = plugin.id
+                            }
                         }
                     }
+                    Spacer(minLength: 8)
+                    TrayIconButton(
+                        systemImage: "gearshape.fill",
+                        displayName: "Settings",
+                        isActive: false
+                    ) {
+                        NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
+                    }
                 }
-                Spacer(minLength: 0)
-                TrayIconButton(
-                    systemImage: "gearshape.fill",
-                    displayName: "Settings",
-                    isActive: false
-                ) {
-                    NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
-                }
+                .padding(.horizontal, NotchTheme.spaceMD)
             }
-            .padding(.horizontal, NotchTheme.spaceMD)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .frame(height: 38)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
 
             if let active = registry.activePlugin {
-                active.expandedView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, NotchTheme.spaceMD)
-                    .padding(.bottom, 12)
+                // Vertical scroll bar for widget content that exceeds the short expanded panel.
+                NotchScrollView(axes: .vertical) {
+                    active.expandedView()
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, NotchTheme.spaceMD)
+                        .padding(.bottom, 12)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

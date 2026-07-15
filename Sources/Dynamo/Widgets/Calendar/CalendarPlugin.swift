@@ -181,24 +181,23 @@ private struct ExpandedCalendarView: View {
                         .font(NotchTheme.body)
                         .foregroundStyle(NotchTheme.textTertiary)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                            if !plugin.dueReminders.isEmpty {
-                                Text("Reminders")
-                                    .font(NotchTheme.micro.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                                ForEach(plugin.dueReminders) { reminder in
-                                    reminderRow(reminder)
-                                }
+                    // Host `NotchScrollView` provides the scrollbar — avoid nested ScrollViews.
+                    VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+                        if !plugin.dueReminders.isEmpty {
+                            Text("Reminders")
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                            ForEach(plugin.dueReminders) { reminder in
+                                reminderRow(reminder)
                             }
-                            ForEach(groupedDays, id: \.dayStart) { group in
-                                Text(dayLabel(group.dayStart))
-                                    .font(NotchTheme.micro.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                                    .padding(.top, 2)
-                                ForEach(group.events) { event in
-                                    eventRow(event)
-                                }
+                        }
+                        ForEach(groupedDays, id: \.dayStart) { group in
+                            Text(dayLabel(group.dayStart))
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                                .padding(.top, 2)
+                            ForEach(group.events) { event in
+                                eventRow(event)
                             }
                         }
                     }

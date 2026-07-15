@@ -87,11 +87,10 @@ private struct ExpandedClipboardView: View {
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textTertiary)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(plugin.store.history) { item in
-                            historyRow(item)
-                        }
+                // Host `NotchScrollView` provides the scrollbar.
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(plugin.store.history) { item in
+                        historyRow(item)
                     }
                 }
             }
