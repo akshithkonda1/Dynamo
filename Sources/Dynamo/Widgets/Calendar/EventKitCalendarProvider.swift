@@ -1,8 +1,10 @@
+import AppKit
 import EventKit
 import Foundation
 
-/// EventKit-backed calendar + reminders source. Branches on macOS 14 full-access
-/// APIs and falls back to the legacy request on macOS 13.
+/// EventKit-backed calendar + reminders source — reads **your** calendars
+/// (iCloud, Exchange, Google via Calendar.app, local, etc.) the same way the
+/// system Calendar app does.
 @MainActor
 final class EventKitCalendarProvider: CalendarProvider {
     private(set) var authorizationState: CalendarAuthState = .notDetermined
@@ -13,22 +15,40 @@ final class EventKitCalendarProvider: CalendarProvider {
     private let store = EKEventStore()
     private var timer: Timer?
     private var remindersAuthorized = false
+    private var changeObserver: NSObjectProtocol?
 
     func start() {
         updateAuthState()
         if authorizationState == .authorized {
             refresh()
         }
+        // Live updates when the user edits Calendar.app / iCloud syncs.
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: store,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
+        }
+        if let timer {
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let changeObserver {
+            NotificationCenter.default.removeObserver(changeObserver)
+            self.changeObserver = nil
+        }
     }
 
     func requestAccess() async {
@@ -41,7 +61,6 @@ final class EventKitCalendarProvider: CalendarProvider {
             }
             authorizationState = eventsGranted ? .authorized : .denied
 
-            // Reminders are a separate grant — best-effort; calendar still works without them.
             if #available(macOS 14.0, *) {
                 remindersAuthorized = (try? await store.requestFullAccessToReminders()) ?? false
             } else {
@@ -69,11 +88,20 @@ final class EventKitCalendarProvider: CalendarProvider {
         }
 
         let start = Date()
-        let end = Calendar.current.date(byAdding: .day, value: 3, to: start) ?? start.addingTimeInterval(259_200)
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        // Look further ahead so "your week" feels complete.
+        let end = Calendar.current.date(byAdding: .day, value: 14, to: start)
+            ?? start.addingTimeInterval(14 * 86_400)
+
+        // All calendars the user has enabled in Calendar.app (nil = all).
+        let calendars = store.calendars(for: .event)
+        let predicate = store.predicateForEvents(
+            withStart: start,
+            end: end,
+            calendars: calendars.isEmpty ? nil : calendars
+        )
         let events = store.events(matching: predicate)
             .sorted { $0.startDate < $1.startDate }
-            .prefix(8)
+            .prefix(24)
             .map { event -> CalendarEventItem in
                 var color: CodableColor?
                 if let cg = event.calendar.cgColor,
@@ -86,18 +114,49 @@ final class EventKitCalendarProvider: CalendarProvider {
                         alpha: comps.count > 3 ? Double(comps[3]) : 1
                     )
                 }
+                let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return CalendarEventItem(
                     id: event.eventIdentifier ?? UUID().uuidString,
-                    title: event.title ?? "Untitled",
+                    title: event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled",
                     start: event.startDate,
                     end: event.endDate,
                     calendarColor: color,
-                    isAllDay: event.isAllDay
+                    isAllDay: event.isAllDay,
+                    calendarName: event.calendar.title,
+                    location: (location?.isEmpty == false) ? location : nil
                 )
             }
         upcoming = Array(events)
         refreshReminders()
         onChange?()
+    }
+
+    func openEvent(id: String) {
+        // Prefer deep-link into Calendar.app for this event.
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        if let url = URL(string: "ical://ekevent/\(encoded)"),
+           NSWorkspace.shared.open(url) {
+            return
+        }
+        // Fallback: show the day in Calendar.
+        if let event = store.event(withIdentifier: id) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd"
+            let day = formatter.string(from: event.startDate)
+            if let url = URL(string: "ical://\(day)") {
+                NSWorkspace.shared.open(url)
+                return
+            }
+        }
+        openCalendarApp()
+    }
+
+    func openCalendarApp() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+        }
     }
 
     private func refreshReminders() {
@@ -111,7 +170,6 @@ final class EventKitCalendarProvider: CalendarProvider {
             ending: end,
             calendars: nil
         )
-        // EventKit reminders fetch is completion-handler based.
         store.fetchReminders(matching: predicate) { [weak self] reminders in
             Task { @MainActor in
                 guard let self else { return }
@@ -121,7 +179,6 @@ final class EventKitCalendarProvider: CalendarProvider {
                         guard let components = reminder.dueDateComponents,
                               let due = Calendar.current.date(from: components)
                         else { return nil }
-                        // Only surface items due within the next day or already overdue by ≤1h.
                         guard due.timeIntervalSince(now) <= 24 * 60 * 60,
                               due.timeIntervalSince(now) > -60 * 60
                         else { return nil }
@@ -144,8 +201,10 @@ final class EventKitCalendarProvider: CalendarProvider {
         if #available(macOS 14.0, *) {
             status = EKEventStore.authorizationStatus(for: .event)
             switch status {
-            case .fullAccess, .writeOnly:
-                authorizationState = (status == .fullAccess) ? .authorized : .denied
+            case .fullAccess:
+                authorizationState = .authorized
+            case .writeOnly:
+                authorizationState = .denied
             case .authorized:
                 authorizationState = .authorized
             case .notDetermined:
@@ -175,4 +234,8 @@ final class EventKitCalendarProvider: CalendarProvider {
             remindersAuthorized = (status == .authorized)
         }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

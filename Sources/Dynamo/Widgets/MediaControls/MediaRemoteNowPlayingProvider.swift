@@ -241,11 +241,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     /// Pick the richest non-empty source. Prefer playing over paused when tied.
+    /// Merge artwork from any candidate that shares the same track identity.
     private func publishBest() {
         let scripted = AppleScriptMedia.shared.currentInfo()
         let candidates = [latestMRInfo, latestHelperInfo, scripted].compactMap { $0 }.filter { !Self.isEmpty($0) }
 
-        guard let best = Self.pickBest(from: candidates) else {
+        guard var best = Self.pickBest(from: candidates) else {
             emptyStreak += 1
             // Don't flash "Not Playing" on a single empty poll (players lag after skip).
             if emptyStreak >= 3 {
@@ -253,8 +254,28 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             }
             return
         }
+        // If the winner lacks art, steal art from another source for the same track.
+        if best.artworkData == nil {
+            let key = Self.trackKey(best)
+            if let art = candidates.first(where: { Self.trackKey($0) == key && $0.artworkData != nil })?.artworkData {
+                best.artworkData = art
+            } else if let art = candidates.first(where: { $0.artworkData != nil })?.artworkData,
+                      candidates.contains(where: { Self.trackKey($0) == key }) {
+                best.artworkData = art
+            }
+        }
+        // Keep previous art for a beat when the same track re-publishes without art.
+        if best.artworkData == nil,
+           Self.trackKey(best) == Self.trackKey(current),
+           let prev = current.artworkData {
+            best.artworkData = prev
+        }
         emptyStreak = 0
         publish(best)
+    }
+
+    private static func trackKey(_ info: NowPlayingInfo) -> String {
+        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)"
     }
 
     private static func pickBest(from candidates: [NowPlayingInfo]) -> NowPlayingInfo? {
@@ -263,8 +284,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         let playing = candidates.filter(\.isPlaying)
         let pool = playing.isEmpty ? candidates : playing
         return pool.max { a, b in
-            let aScore = (a.artworkData != nil ? 2 : 0) + (a.artist.isEmpty ? 0 : 1)
-            let bScore = (b.artworkData != nil ? 2 : 0) + (b.artist.isEmpty ? 0 : 1)
+            let aScore = (a.artworkData != nil ? 4 : 0) + (a.isPlaying ? 2 : 0) + (a.artist.isEmpty ? 0 : 1)
+            let bScore = (b.artworkData != nil ? 4 : 0) + (b.isPlaying ? 2 : 0) + (b.artist.isEmpty ? 0 : 1)
             return aScore < bScore
         }
     }

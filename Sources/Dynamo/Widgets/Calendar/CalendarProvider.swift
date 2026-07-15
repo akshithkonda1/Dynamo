@@ -7,6 +7,9 @@ struct CalendarEventItem: Identifiable, Equatable {
     let end: Date
     let calendarColor: CodableColor?
     let isAllDay: Bool
+    /// Name of the EKCalendar this event belongs to (e.g. "Work", "Home").
+    let calendarName: String
+    let location: String?
 }
 
 struct ReminderItem: Identifiable, Equatable {
@@ -41,8 +44,14 @@ protocol CalendarProvider: AnyObject {
     func stop()
     func requestAccess() async
     func refresh()
+    /// Open the event in the system Calendar app when possible.
+    func openEvent(id: String)
+    /// Open Calendar focused on today.
+    func openCalendarApp()
 }
 
 extension CalendarProvider {
     var dueReminders: [ReminderItem] { [] }
+    func openEvent(id: String) {}
+    func openCalendarApp() {}
 }
