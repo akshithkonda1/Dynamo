@@ -54,6 +54,11 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     }
 
     func refresh() {
+        // Optimistic seed from last successful FDA/calendar read.
+        if PermissionsStore.shared.isGranted(.fullDiskAccess), authorizationState != .authorized {
+            authorizationState = .authorized
+        }
+
         let url = Self.databaseURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             authorizationState = .denied
@@ -67,6 +72,7 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         // Copy main db + WAL + SHM for a consistent read when possible.
         guard let snapshot = makeSnapshot(of: url) else {
             authorizationState = .denied
+            PermissionsStore.shared.recordDenied(.fullDiskAccess)
             upcoming = []
             dueReminders = []
             onChange?()
@@ -77,6 +83,7 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             let events = try queryUpcoming(from: snapshot)
             upcoming = events
             authorizationState = .authorized
+            PermissionsStore.shared.recordGranted(.fullDiskAccess)
             dueReminders = [] // Reminders live in a different store; keep EventKit-free for now.
         } catch {
             NSLog("Dynamo Calendar DB read failed: %@", error.localizedDescription)

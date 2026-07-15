@@ -22,7 +22,12 @@ final class MessagesSendService {
         """
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
-        return error == nil
+        if error == nil {
+            PermissionsStore.shared.recordGranted(.automationMessages)
+            return true
+        }
+        // Don't mark denied on transient failures (Messages not running, bad chat id).
+        return false
     }
 
     /// Quotes and escapes a string for safe interpolation into an AppleScript

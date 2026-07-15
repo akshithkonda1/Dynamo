@@ -332,13 +332,41 @@ final class AppleScriptMedia {
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else { return nil }
         let result = script.executeAndReturnError(&error)
-        if error != nil { return nil }
+        if error != nil {
+            rememberAutomationFailure(for: source)
+            return nil
+        }
+        rememberAutomationSuccess(for: source)
         return result.stringValue
     }
 
     private func run(_ source: String) {
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)
+        if error != nil {
+            rememberAutomationFailure(for: source)
+        } else {
+            rememberAutomationSuccess(for: source)
+        }
+    }
+
+    private func rememberAutomationSuccess(for source: String) {
+        if source.contains(Self.musicBundle) || source.contains("Music") {
+            PermissionsStore.shared.recordGranted(.automationMusic)
+        }
+        if source.contains(Self.spotifyBundle) || source.contains("Spotify") {
+            PermissionsStore.shared.recordGranted(.automationSpotify)
+        }
+    }
+
+    private func rememberAutomationFailure(for source: String) {
+        // Only mark denied when the error is likely a TCC denial, not "app not running".
+        if source.contains(Self.musicBundle) || source.contains("Music") {
+            if PermissionsStore.shared.status(for: .automationMusic) == .notDetermined {
+                // Leave notDetermined until OS probe / success.
+                return
+            }
+        }
     }
 }
 

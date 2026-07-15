@@ -63,9 +63,30 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
     }
 
     func recheckAccess() {
-        accessState = FileManager.default.isReadableFile(atPath: Self.databasePath)
-            ? .granted
-            : .needsFullDiskAccess
+        // Prefer a real open probe; also seed from remembered FDA grant.
+        let path = Self.databasePath
+        let readable: Bool
+        if let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) {
+            try? handle.close()
+            readable = true
+        } else {
+            readable = FileManager.default.isReadableFile(atPath: path)
+        }
+
+        if readable {
+            accessState = .granted
+            PermissionsStore.shared.recordGranted(.fullDiskAccess)
+        } else if PermissionsStore.shared.isGranted(.fullDiskAccess),
+                  FileManager.default.fileExists(atPath: path) {
+            // Remembered grant but open failed this tick (timing) — keep granted UI,
+            // next poll will correct if still blocked.
+            accessState = .granted
+        } else {
+            accessState = .needsFullDiskAccess
+            if FileManager.default.fileExists(atPath: path) {
+                PermissionsStore.shared.recordDenied(.fullDiskAccess)
+            }
+        }
     }
 
     func selectConversation(guid: String, rowID: Int64) {
