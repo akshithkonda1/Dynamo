@@ -15,8 +15,6 @@ final class NotchPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        // Above the menu bar chrome so hover isn't stolen by system UI.
-        level = .statusBar
         collectionBehavior = [
             .canJoinAllSpaces,
             .stationary,
@@ -30,7 +28,9 @@ final class NotchPanel: NSPanel {
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
         isReleasedWhenClosed = false
-        // Don't let the system auto-reposition this as a normal window.
+        // Floating + statusBar level: set floating first, then pin level so we
+        // stay above menu-bar chrome (not a normal floating window layer).
         isFloatingPanel = true
+        level = .statusBar
     }
 }
