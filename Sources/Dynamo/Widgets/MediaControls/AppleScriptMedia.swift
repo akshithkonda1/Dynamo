@@ -55,19 +55,41 @@ final class AppleScriptMedia {
 
     // MARK: - Transport
 
+    /// Absolute play/pause (not `playpause` toggle) so dual-firing or stale
+    /// state can't cancel itself out.
+    func setPlaying(_ shouldPlay: Bool) {
+        guard let player = preferredPlayer() ?? fallbackPlayer() else { return }
+        switch player {
+        case .music:
+            run(shouldPlay
+                ? "tell application id \"\(Self.musicBundle)\" to play"
+                : "tell application id \"\(Self.musicBundle)\" to pause")
+        case .spotify:
+            run(shouldPlay
+                ? "tell application id \"\(Self.spotifyBundle)\" to play"
+                : "tell application id \"\(Self.spotifyBundle)\" to pause")
+        }
+    }
+
     func togglePlayPause() {
-        switch preferredPlayer() {
+        // Fallback when caller doesn't know desired state — still prefer absolute
+        // commands from current player state when we can read it.
+        if let info = currentInfo() {
+            setPlaying(!info.isPlaying)
+            return
+        }
+        guard let player = preferredPlayer() ?? fallbackPlayer() else { return }
+        switch player {
         case .music:
             run("tell application id \"\(Self.musicBundle)\" to playpause")
         case .spotify:
             run("tell application id \"\(Self.spotifyBundle)\" to playpause")
-        case .none:
-            if isRunning(bundleID: Self.musicBundle) {
-                run("tell application id \"\(Self.musicBundle)\" to playpause")
-            } else if isRunning(bundleID: Self.spotifyBundle) {
-                run("tell application id \"\(Self.spotifyBundle)\" to playpause")
-            }
         }
+    }
+
+    /// True when Music or Spotify is the intended transport target.
+    var hasScriptablePlayer: Bool {
+        preferredPlayer() != nil || fallbackPlayer() != nil
     }
 
     func nextTrack() {

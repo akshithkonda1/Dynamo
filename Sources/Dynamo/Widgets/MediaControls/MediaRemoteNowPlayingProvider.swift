@@ -109,28 +109,46 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     // MARK: - Transport
 
     func togglePlayPause() {
-        // Optimistic UI flip so the button feels instant.
+        // Desired end state (absolute). Dual-firing MediaRemote *and* AppleScript
+        // `playpause` was toggling twice — play then immediately pause.
+        let wantPlaying = !current.isPlaying
         var optimistic = current
-        if optimistic.title != NowPlayingInfo.empty.title {
-            optimistic.isPlaying.toggle()
+        if !Self.isEmpty(optimistic) {
+            optimistic.isPlaying = wantPlaying
             publish(optimistic)
         }
-        _ = send(MRCommand.togglePlayPause)
-        AppleScriptMedia.shared.togglePlayPause()
-        scheduleRefresh(after: 0.2)
-        scheduleRefresh(after: 0.6)
+
+        let scripted = AppleScriptMedia.shared
+        if scripted.hasScriptablePlayer {
+            // Music / Spotify: one absolute play/pause command only.
+            scripted.setPlaying(wantPlaying)
+        } else {
+            // Browser / other now-playing: MediaRemote toggle only.
+            _ = send(MRCommand.togglePlayPause)
+        }
+        scheduleRefresh(after: 0.15)
+        scheduleRefresh(after: 0.45)
+        scheduleRefresh(after: 1.0)
     }
 
     func nextTrack() {
-        _ = send(MRCommand.nextTrack)
-        AppleScriptMedia.shared.nextTrack()
+        let scripted = AppleScriptMedia.shared
+        if scripted.hasScriptablePlayer {
+            scripted.nextTrack()
+        } else {
+            _ = send(MRCommand.nextTrack)
+        }
         scheduleRefresh(after: 0.25)
         scheduleRefresh(after: 0.7)
     }
 
     func previousTrack() {
-        _ = send(MRCommand.previousTrack)
-        AppleScriptMedia.shared.previousTrack()
+        let scripted = AppleScriptMedia.shared
+        if scripted.hasScriptablePlayer {
+            scripted.previousTrack()
+        } else {
+            _ = send(MRCommand.previousTrack)
+        }
         scheduleRefresh(after: 0.25)
         scheduleRefresh(after: 0.7)
     }

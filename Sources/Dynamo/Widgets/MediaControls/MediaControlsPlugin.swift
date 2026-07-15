@@ -299,32 +299,45 @@ private struct ExpandedMediaView: View {
 
     private var transportRow: some View {
         HStack(spacing: 14) {
-            transportButton("backward.fill", size: 15, diameter: 38) { plugin.previousTrack() }
+            transportButton(
+                "backward.fill",
+                accessibility: "Previous",
+                size: 15,
+                diameter: 38
+            ) { plugin.previousTrack() }
             transportButton(
                 plugin.info.isPlaying ? "pause.fill" : "play.fill",
+                accessibility: plugin.info.isPlaying ? "Pause" : "Play",
                 size: 18,
                 diameter: 44,
                 prominent: true
             ) { plugin.togglePlayPause() }
-            transportButton("forward.fill", size: 15, diameter: 38) { plugin.nextTrack() }
+            transportButton(
+                "forward.fill",
+                accessibility: "Next",
+                size: 15,
+                diameter: 38
+            ) { plugin.nextTrack() }
         }
     }
 
     private func transportButton(
         _ systemName: String,
+        accessibility: String,
         size: CGFloat,
         diameter: CGFloat,
         prominent: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(NotchTheme.textPrimary)
-            .frame(width: diameter, height: diameter)
-            .background(Circle().fill(prominent ? NotchTheme.chipFillActive : NotchTheme.chipFill))
-            .contentShape(Circle())
-            .onTapGesture(perform: action)
-            .accessibilityLabel(systemName)
-            .accessibilityAddTraits(.isButton)
+        // Real `Button` + shared style so first-clicks fire on the nonactivating
+        // notch panel (plain Image + onTapGesture often eats the first press).
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
+        }
+        .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
+        .help(accessibility)
+        .accessibilityLabel(accessibility)
     }
 }
