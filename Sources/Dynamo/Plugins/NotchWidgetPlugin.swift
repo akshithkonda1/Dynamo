@@ -30,3 +30,10 @@ extension NotchWidgetPlugin {
     func start() {}
     func stop() {}
 }
+
+/// Optional: widget can open an external player app when its tray icon is
+/// re-tapped while already selected (e.g. Media → Music / Spotify).
+@MainActor
+protocol PlayerAppOpening: AnyObject {
+    func openPlayerApp()
+}

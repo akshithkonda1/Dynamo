@@ -2,33 +2,38 @@ import AppKit
 import Foundation
 
 /// Reliable Music / Spotify control and now-playing via AppleScript.
-/// Used when private MediaRemote is empty or transport commands no-op
-/// (common on macOS 15.4+ for non-`com.apple.*` hosts).
 @MainActor
 final class AppleScriptMedia {
     static let shared = AppleScriptMedia()
 
-    private static let musicBundle = "com.apple.Music"
-    private static let spotifyBundle = "com.spotify.client"
-    /// Field separator that won't appear in track metadata.
+    static let musicBundle = "com.apple.Music"
+    static let spotifyBundle = "com.spotify.client"
     private static let sep = "\u{001F}"
 
-    /// Cache artwork by track key so we don't re-pull JPEG data every poll.
     private var artworkCache: [String: Data] = [:]
     private var lastArtworkKey: String?
+    private var playlistCache: [String] = []
+    private var playlistCacheAt: Date?
 
     private init() {}
 
+    enum Player {
+        case music
+        case spotify
+    }
+
     // MARK: - Now playing
 
-    /// Prefer the player that is actively playing; otherwise any paused track.
-    /// Includes album art when available (Music artwork / Spotify artwork URL).
     func currentInfo() -> NowPlayingInfo? {
         let music = infoFromMusic()
         let spotify = infoFromSpotify()
 
-        if let music, music.isPlaying { return music.withArtwork(fetchArtworkIfNeeded(for: music, player: .music)) }
-        if let spotify, spotify.isPlaying { return musicWithSpotifyArt(spotify) }
+        if let music, music.isPlaying {
+            return music.withArtwork(fetchArtworkIfNeeded(for: music, player: .music))
+        }
+        if let spotify, spotify.isPlaying {
+            return musicWithSpotifyArt(spotify)
+        }
         if let music, music.title != NowPlayingInfo.empty.title {
             return music.withArtwork(fetchArtworkIfNeeded(for: music, player: .music))
         }
@@ -38,7 +43,6 @@ final class AppleScriptMedia {
         return nil
     }
 
-    /// Which scriptable player should receive transport commands.
     func preferredPlayer() -> Player? {
         let music = infoFromMusic()
         let spotify = infoFromSpotify()
@@ -47,11 +51,6 @@ final class AppleScriptMedia {
         if isRunning(bundleID: Self.musicBundle) { return .music }
         if isRunning(bundleID: Self.spotifyBundle) { return .spotify }
         return nil
-    }
-
-    enum Player {
-        case music
-        case spotify
     }
 
     // MARK: - Transport
@@ -87,6 +86,89 @@ final class AppleScriptMedia {
         }
     }
 
+    // MARK: - Open app / reveal track
+
+    /// Activate Music or Spotify and reveal the current track (and its playlist context in Music).
+    func openConnectedApp() {
+        switch preferredPlayer() ?? fallbackPlayer() {
+        case .music:
+            // reveal current track jumps Library/playlist UI to that song.
+            run("""
+            tell application id "\(Self.musicBundle)"
+                activate
+                try
+                    reveal current track
+                end try
+            end tell
+            """)
+        case .spotify:
+            run("""
+            tell application id "\(Self.spotifyBundle)"
+                activate
+            end tell
+            """)
+        case .none:
+            // Default to Music if nothing is known.
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.musicBundle) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    // MARK: - Playlists (Music)
+
+    /// User playlists from Music.app (cached ~30s).
+    func musicPlaylists() -> [String] {
+        guard isRunning(bundleID: Self.musicBundle) else { return playlistCache }
+        if let at = playlistCacheAt, Date().timeIntervalSince(at) < 30, !playlistCache.isEmpty {
+            return playlistCache
+        }
+        let script = """
+        tell application id "\(Self.musicBundle)"
+            try
+                set names to name of every user playlist
+                set AppleScript's text item delimiters to "\(Self.sep)"
+                set out to names as text
+                set AppleScript's text item delimiters to ""
+                return out
+            on error
+                return ""
+            end try
+        end tell
+        """
+        guard let raw = runReturning(script), !raw.isEmpty else {
+            return playlistCache
+        }
+        let names = raw.components(separatedBy: Self.sep)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "Music" && $0 != "Music Videos" }
+        playlistCache = names
+        playlistCacheAt = Date()
+        return names
+    }
+
+    func playPlaylist(named name: String) {
+        let escaped = name.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        switch preferredPlayer() ?? fallbackPlayer() ?? .music {
+        case .music:
+            run("""
+            tell application id "\(Self.musicBundle)"
+                try
+                    play user playlist "\(escaped)"
+                on error
+                    try
+                        play playlist "\(escaped)"
+                    end try
+                end try
+            end tell
+            """)
+        case .spotify:
+            // Spotify has no stable "play playlist by name" without URIs.
+            run("tell application id \"\(Self.spotifyBundle)\" to activate")
+        }
+    }
+
     private func fallbackPlayer() -> Player? {
         if isRunning(bundleID: Self.musicBundle) { return .music }
         if isRunning(bundleID: Self.spotifyBundle) { return .spotify }
@@ -107,13 +189,17 @@ final class AppleScriptMedia {
                 set a to artist of current track
                 set al to album of current track
                 set p to (st is "playing")
-                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p
+                set pl to ""
+                try
+                    set pl to name of current playlist
+                end try
+                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p & "\(s)" & pl
             on error
                 return ""
             end try
         end tell
         """
-        return parse(runReturning(script))
+        return parse(runReturning(script), source: .music)
     }
 
     private func infoFromSpotify() -> NowPlayingInfo? {
@@ -128,13 +214,13 @@ final class AppleScriptMedia {
                 set a to artist of current track
                 set al to album of current track
                 set p to (st is "playing")
-                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p
+                return t & "\(s)" & a & "\(s)" & al & "\(s)" & p & "\(s)" & ""
             on error
                 return ""
             end try
         end tell
         """
-        return parse(runReturning(script))
+        return parse(runReturning(script), source: .spotify)
     }
 
     private func musicWithSpotifyArt(_ info: NowPlayingInfo) -> NowPlayingInfo {
@@ -150,8 +236,6 @@ final class AppleScriptMedia {
     private func fetchArtworkIfNeeded(for info: NowPlayingInfo, player: Player) -> Data? {
         let key = trackKey(info)
         if let cached = artworkCache[key] { return cached }
-
-        // Drop previous track's art from memory if we jumped tracks.
         if let last = lastArtworkKey, last != key {
             artworkCache.removeValue(forKey: last)
         }
@@ -159,10 +243,8 @@ final class AppleScriptMedia {
 
         let data: Data?
         switch player {
-        case .music:
-            data = fetchMusicArtworkData()
-        case .spotify:
-            data = fetchSpotifyArtworkData()
+        case .music: data = fetchMusicArtworkData()
+        case .spotify: data = fetchSpotifyArtworkData()
         }
         if let data, !data.isEmpty {
             artworkCache[key] = data
@@ -171,7 +253,6 @@ final class AppleScriptMedia {
         return nil
     }
 
-    /// Music exposes artwork as a JPEG picture descriptor via AppleScript.
     private func fetchMusicArtworkData() -> Data? {
         let script = """
         tell application id "\(Self.musicBundle)"
@@ -187,8 +268,6 @@ final class AppleScriptMedia {
         guard let appleScript = NSAppleScript(source: script) else { return nil }
         let result = appleScript.executeAndReturnError(&error)
         if error != nil { return nil }
-
-        // JPEG picture / TIFF / raw data — `data` is non-optional on NSAppleEventDescriptor.
         let payload = result.data
         if !payload.isEmpty { return payload }
         if result.numberOfItems > 0, let item = result.atIndex(1) {
@@ -198,8 +277,6 @@ final class AppleScriptMedia {
         return nil
     }
 
-    /// Spotify exposes an HTTPS artwork URL — download async and fill the cache
-    /// for the next poll (never block the main actor with a semaphore).
     private func fetchSpotifyArtworkData() -> Data? {
         let script = """
         tell application id "\(Self.spotifyBundle)"
@@ -216,12 +293,9 @@ final class AppleScriptMedia {
               let url = URL(string: urlString)
         else { return nil }
 
-        // Kick off download; return nil this pass — cache hits on the next refresh.
         let key = lastArtworkKey
         Task { [weak self] in
-            let data = await Task.detached {
-                try? Data(contentsOf: url)
-            }.value
+            let data = await Task.detached { try? Data(contentsOf: url) }.value
             guard let data, !data.isEmpty else { return }
             await MainActor.run {
                 guard let self, let key, self.lastArtworkKey == key else { return }
@@ -231,18 +305,21 @@ final class AppleScriptMedia {
         return nil
     }
 
-    private func parse(_ raw: String?) -> NowPlayingInfo? {
+    private func parse(_ raw: String?, source: MediaPlayerApp) -> NowPlayingInfo? {
         guard let raw, !raw.isEmpty else { return nil }
         let parts = raw.components(separatedBy: Self.sep)
         guard parts.count >= 4 else { return nil }
         let title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
+        let playlist = parts.count >= 5 ? parts[4].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         return NowPlayingInfo(
             title: title,
             artist: parts[1],
             album: parts[2],
             isPlaying: parts[3].lowercased().contains("true"),
-            artworkData: nil
+            artworkData: nil,
+            playlistName: playlist.isEmpty ? nil : playlist,
+            sourceApp: source
         )
     }
 

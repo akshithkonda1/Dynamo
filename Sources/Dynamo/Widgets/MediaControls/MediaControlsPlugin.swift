@@ -4,18 +4,18 @@ import SwiftUI
 /// Media controls widget. Talks only to `NowPlayingProvider` — never to a
 /// concrete data source. Swapping mock ↔ real happens at construction time.
 @MainActor
-final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding {
+final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding, PlayerAppOpening {
     let id = "media"
     let displayName = "Media"
     let systemImage = "music.note"
 
     @Published private(set) var info: NowPlayingInfo = .empty
+    @Published private(set) var playlists: [String] = []
+    @Published var showPlaylistPicker = false
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: NowPlayingProvider
     private var lastTrackKey: String
-    /// The onChange right after (re)start reports whatever's already playing —
-    /// that's not a "track change" worth a peek, just Dynamo catching up.
     private var suppressNextPeek = true
 
     init(provider: NowPlayingProvider? = nil) {
@@ -32,6 +32,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         suppressNextPeek = true
         provider.start()
         info = provider.current
+        refreshPlaylists()
     }
 
     func stop() {
@@ -69,29 +70,54 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     func nextTrack() { provider.nextTrack() }
     func previousTrack() { provider.previousTrack() }
 
+    /// Open Music / Spotify and reveal the current track / playlist context.
+    func openConnectedApp() {
+        provider.openConnectedApp()
+    }
+
+    /// Tray re-tap → jump to the connected player app.
+    func openPlayerApp() {
+        openConnectedApp()
+    }
+
+    func refreshPlaylists() {
+        playlists = provider.availablePlaylists()
+    }
+
+    func playPlaylist(_ name: String) {
+        provider.playPlaylist(named: name)
+        showPlaylistPicker = false
+    }
+
     // MARK: - NotchAmbientProviding
 
-    /// Show the ambient art + visualizer only while something is actually playing.
     var isAmbientActive: Bool { info.isPlaying }
     func ambientView() -> AnyView { AnyView(AmbientMediaView(plugin: self)) }
 }
 
-// MARK: - Views
+// MARK: - Ambient (collapsed)
 
-/// Ambient content for the collapsed notch: album art hugging the leading edge,
-/// a dancing-bars visualizer on the trailing edge, camera gap in between.
 private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
 
     var body: some View {
         HStack(spacing: 0) {
             artThumb
+                .onTapGesture { plugin.openConnectedApp() }
+                .help("Open \(playerLabel)")
             Spacer(minLength: 0)
             MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12)
                 .fixedSize()
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var playerLabel: String {
+        switch plugin.info.sourceApp {
+        case .spotify: return "Spotify"
+        case .music, .other, .none: return "Music"
+        }
     }
 
     @ViewBuilder
@@ -103,6 +129,7 @@ private struct AmbientMediaView: View {
                 .aspectRatio(1, contentMode: .fill)
                 .frame(width: 20, height: 20)
                 .clipShape(shape)
+                .contentShape(shape)
         } else {
             shape
                 .fill(NotchTheme.chipFill)
@@ -112,9 +139,12 @@ private struct AmbientMediaView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
                 )
+                .contentShape(shape)
         }
     }
 }
+
+// MARK: - Expanded
 
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
@@ -126,22 +156,37 @@ private struct ExpandedMediaView: View {
     var body: some View {
         HStack(alignment: .center, spacing: NotchTheme.spaceLG) {
             artwork
+                .onTapGesture { plugin.openConnectedApp() }
+                .help("Open in \(playerAppName)")
+
             VStack(alignment: .leading, spacing: 5) {
                 header
                 Text(hasTrack ? plugin.info.title : "Nothing playing")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
+                    .onTapGesture { plugin.openConnectedApp() }
                 Text(subtitle)
                     .font(NotchTheme.body)
                     .foregroundStyle(NotchTheme.textSecondary)
                     .lineLimit(1)
+
+                playlistRow
+
                 Spacer(minLength: NotchTheme.spaceSM)
                 transportRow
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .onAppear { plugin.refreshPlaylists() }
+    }
+
+    private var playerAppName: String {
+        switch plugin.info.sourceApp {
+        case .spotify: return "Spotify"
+        case .music, .other, .none: return "Music"
+        }
     }
 
     private var subtitle: String {
@@ -161,28 +206,85 @@ private struct ExpandedMediaView: View {
                 MusicBarsView(isPlaying: true, maxHeight: 11)
                     .fixedSize()
             }
+            Spacer(minLength: 0)
+            // Icon that opens Music / Spotify
+            Image(systemName: playerAppName == "Spotify" ? "music.note.list" : "music.note.house")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NotchTheme.textSecondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(NotchTheme.chipFill))
+                .contentShape(Circle())
+                .onTapGesture { plugin.openConnectedApp() }
+                .help("Open \(playerAppName)")
+        }
+    }
+
+    @ViewBuilder
+    private var playlistRow: some View {
+        if hasTrack || !plugin.playlists.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Text(plugin.info.playlistName ?? "No playlist")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if !plugin.playlists.isEmpty {
+                    Menu {
+                        ForEach(plugin.playlists, id: \.self) { name in
+                            Button(name) { plugin.playPlaylist(name) }
+                        }
+                    } label: {
+                        Text("Switch")
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(NotchTheme.chipFill))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Play a different Music playlist")
+                }
+            }
+            .onTapGesture {
+                // Tapping the playlist name also opens the player at context.
+                plugin.openConnectedApp()
+            }
         }
     }
 
     @ViewBuilder
     private var artwork: some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(1, contentMode: .fill)
-                .frame(width: 104, height: 104)
-                .clipShape(shape)
-                .shadow(color: .black.opacity(0.28), radius: 9, y: 3)
-        } else {
-            shape
-                .fill(NotchTheme.chipFill)
-                .frame(width: 104, height: 104)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 30))
-                        .foregroundStyle(NotchTheme.textTertiary)
-                )
+        Group {
+            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: 104, height: 104)
+                    .clipShape(shape)
+                    .shadow(color: .black.opacity(0.28), radius: 9, y: 3)
+            } else {
+                shape
+                    .fill(NotchTheme.chipFill)
+                    .frame(width: 104, height: 104)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 30))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    )
+            }
+        }
+        .contentShape(shape)
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "arrow.up.right.square.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .shadow(radius: 2)
+                .padding(6)
         }
     }
 
@@ -206,8 +308,6 @@ private struct ExpandedMediaView: View {
         prominent: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        // Tap gesture first so transport works even when the notch panel is
-        // nonactivating / not yet key (SwiftUI Button can miss first click).
         Image(systemName: systemName)
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(NotchTheme.textPrimary)

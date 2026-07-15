@@ -135,6 +135,20 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         scheduleRefresh(after: 0.7)
     }
 
+    func openConnectedApp() {
+        AppleScriptMedia.shared.openConnectedApp()
+    }
+
+    func availablePlaylists() -> [String] {
+        AppleScriptMedia.shared.musicPlaylists()
+    }
+
+    func playPlaylist(named name: String) {
+        AppleScriptMedia.shared.playPlaylist(named: name)
+        scheduleRefresh(after: 0.4)
+        scheduleRefresh(after: 1.0)
+    }
+
     // MARK: - Framework
 
     private func loadFramework() {
@@ -264,6 +278,16 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 best.artworkData = art
             }
         }
+        // Prefer playlist / sourceApp from AppleScript when MR/helper omit them.
+        if best.playlistName == nil {
+            best.playlistName = candidates.first(where: { $0.playlistName != nil })?.playlistName
+        }
+        if best.sourceApp == nil {
+            best.sourceApp = candidates.first(where: { $0.sourceApp != nil })?.sourceApp
+                ?? (AppleScriptMedia.shared.preferredPlayer().map {
+                    $0 == .music ? MediaPlayerApp.music : .spotify
+                })
+        }
         // Keep previous art for a beat when the same track re-publishes without art.
         if best.artworkData == nil,
            Self.trackKey(best) == Self.trackKey(current),
@@ -300,7 +324,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             artist: payload.artist,
             album: payload.album,
             isPlaying: payload.isPlaying,
-            artworkData: payload.artworkBase64.flatMap { Data(base64Encoded: $0) }
+            artworkData: payload.artworkBase64.flatMap { Data(base64Encoded: $0) },
+            playlistName: nil,
+            sourceApp: .other
         )
     }
 
@@ -337,7 +363,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             artist: artist,
             album: album,
             isPlaying: rate > 0,
-            artworkData: artwork
+            artworkData: artwork,
+            playlistName: nil,
+            sourceApp: .other
         )
     }
 

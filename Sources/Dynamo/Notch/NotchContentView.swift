@@ -66,7 +66,13 @@ struct NotchContentView: View {
                         displayName: plugin.displayName,
                         isActive: registry.activePluginID == plugin.id
                     ) {
-                        registry.activePluginID = plugin.id
+                        // Re-tap an already-active player widget → open Music/Spotify.
+                        if registry.activePluginID == plugin.id,
+                           let opener = plugin as? any PlayerAppOpening {
+                            opener.openPlayerApp()
+                        } else {
+                            registry.activePluginID = plugin.id
+                        }
                     }
                 }
                 Spacer(minLength: 0)

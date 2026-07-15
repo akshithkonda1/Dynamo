@@ -8,21 +8,20 @@ final class MockNowPlayingProvider: NowPlayingProvider {
         artist: "M83",
         album: "Hurry Up, We're Dreaming",
         isPlaying: true,
-        artworkData: nil
+        artworkData: nil,
+        playlistName: "Favorites",
+        sourceApp: .music
     )
     var onChange: ((NowPlayingInfo) -> Void)?
 
     private let catalog: [NowPlayingInfo] = [
-        NowPlayingInfo(title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", isPlaying: true, artworkData: nil),
-        NowPlayingInfo(title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", isPlaying: true, artworkData: nil),
-        NowPlayingInfo(title: "Weightless", artist: "Marconi Union", album: "Weightless", isPlaying: true, artworkData: nil)
+        NowPlayingInfo(title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music),
+        NowPlayingInfo(title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music),
+        NowPlayingInfo(title: "Weightless", artist: "Marconi Union", album: "Weightless", isPlaying: true, artworkData: nil, playlistName: "Sleep", sourceApp: .music)
     ]
     private var index = 0
 
-    func start() {
-        publish()
-    }
-
+    func start() { publish() }
     func stop() {}
 
     func togglePlayPause() {
@@ -46,7 +45,12 @@ final class MockNowPlayingProvider: NowPlayingProvider {
         publish()
     }
 
-    private func publish() {
-        onChange?(current)
+    func openConnectedApp() {}
+    func availablePlaylists() -> [String] { ["Favorites", "Sleep", "Driving"] }
+    func playPlaylist(named name: String) {
+        current.playlistName = name
+        publish()
     }
+
+    private func publish() { onChange?(current) }
 }
