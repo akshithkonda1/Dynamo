@@ -33,7 +33,7 @@ enum DynamoPermission: String, CaseIterable, Codable {
         case .fullDiskAccess: return "Calendar + Messages local databases"
         case .automationMusic: return "Play/pause, skip, cover art, playlists"
         case .automationSpotify: return "Play/pause, skip, cover art"
-        case .automationMessages: return "Send replies from the notch"
+        case .automationMessages: return "Legacy; replies now open Messages compose"
         }
     }
 }

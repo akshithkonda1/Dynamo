@@ -3,19 +3,14 @@ import SQLite3
 
 /// Reads recent iMessage/SMS conversations directly from Messages.app's own
 /// local SQLite database (`~/Library/Messages/chat.db`) — read-only,
-/// never written to. Sending replies goes through `MessagesSendService`
-/// (AppleScript driving Messages.app itself), never by inserting rows
-/// directly, which would be fragile and risk corrupting the user's real
-/// message history.
+/// never written to. Replies open a Messages compose window via
+/// `MessagesSendService` (share sheet / `imessage:` URL) — never by inserting
+/// rows into chat.db, and never via AppleScript Automation.
 ///
-/// **Two separate OS permissions, neither requestable in-app:**
-/// - **Full Disk Access** (System Settings → Privacy & Security → Full Disk
-///   Access) to read chat.db at all. There is no API to prompt for this —
-///   `accessState` reflects whether it's been granted by attempting a read,
-///   not by any permission callback.
-/// - **Automation** (System Settings → Privacy & Security → Automation), to
-///   let `MessagesSendService` send Apple Events to Messages.app. macOS
-///   prompts for this the first time a reply is actually sent.
+/// **Permission:** Full Disk Access (System Settings → Privacy & Security →
+/// Full Disk Access) to read chat.db. There is no API to prompt for this —
+/// `accessState` reflects a real open probe. Sending does **not** need
+/// Automation access.
 ///
 /// No message content is ever written to Dynamo's own storage
 /// (`AppSupportStore`) — conversations and messages are held only in memory
@@ -120,20 +115,20 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
         guard let guid = selectedChatGUID else { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        let ok = sendService.send(text: trimmed, chatGUID: guid)
-        if ok {
-            // Optimistic echo — the next poll reconciles with the real row
-            // once Messages.app actually writes it to chat.db.
-            messages.append(MessageBubbleItem(
-                id: "pending-\(UUID().uuidString)",
-                text: trimmed,
-                date: Date(),
-                isFromMe: true,
-                senderLabel: "Me"
-            ))
-            onChange?()
-        }
-        return ok
+
+        let conversation = conversations.first(where: { $0.id == guid })
+        let identifier = conversation?.chatIdentifier ?? guid
+        let isGroup = conversation?.isGroupChat ?? guid.contains(";+")
+
+        let outcome = sendService.send(
+            text: trimmed,
+            chatGUID: guid,
+            chatIdentifier: identifier,
+            isGroupChat: isGroup
+        )
+        // No optimistic bubble — compose may be cancelled. Next poll shows
+        // the real row once the user hits Send in Messages.
+        return outcome == .openedCompose
     }
 
     // MARK: - Reads
@@ -184,6 +179,7 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
             results.append(MessageConversationItem(
                 id: guid,
                 chatRowID: rowID,
+                chatIdentifier: chatIdentifier,
                 displayName: name,
                 lastMessagePreview: preview,
                 lastMessageDate: Self.date(fromAppleTimestamp: lastDateRaw),

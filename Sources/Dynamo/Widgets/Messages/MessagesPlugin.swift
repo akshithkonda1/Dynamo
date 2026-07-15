@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Messages widget: browse recent conversations and reply, without leaving
-/// the notch. Talks only to `MessagesProvider` — never touches chat.db or
-/// AppleScript directly. See `ChatDatabaseMessagesProvider`'s doc comment for
-/// the two OS permissions this needs and why neither can be requested in-app.
+/// Messages widget: browse recent conversations and open a reply in
+/// Messages.app. Talks only to `MessagesProvider` — never touches chat.db
+/// directly. Reading needs Full Disk Access; sending uses the system compose
+/// path (no Automation permission).
 @MainActor
 final class MessagesPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, WidgetSettingsProviding {
     let id = "messages"
@@ -219,6 +219,7 @@ private struct ExpandedMessagesView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
+            .help("Open in Messages to send")
         }
     }
 
@@ -284,7 +285,7 @@ private struct MessagesSettingsView: View {
                 }
             }
 
-            Text("Sending a reply the first time will also prompt for Automation access to Messages — that's macOS asking permission to send Apple Events, not Dynamo. Message content is never stored by Dynamo; it's read fresh from Messages' own database each time.")
+            Text("Reply opens Messages with your text ready — confirm Send there. No Automation permission needed. Message content is never stored by Dynamo; it's read fresh from Messages' own database each time.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

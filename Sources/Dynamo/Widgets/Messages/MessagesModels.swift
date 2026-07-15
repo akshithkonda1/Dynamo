@@ -3,6 +3,8 @@ import Foundation
 struct MessageConversationItem: Identifiable, Equatable {
     var id: String // chat.guid
     var chatRowID: Int64
+    /// Phone, email, or opaque group id from chat.db — used to open compose.
+    var chatIdentifier: String
     var displayName: String
     var lastMessagePreview: String
     var lastMessageDate: Date
@@ -50,8 +52,9 @@ protocol MessagesProvider: AnyObject {
     func recheckAccess()
     func selectConversation(guid: String, rowID: Int64)
     func refresh()
-    /// Sends to the currently selected conversation. Returns whether the
-    /// AppleScript call reported success (not a delivery receipt).
+    /// Opens a Messages compose window for the selected conversation
+    /// (no silent send — macOS has no public API for that). Returns whether
+    /// compose was opened successfully.
     @discardableResult
     func send(text: String) -> Bool
 }
