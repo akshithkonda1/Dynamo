@@ -55,10 +55,11 @@ private struct ExpandedShelfView: View {
             if store.items.isEmpty {
                 dropHint
             } else {
-                // Host `NotchScrollView` provides the scrollbar.
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.items) { item in
-                        row(item)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(store.items) { item in
+                            row(item)
+                        }
                     }
                 }
             }

@@ -10,14 +10,16 @@ final class MockNowPlayingProvider: NowPlayingProvider {
         isPlaying: true,
         artworkData: nil,
         playlistName: "Favorites",
-        sourceApp: .music
+        sourceApp: .music,
+        elapsed: 42,
+        duration: 244
     )
     var onChange: ((NowPlayingInfo) -> Void)?
 
     private let catalog: [NowPlayingInfo] = [
-        NowPlayingInfo(title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music),
-        NowPlayingInfo(title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music),
-        NowPlayingInfo(title: "Weightless", artist: "Marconi Union", album: "Weightless", isPlaying: true, artworkData: nil, playlistName: "Sleep", sourceApp: .music)
+        NowPlayingInfo(title: "Midnight City", artist: "M83", album: "Hurry Up, We're Dreaming", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music, elapsed: 0, duration: 244),
+        NowPlayingInfo(title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", isPlaying: true, artworkData: nil, playlistName: "Favorites", sourceApp: .music, elapsed: 0, duration: 200),
+        NowPlayingInfo(title: "Weightless", artist: "Marconi Union", album: "Weightless", isPlaying: true, artworkData: nil, playlistName: "Sleep", sourceApp: .music, elapsed: 0, duration: 480)
     ]
     private var index = 0
 
@@ -49,6 +51,11 @@ final class MockNowPlayingProvider: NowPlayingProvider {
     func availablePlaylists() -> [String] { ["Favorites", "Sleep", "Driving"] }
     func playPlaylist(named name: String) {
         current.playlistName = name
+        publish()
+    }
+
+    func seek(to elapsed: TimeInterval) {
+        current.elapsed = min(max(0, elapsed), max(current.duration, 0))
         publish()
     }
 

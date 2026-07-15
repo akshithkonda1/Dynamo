@@ -167,6 +167,27 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         scheduleRefresh(after: 1.0)
     }
 
+    func seek(to elapsed: TimeInterval) {
+        let duration = current.duration
+        let target: TimeInterval
+        if duration > 0 {
+            target = min(max(0, elapsed), duration)
+        } else {
+            target = max(0, elapsed)
+        }
+        // Optimistic scrub so the bar doesn't snap back while AppleScript runs.
+        var optimistic = current
+        optimistic.elapsed = target
+        if !Self.isEmpty(optimistic) {
+            publish(optimistic)
+        }
+        if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.seek(to: target)
+        }
+        scheduleRefresh(after: 0.2)
+        scheduleRefresh(after: 0.6)
+    }
+
     // MARK: - Framework
 
     private func loadFramework() {
@@ -296,7 +317,7 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 best.artworkData = art
             }
         }
-        // Prefer playlist / sourceApp from AppleScript when MR/helper omit them.
+        // Prefer playlist / sourceApp / timing from AppleScript when MR/helper omit them.
         if best.playlistName == nil {
             best.playlistName = candidates.first(where: { $0.playlistName != nil })?.playlistName
         }
@@ -305,6 +326,19 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 ?? (AppleScriptMedia.shared.preferredPlayer().map {
                     $0 == .music ? MediaPlayerApp.music : .spotify
                 })
+        }
+        if best.duration <= 0 {
+            best.duration = candidates.first(where: { $0.duration > 0 })?.duration ?? 0
+        }
+        if best.elapsed <= 0 {
+            best.elapsed = candidates.first(where: { $0.elapsed > 0 })?.elapsed ?? best.elapsed
+        }
+        // When AppleScript has richer timing for the same track, prefer it.
+        if let scripted,
+           Self.trackKey(scripted) == Self.trackKey(best),
+           scripted.duration > 0 {
+            best.elapsed = scripted.elapsed
+            best.duration = scripted.duration
         }
         // Keep previous art for a beat when the same track re-publishes without art.
         if best.artworkData == nil,
@@ -344,7 +378,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             isPlaying: payload.isPlaying,
             artworkData: payload.artworkBase64.flatMap { Data(base64Encoded: $0) },
             playlistName: nil,
-            sourceApp: .other
+            sourceApp: .other,
+            elapsed: 0,
+            duration: 0
         )
     }
 
@@ -355,6 +391,13 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 if let value = dict[key] as? String, !value.isEmpty { return value }
             }
             return ""
+        }
+        func number(_ keys: [String]) -> Double? {
+            for key in keys {
+                if let n = dict[key] as? NSNumber { return n.doubleValue }
+                if let d = dict[key] as? Double { return d }
+            }
+            return nil
         }
         let title = string([
             "kMRMediaRemoteNowPlayingInfoTitle",
@@ -376,6 +419,19 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         let rate = (dict["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue
             ?? (dict["playbackRate"] as? NSNumber)?.doubleValue
             ?? 0
+        // Elapsed/duration may be seconds or (on some builds) milliseconds.
+        var elapsed = number([
+            "kMRMediaRemoteNowPlayingInfoElapsedTime",
+            "elapsedTime",
+            "ElapsedTime"
+        ]) ?? 0
+        var duration = number([
+            "kMRMediaRemoteNowPlayingInfoDuration",
+            "duration",
+            "Duration"
+        ]) ?? 0
+        if duration > 10_000 { duration /= 1000 }
+        if elapsed > 10_000 { elapsed /= 1000 }
         return NowPlayingInfo(
             title: title.isEmpty ? NowPlayingInfo.empty.title : title,
             artist: artist,
@@ -383,7 +439,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             isPlaying: rate > 0,
             artworkData: artwork,
             playlistName: nil,
-            sourceApp: .other
+            sourceApp: .other,
+            elapsed: max(0, elapsed),
+            duration: max(0, duration)
         )
     }
 

@@ -218,7 +218,9 @@ final class AppleScriptMedia {
                 try
                     set playlistName to name of current playlist
                 end try
-                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & playlistName
+                set elapsedSeconds to player position
+                set durationSeconds to duration of current track
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & playlistName & "\(s)" & elapsedSeconds & "\(s)" & durationSeconds
             on error
                 return ""
             end try
@@ -239,13 +241,30 @@ final class AppleScriptMedia {
                 set trackArtist to artist of current track
                 set trackAlbum to album of current track
                 set isPlayingFlag to (playerStateText is "playing")
-                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & ""
+                set elapsedSeconds to player position
+                set durationSeconds to (duration of current track) / 1000
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & "" & "\(s)" & elapsedSeconds & "\(s)" & durationSeconds
             on error
                 return ""
             end try
         end tell
         """
         return parse(runReturning(script), source: .spotify)
+    }
+
+    /// Absolute seek in seconds for Music / Spotify.
+    func seek(to elapsed: TimeInterval) {
+        let clamped = max(0, elapsed)
+        // AppleScript reals need a plain decimal form.
+        let value = String(format: "%.3f", clamped)
+        switch preferredPlayer() ?? fallbackPlayer() {
+        case .music:
+            run("tell application id \"\(Self.musicBundle)\" to set player position to \(value)")
+        case .spotify:
+            run("tell application id \"\(Self.spotifyBundle)\" to set player position to \(value)")
+        case .none:
+            break
+        }
     }
 
     private func musicWithSpotifyArt(_ info: NowPlayingInfo) -> NowPlayingInfo {
@@ -337,6 +356,8 @@ final class AppleScriptMedia {
         let title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         let playlist = parts.count >= 5 ? parts[4].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let elapsed = parts.count >= 6 ? Double(parts[5].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 : 0
+        let duration = parts.count >= 7 ? Double(parts[6].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 : 0
         return NowPlayingInfo(
             title: title,
             artist: parts[1],
@@ -344,7 +365,9 @@ final class AppleScriptMedia {
             isPlaying: parts[3].lowercased().contains("true"),
             artworkData: nil,
             playlistName: playlist.isEmpty ? nil : playlist,
-            sourceApp: source
+            sourceApp: source,
+            elapsed: max(0, elapsed),
+            duration: max(0, duration)
         )
     }
 

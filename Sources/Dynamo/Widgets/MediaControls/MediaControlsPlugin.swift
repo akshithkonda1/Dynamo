@@ -89,6 +89,10 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         showPlaylistPicker = false
     }
 
+    func seek(to elapsed: TimeInterval) {
+        provider.seek(to: elapsed)
+    }
+
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
@@ -148,9 +152,18 @@ private struct AmbientMediaView: View {
 
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
+    /// Local scrub value while the user is dragging the timeline.
+    @State private var scrubElapsed: Double?
+    @State private var displayElapsed: Double = 0
+    @State private var lastTick: Date = .now
 
     private var hasTrack: Bool {
         plugin.info.isPlaying || plugin.info.title != NowPlayingInfo.empty.title
+    }
+
+    private var effectiveElapsed: Double {
+        if let scrubElapsed { return scrubElapsed }
+        return displayElapsed
     }
 
     var body: some View {
@@ -177,15 +190,45 @@ private struct ExpandedMediaView: View {
                 )
                 .frame(height: 18)
 
+                timelineBar
+
                 playlistRow
 
-                Spacer(minLength: NotchTheme.spaceSM)
+                Spacer(minLength: 4)
                 transportRow
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .onAppear { plugin.refreshPlaylists() }
+        .onAppear {
+            plugin.refreshPlaylists()
+            displayElapsed = plugin.info.elapsed
+            lastTick = .now
+        }
+        .onChange(of: plugin.info.elapsed) { newValue in
+            // Don't yank the knob while the user is scrubbing.
+            guard scrubElapsed == nil else { return }
+            // Accept remote updates that jump more than a small delta (seek / new track).
+            if abs(newValue - displayElapsed) > 1.25 || !plugin.info.isPlaying {
+                displayElapsed = newValue
+            }
+            lastTick = .now
+        }
+        .onChange(of: plugin.info.title) { _ in
+            displayElapsed = plugin.info.elapsed
+            scrubElapsed = nil
+            lastTick = .now
+        }
+        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { now in
+            guard scrubElapsed == nil, plugin.info.isPlaying, plugin.info.duration > 0 else {
+                lastTick = now
+                return
+            }
+            let dt = now.timeIntervalSince(lastTick)
+            lastTick = now
+            let next = min(plugin.info.duration, displayElapsed + dt)
+            displayElapsed = next
+        }
     }
 
     private var playerAppName: String {
@@ -225,6 +268,59 @@ private struct ExpandedMediaView: View {
         }
     }
 
+    /// Scrubbable playback position — the “time bar”, not a content scrollbar.
+    private var timelineBar: some View {
+        let duration = max(plugin.info.duration, 0)
+        let canSeek = duration > 0.5 && hasTrack
+        return VStack(spacing: 2) {
+            Slider(
+                value: Binding(
+                    get: {
+                        canSeek ? min(effectiveElapsed, duration) : 0
+                    },
+                    set: { newValue in
+                        scrubElapsed = newValue
+                        displayElapsed = newValue
+                    }
+                ),
+                in: 0...max(duration, 0.001),
+                onEditingChanged: { editing in
+                    if editing {
+                        scrubElapsed = effectiveElapsed
+                    } else if let value = scrubElapsed {
+                        plugin.seek(to: value)
+                        displayElapsed = value
+                        scrubElapsed = nil
+                        lastTick = .now
+                    }
+                }
+            )
+            .controlSize(.mini)
+            .disabled(!canSeek)
+            .opacity(canSeek ? 1 : 0.35)
+            .tint(Color.white.opacity(0.85))
+
+            HStack {
+                Text(Self.formatTime(effectiveElapsed))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+                Spacer(minLength: 0)
+                Text(canSeek ? Self.formatTime(duration) : "--:--")
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private static func formatTime(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded(.down))
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     @ViewBuilder
     private var playlistRow: some View {
         if hasTrack || !plugin.playlists.isEmpty {
@@ -241,53 +337,25 @@ private struct ExpandedMediaView: View {
                 .frame(height: 14)
                 Spacer(minLength: 0)
                 if !plugin.playlists.isEmpty {
-                    Button {
-                        plugin.showPlaylistPicker.toggle()
+                    Menu {
+                        ForEach(plugin.playlists, id: \.self) { name in
+                            Button(name) { plugin.playPlaylist(name) }
+                        }
                     } label: {
-                        Text(plugin.showPlaylistPicker ? "Hide" : "Switch")
+                        Text("Switch")
                             .font(NotchTheme.micro.weight(.semibold))
                             .foregroundStyle(NotchTheme.textSecondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Capsule().fill(NotchTheme.chipFill))
                     }
-                    .buttonStyle(.plain)
-                    .help("Show playlists")
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Play a different Music playlist")
                 }
             }
-
-            if plugin.showPlaylistPicker, !plugin.playlists.isEmpty {
-                // Inline list with scrollbar (menus hide overflow awkwardly in the notch).
-                NotchScrollView(axes: .vertical) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(plugin.playlists, id: \.self) { name in
-                            Button {
-                                plugin.playPlaylist(name)
-                            } label: {
-                                Text(name)
-                                    .font(NotchTheme.caption)
-                                    .foregroundStyle(
-                                        name == plugin.info.playlistName
-                                            ? NotchTheme.textPrimary
-                                            : NotchTheme.textSecondary
-                                    )
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(name == plugin.info.playlistName
-                                                  ? NotchTheme.chipFillActive
-                                                  : Color.clear)
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .frame(maxHeight: 88)
+            .onTapGesture {
+                plugin.openConnectedApp()
             }
         }
     }

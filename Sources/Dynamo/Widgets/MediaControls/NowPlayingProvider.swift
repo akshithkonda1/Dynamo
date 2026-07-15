@@ -18,6 +18,10 @@ struct NowPlayingInfo: Equatable {
     var playlistName: String?
     /// App that owns this track (for open-in-app + playlist switching).
     var sourceApp: MediaPlayerApp?
+    /// Playback position in seconds (0…duration).
+    var elapsed: TimeInterval
+    /// Track length in seconds (0 when unknown).
+    var duration: TimeInterval
 
     static let empty = NowPlayingInfo(
         title: "Not Playing",
@@ -26,8 +30,16 @@ struct NowPlayingInfo: Equatable {
         isPlaying: false,
         artworkData: nil,
         playlistName: nil,
-        sourceApp: nil
+        sourceApp: nil,
+        elapsed: 0,
+        duration: 0
     )
+
+    var canSeek: Bool { duration > 0.5 }
+    var progress: Double {
+        guard duration > 0 else { return 0 }
+        return min(1, max(0, elapsed / duration))
+    }
 }
 
 @MainActor
@@ -47,10 +59,13 @@ protocol NowPlayingProvider: AnyObject {
     func availablePlaylists() -> [String]
     /// Start playing the named playlist in the connected Music app.
     func playPlaylist(named name: String)
+    /// Seek to an absolute position in the current track (seconds).
+    func seek(to elapsed: TimeInterval)
 }
 
 extension NowPlayingProvider {
     func openConnectedApp() {}
     func availablePlaylists() -> [String] { [] }
     func playPlaylist(named name: String) {}
+    func seek(to elapsed: TimeInterval) {}
 }
