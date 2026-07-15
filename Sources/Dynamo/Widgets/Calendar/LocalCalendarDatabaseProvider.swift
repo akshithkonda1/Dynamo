@@ -8,8 +8,8 @@ import SQLite3
 /// No EventKit permission prompt — Dynamo only *reads* the same store Calendar
 /// already maintains. Nothing is written. Clicking an event opens Calendar.app.
 ///
-/// Access may require Full Disk Access on some macOS configurations (same class
-/// of protection as Messages’ chat.db). If the DB can’t be opened, `accessState`
+/// Access may require Full Disk Access on some macOS configurations. If the DB
+/// can’t be opened, `accessState`
 /// surfaces that so Settings can point the user at FDA.
 @MainActor
 final class LocalCalendarDatabaseProvider: CalendarProvider {

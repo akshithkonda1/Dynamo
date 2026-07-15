@@ -13,7 +13,6 @@ enum DynamoPermission: String, CaseIterable, Codable {
     case fullDiskAccess
     case automationMusic
     case automationSpotify
-    case automationMessages
 
     var displayName: String {
         switch self {
@@ -22,7 +21,6 @@ enum DynamoPermission: String, CaseIterable, Codable {
         case .fullDiskAccess: return "Full Disk Access"
         case .automationMusic: return "Control Music"
         case .automationSpotify: return "Control Spotify"
-        case .automationMessages: return "Control Messages"
         }
     }
 
@@ -30,10 +28,9 @@ enum DynamoPermission: String, CaseIterable, Codable {
         switch self {
         case .camera: return "Webcam mirror"
         case .location: return "Weather (automatic)"
-        case .fullDiskAccess: return "Calendar + Messages local databases"
+        case .fullDiskAccess: return "Calendar local database"
         case .automationMusic: return "Play/pause, skip, cover art, playlists"
         case .automationSpotify: return "Play/pause, skip, cover art"
-        case .automationMessages: return "Legacy; replies now open Messages compose"
         }
     }
 }
@@ -89,7 +86,6 @@ final class PermissionsStore: ObservableObject {
         update(.fullDiskAccess, to: Self.probeFullDiskAccess())
         update(.automationMusic, to: Self.probeAutomation(bundleID: "com.apple.Music"))
         update(.automationSpotify, to: Self.probeAutomation(bundleID: "com.spotify.client"))
-        update(.automationMessages, to: Self.probeAutomation(bundleID: "com.apple.MobileSMS"))
         persist()
     }
 
@@ -111,7 +107,7 @@ final class PermissionsStore: ObservableObject {
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
             ]
-        case .automationMusic, .automationSpotify, .automationMessages:
+        case .automationMusic, .automationSpotify:
             urls = [
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
@@ -152,19 +148,12 @@ final class PermissionsStore: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let calendarDB = home
             .appendingPathComponent("Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb")
-        let messagesDB = home
-            .appendingPathComponent("Library/Messages/chat.db")
 
         let calOK = isEffectivelyReadable(calendarDB)
-        let msgOK = isEffectivelyReadable(messagesDB)
-
-        // If either protected path is readable, FDA (or equivalent) is working
-        // for Dynamo. If neither file exists, treat as unknown.
         let calExists = FileManager.default.fileExists(atPath: calendarDB.path)
-        let msgExists = FileManager.default.fileExists(atPath: messagesDB.path)
 
-        if calOK || msgOK { return .granted }
-        if calExists || msgExists { return .denied }
+        if calOK { return .granted }
+        if calExists { return .denied }
         return .unknown
     }
 

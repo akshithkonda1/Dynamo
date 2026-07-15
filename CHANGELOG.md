@@ -27,7 +27,6 @@ All notable changes to Dynamo are documented here.
 ### Features
 
 - Smoke-test checklist (`docs/SMOKE_TEST.md`) and run guide (`docs/RUN.md`)
-- Messages widget with intentional Full Disk Access flow (opt-in)
 - EventKit incomplete-reminder peeks (~5 min lead)
 - Settings → Display for notch (multi-monitor)
 - Regenerated app icon (correct pixel sizes)
@@ -37,8 +36,8 @@ All notable changes to Dynamo are documented here.
 ### Notes
 
 - **WeatherKit** still needs a paid Apple Developer team + Xcode-signed app for live weather
-- **Messages** requires Full Disk Access; grant only if you want that feature
 - First Music/Spotify control may prompt **Automation** permission — allow Dynamo → Music
+- Messages widget removed (compose-only send was not a good notch fit)
 
 ### Build
 
