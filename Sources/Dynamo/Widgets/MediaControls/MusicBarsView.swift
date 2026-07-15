@@ -13,7 +13,6 @@ struct MusicBarsView: View {
     var color: Color = NotchTheme.textPrimary
 
     @State private var scales: [CGFloat]
-    private let ticker = Timer.publish(every: 0.28, on: .main, in: .common).autoconnect()
 
     init(isPlaying: Bool, barCount: Int = 4, maxHeight: CGFloat = 14, color: Color = NotchTheme.textPrimary) {
         self.isPlaying = isPlaying
@@ -32,17 +31,18 @@ struct MusicBarsView: View {
             }
         }
         .frame(height: maxHeight)
-        .onReceive(ticker) { _ in
-            guard isPlaying else { return }
-            withAnimation(.easeInOut(duration: 0.26)) {
-                scales = scales.map { _ in CGFloat.random(in: 0.35...1.0) }
+        .task(id: isPlaying) {
+            guard isPlaying else {
+                withAnimation(.easeInOut(duration: 0.26)) {
+                    scales = Array(repeating: 0.3, count: barCount)
+                }
+                return
             }
-        }
-        .onChange(of: isPlaying) { playing in
-            withAnimation(.easeInOut(duration: 0.26)) {
-                scales = playing
-                    ? scales.map { _ in CGFloat.random(in: 0.35...1.0) }
-                    : Array(repeating: 0.3, count: barCount)
+            while !Task.isCancelled {
+                withAnimation(.easeInOut(duration: 0.26)) {
+                    scales = scales.map { _ in CGFloat.random(in: 0.35...1.0) }
+                }
+                try? await Task.sleep(for: .seconds(0.28))
             }
         }
     }

@@ -62,8 +62,17 @@ final class MessagesPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     }
 
     func openFullDiskAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
-        NSWorkspace.shared.open(url)
+        // Prefer modern System Settings deep links; fall back to the legacy pane URL.
+        // There is no public API to request Full Disk Access — this only opens the pane.
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        ]
+        for raw in candidates {
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) {
+                return
+            }
+        }
     }
 
     func expandedView() -> AnyView { AnyView(ExpandedMessagesView(plugin: self)) }

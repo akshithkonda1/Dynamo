@@ -161,11 +161,14 @@ require the **Xcode app target** and a **paid Apple Developer team** (see
 key-free Apple framework instead of a third-party quote API that needed a
 manually-provisioned Finnhub key.
 
-## Messages setup — read this before enabling
+## Messages setup — Full Disk Access (enabled by design)
+
+The Messages widget is registered in the default tray. **Full Disk Access is
+required and expected** if you use it. Grant FDA via System Settings (or the
+in-app “Open Privacy Settings” button), then quit and relaunch Dynamo.
 
 The Messages widget reads recent iMessage/SMS conversations and lets you
-reply, all from the notch. **Please understand what it actually does before
-turning it on:**
+reply, all from the notch. **Understand what it does:**
 
 - **It reads `~/Library/Messages/chat.db` directly** — Messages.app's own
   local SQLite database — read-only, via `ChatDatabaseMessagesProvider`.
@@ -245,6 +248,13 @@ notary credentials:
 written and pushed from an environment with no macOS, Xcode, or Apple account
 access. The individual steps mirror Apple's own documented codesign-import /
 archive / notarytool flow — treat the first real tag push as the test.
+
+## Smoke test
+
+After building, run through **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)** before treating a build as daily-driver ready.
+
+- WeatherKit / paid-team signing can be soft-failed when testing ad-hoc builds.
+- **Messages + Full Disk Access is in-scope:** grant FDA, relaunch, verify read + reply. FDA is intentional for this feature (whole-disk access; revoke anytime in System Settings).
 
 ## Next steps (post Phase 4)
 
