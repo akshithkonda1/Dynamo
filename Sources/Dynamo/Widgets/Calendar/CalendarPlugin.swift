@@ -231,35 +231,31 @@ private struct ExpandedCalendarView: View {
     }
 
     private func eventRow(_ event: CalendarEventItem) -> some View {
-        Button {
-            plugin.openEvent(event)
-        } label: {
-            HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(color(for: event))
-                    .frame(width: 3, height: 32)
+        HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(color(for: event))
+                .frame(width: 3, height: 32)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title)
-                        .font(NotchTheme.body)
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                    Text(subtitle(for: event))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title)
+                    .font(NotchTheme.body)
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .lineLimit(1)
+                Text(subtitle(for: event))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+                if let location = event.location {
+                    Text(location)
                         .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
+                        .foregroundStyle(NotchTheme.textQuaternary)
                         .lineLimit(1)
-                    if let location = event.location {
-                        Text(location)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                            .lineLimit(1)
-                    }
                 }
-                Spacer(minLength: 0)
             }
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture { plugin.openEvent(event) }
         .help("Open in Calendar")
     }
 

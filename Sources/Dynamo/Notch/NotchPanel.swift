@@ -1,6 +1,7 @@
 import AppKit
 
-/// Borderless, non-activating panel that floats above the menu bar / notch.
+/// Borderless floating panel for the notch. Must accept first-click and become
+/// key so SwiftUI `Button`s work without a prior click to focus the window.
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -24,13 +25,20 @@ final class NotchPanel: NSPanel {
         isMovableByWindowBackground = false
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
-        // Critical: accessory apps often deactivate; keep the notch up.
         hidesOnDeactivate = false
-        becomesKeyOnlyIfNeeded = true
+        // Allow the panel to become key on click so buttons receive the event.
+        becomesKeyOnlyIfNeeded = false
         isReleasedWhenClosed = false
-        // Floating + statusBar level: set floating first, then pin level so we
-        // stay above menu-bar chrome (not a normal floating window layer).
         isFloatingPanel = true
         level = .statusBar
+        // Ensure mouse events hit our content even when another app is active.
+        ignoresMouseEvents = false
+    }
+
+    /// First click both focuses the panel *and* reaches the control underneath
+    /// (no “click once to focus, again to press”).
+    override func mouseDown(with event: NSEvent) {
+        makeKeyAndOrderFront(nil)
+        super.mouseDown(with: event)
     }
 }

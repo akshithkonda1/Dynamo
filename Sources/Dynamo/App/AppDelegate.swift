@@ -64,6 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         installStatusItem()
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettings),
+            name: .dynamoOpenSettings,
+            object: nil
+        )
+
         let registryRef = registry
         NotificationCenter.default.addObserver(
             forName: .dynamoWidgetConfigurationDidChange,

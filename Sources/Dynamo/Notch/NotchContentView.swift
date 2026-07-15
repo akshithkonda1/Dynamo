@@ -59,7 +59,7 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            HStack(spacing: NotchTheme.spaceMD) {
+            HStack(spacing: 8) {
                 ForEach(registry.plugins, id: \.id) { plugin in
                     TrayIconButton(
                         systemImage: plugin.systemImage,
@@ -70,25 +70,31 @@ struct NotchContentView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                TrayIconButton(
+                    systemImage: "gearshape.fill",
+                    displayName: "Settings",
+                    isActive: false
+                ) {
+                    NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
+                }
             }
-            .padding(.horizontal, NotchTheme.spaceLG)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, NotchTheme.spaceMD)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
 
             if let active = registry.activePlugin {
                 active.expandedView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, NotchTheme.spaceLG)
-                    .padding(.bottom, 14)
+                    .padding(.horizontal, NotchTheme.spaceMD)
+                    .padding(.bottom, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-/// A tray-row widget selector icon. Filled while active (selected); on top of
-/// that, a hover highlight previews the icon before you click it, so the row
-/// feels responsive rather than only reacting after the fact.
+/// Tray-row control that works inside a nonactivating notch panel.
+/// Uses an explicit tap gesture + large hit target so the first click fires.
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
@@ -96,24 +102,38 @@ private struct TrayIconButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @State private var isPressed = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(fillColor))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(displayName)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
+        Image(systemName: systemImage)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(fillColor))
+            .scaleEffect(isPressed ? 0.9 : 1.0)
+            .contentShape(Rectangle().size(CGSize(width: 32, height: 32)))
+            .onHover { isHovering = $0 }
+            .onTapGesture {
+                action()
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in isPressed = true }
+                    .onEnded { _ in isPressed = false }
+            )
+            .help(displayName)
+            .animation(.easeOut(duration: 0.1), value: isHovering)
+            .animation(.easeOut(duration: 0.1), value: isPressed)
+            .accessibilityLabel(displayName)
+            .accessibilityAddTraits(.isButton)
     }
 
     private var fillColor: Color {
         if isActive { return NotchTheme.chipFillActive }
         return isHovering ? NotchTheme.chipFill : .clear
     }
+}
+
+extension Notification.Name {
+    static let dynamoOpenSettings = Notification.Name("dynamoOpenSettings")
 }

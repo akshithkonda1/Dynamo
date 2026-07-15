@@ -206,11 +206,16 @@ private struct ExpandedMediaView: View {
         prominent: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-        }
-        .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
+        // Tap gesture first so transport works even when the notch panel is
+        // nonactivating / not yet key (SwiftUI Button can miss first click).
+        Image(systemName: systemName)
+            .font(.system(size: size, weight: .semibold))
+            .foregroundStyle(NotchTheme.textPrimary)
+            .frame(width: diameter, height: diameter)
+            .background(Circle().fill(prominent ? NotchTheme.chipFillActive : NotchTheme.chipFill))
+            .contentShape(Circle())
+            .onTapGesture(perform: action)
+            .accessibilityLabel(systemName)
+            .accessibilityAddTraits(.isButton)
     }
 }
