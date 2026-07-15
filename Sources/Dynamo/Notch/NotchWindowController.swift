@@ -271,11 +271,17 @@ final class NotchWindowController: ObservableObject {
         }
     }
 
-    private func preferredScreen() -> NSScreen? {
-        if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
-            return notched
+    func preferredScreen() -> NSScreen? {
+        DisplayPreference.resolveScreen()
+    }
+
+    /// Public entry for Settings when the user picks another display.
+    func applyPreferredDisplay() {
+        if isHiddenModeEnabled {
+            removePeekSensor()
+            installPeekSensor()
         }
-        return NSScreen.main
+        reposition()
     }
 
     private func topCenterOrigin(size: NSSize, on screen: NSScreen) -> NSPoint {

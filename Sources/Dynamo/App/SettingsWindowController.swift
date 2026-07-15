@@ -103,6 +103,29 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Text("Display for notch")
+                .font(.subheadline.weight(.semibold))
+            Picker("Display", selection: Binding(
+                get: { DisplayPreference.preferredDisplayID ?? "" },
+                set: { newValue in
+                    DisplayPreference.preferredDisplayID = newValue.isEmpty ? nil : newValue
+                    notch.applyPreferredDisplay()
+                }
+            )) {
+                Text("Automatic (prefer notched)").tag("")
+                ForEach(Array(NSScreen.screens.enumerated()), id: \.offset) { _, screen in
+                    Text(DisplayPreference.label(for: screen))
+                        .tag(DisplayPreference.displayID(of: screen))
+                }
+            }
+            .labelsHidden()
+            Text("Pick which monitor hosts the notch tray when you use multiple displays.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

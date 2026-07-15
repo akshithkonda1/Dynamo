@@ -41,12 +41,14 @@ Check boxes as you go. Prefer a cold launch each major section.
 - [ ] Toggle a widget **off** → disappears from the tray immediately
 - [ ] Toggle it **on** → returns immediately
 - [ ] Drag-reorder widgets → tray icon order updates immediately
-- [ ] Quit and relaunch → order + enabled set survive
+- [ ] **Display for notch** picker lists screens; choosing one repositions the tray
+- [ ] Quit and relaunch → order + enabled set + display preference survive
 
 ---
 
 ## 3. Media Controls
 
+- [ ] Packaged app contains `Contents/MacOS/DynamoMediaRemoteHelper` (`ls dist/Dynamo.app/Contents/MacOS/`)
 - [ ] Start playback in Music or Spotify
 - [ ] Collapsed / ambient notch shows now-playing presence (art and/or bars) when designed to
 - [ ] Expanded: play/pause and skip control the player
@@ -55,11 +57,13 @@ Check boxes as you go. Prefer a cold launch each major section.
 
 ---
 
-## 4. Calendar
+## 4. Calendar + Reminders
 
-- [ ] Grant **Calendars** if prompted (System Settings → Privacy & Security → Calendars)
+- [ ] Grant **Calendars** (and **Reminders** if prompted)
 - [ ] Expanded list shows upcoming events (or empty state)
+- [ ] Due reminders appear under a Reminders section when present
 - [ ] With a non-all-day event ~5 minutes out: notch peeks a meeting reminder once
+- [ ] With a reminder due within ~5 minutes: notch peeks with checklist icon
 
 ---
 

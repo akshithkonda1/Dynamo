@@ -7,6 +7,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     let systemImage = "calendar"
 
     @Published private(set) var events: [CalendarEventItem] = []
+    @Published private(set) var dueReminders: [ReminderItem] = []
     @Published private(set) var authState: CalendarAuthState = .notDetermined
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
@@ -14,7 +15,8 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     /// Event IDs already peeked, so the ~60s refresh doesn't re-fire while an
     /// event is still inside the "starting soon" window.
     private var notifiedEventIDs: Set<String> = []
-    /// How far ahead of an event's start to peek.
+    private var notifiedReminderIDs: Set<String> = []
+    /// How far ahead of an event's start / reminder due to peek.
     private let leadTime: TimeInterval = 5 * 60
 
     init(provider: CalendarProvider? = nil) {
@@ -23,14 +25,17 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         resolved.onChange = { [weak self] in
             guard let self else { return }
             self.events = self.provider.upcoming
+            self.dueReminders = self.provider.dueReminders
             self.authState = self.provider.authorizationState
             self.checkUpcomingEvents()
+            self.checkDueReminders()
         }
     }
 
     func start() {
         provider.start()
         events = provider.upcoming
+        dueReminders = provider.dueReminders
         authState = provider.authorizationState
         if authState == .notDetermined {
             Task { await provider.requestAccess() }
@@ -71,6 +76,29 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         let minutes = max(1, Int((interval / 60).rounded()))
         return minutes == 1 ? "Starts in 1 minute" : "Starts in \(minutes) minutes"
     }
+
+    /// Peek once for incomplete reminders due within the lead window (or just overdue).
+    private func checkDueReminders() {
+        notifiedReminderIDs.formIntersection(Set(dueReminders.map(\.id)))
+        for reminder in dueReminders {
+            guard !notifiedReminderIDs.contains(reminder.id) else { continue }
+            let interval = reminder.due.timeIntervalSinceNow
+            guard interval <= leadTime, interval > -60 else { continue }
+            notifiedReminderIDs.insert(reminder.id)
+            let subtitle: String
+            if interval <= 0 {
+                subtitle = "Due now"
+            } else {
+                let minutes = max(1, Int((interval / 60).rounded()))
+                subtitle = minutes == 1 ? "Due in 1 minute" : "Due in \(minutes) minutes"
+            }
+            onSneakPeek?(NotchSneakPeek(
+                systemImage: "checklist",
+                title: reminder.title,
+                subtitle: subtitle
+            ))
+        }
+    }
 }
 
 // MARK: - Views
@@ -109,13 +137,21 @@ private struct ExpandedCalendarView: View {
                     .foregroundStyle(NotchTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .authorized:
-                if plugin.events.isEmpty {
-                    Text("No events in the next few days.")
+                if plugin.events.isEmpty && plugin.dueReminders.isEmpty {
+                    Text("No events or due reminders soon.")
                         .font(NotchTheme.body)
                         .foregroundStyle(NotchTheme.textTertiary)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+                            if !plugin.dueReminders.isEmpty {
+                                Text("Reminders")
+                                    .font(NotchTheme.micro.weight(.semibold))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                                ForEach(plugin.dueReminders) { reminder in
+                                    reminderRow(reminder)
+                                }
+                            }
                             ForEach(plugin.events) { event in
                                 eventRow(event)
                             }
@@ -139,6 +175,25 @@ private struct ExpandedCalendarView: View {
                     .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
                 Text(subtitle(for: event))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func reminderRow(_ reminder: ReminderItem) -> some View {
+        HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
+            Image(systemName: "checklist")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NotchTheme.caution)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reminder.title)
+                    .font(NotchTheme.body)
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .lineLimit(1)
+                Text(Self.timeFormatter.string(from: reminder.due))
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textTertiary)
             }

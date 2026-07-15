@@ -1,16 +1,18 @@
 import EventKit
 import Foundation
 
-/// EventKit-backed calendar source. Branches on macOS 14's full-access API
-/// and falls back to the legacy request on macOS 13.
+/// EventKit-backed calendar + reminders source. Branches on macOS 14 full-access
+/// APIs and falls back to the legacy request on macOS 13.
 @MainActor
 final class EventKitCalendarProvider: CalendarProvider {
     private(set) var authorizationState: CalendarAuthState = .notDetermined
     private(set) var upcoming: [CalendarEventItem] = []
+    private(set) var dueReminders: [ReminderItem] = []
     var onChange: (() -> Void)?
 
     private let store = EKEventStore()
     private var timer: Timer?
+    private var remindersAuthorized = false
 
     func start() {
         updateAuthState()
@@ -31,14 +33,22 @@ final class EventKitCalendarProvider: CalendarProvider {
 
     func requestAccess() async {
         do {
-            let granted: Bool
+            let eventsGranted: Bool
             if #available(macOS 14.0, *) {
-                granted = try await store.requestFullAccessToEvents()
+                eventsGranted = try await store.requestFullAccessToEvents()
             } else {
-                granted = try await store.requestAccess(to: .event)
+                eventsGranted = try await store.requestAccess(to: .event)
             }
-            authorizationState = granted ? .authorized : .denied
-            if granted {
+            authorizationState = eventsGranted ? .authorized : .denied
+
+            // Reminders are a separate grant — best-effort; calendar still works without them.
+            if #available(macOS 14.0, *) {
+                remindersAuthorized = (try? await store.requestFullAccessToReminders()) ?? false
+            } else {
+                remindersAuthorized = (try? await store.requestAccess(to: .reminder)) ?? false
+            }
+
+            if eventsGranted {
                 refresh()
             }
             onChange?()
@@ -50,8 +60,10 @@ final class EventKitCalendarProvider: CalendarProvider {
 
     func refresh() {
         updateAuthState()
+        updateRemindersAuth()
         guard authorizationState == .authorized else {
             upcoming = []
+            dueReminders = []
             onChange?()
             return
         }
@@ -84,7 +96,47 @@ final class EventKitCalendarProvider: CalendarProvider {
                 )
             }
         upcoming = Array(events)
+        refreshReminders()
         onChange?()
+    }
+
+    private func refreshReminders() {
+        guard remindersAuthorized else {
+            dueReminders = []
+            return
+        }
+        let end = Date().addingTimeInterval(24 * 60 * 60)
+        let predicate = store.predicateForIncompleteReminders(
+            withDueDateStarting: nil,
+            ending: end,
+            calendars: nil
+        )
+        // EventKit reminders fetch is completion-handler based.
+        store.fetchReminders(matching: predicate) { [weak self] reminders in
+            Task { @MainActor in
+                guard let self else { return }
+                let now = Date()
+                let items = (reminders ?? [])
+                    .compactMap { reminder -> ReminderItem? in
+                        guard let components = reminder.dueDateComponents,
+                              let due = Calendar.current.date(from: components)
+                        else { return nil }
+                        // Only surface items due within the next day or already overdue by ≤1h.
+                        guard due.timeIntervalSince(now) <= 24 * 60 * 60,
+                              due.timeIntervalSince(now) > -60 * 60
+                        else { return nil }
+                        return ReminderItem(
+                            id: reminder.calendarItemIdentifier,
+                            title: reminder.title ?? "Reminder",
+                            due: due
+                        )
+                    }
+                    .sorted { $0.due < $1.due }
+                    .prefix(8)
+                self.dueReminders = Array(items)
+                self.onChange?()
+            }
+        }
     }
 
     private func updateAuthState() {
@@ -93,7 +145,6 @@ final class EventKitCalendarProvider: CalendarProvider {
             status = EKEventStore.authorizationStatus(for: .event)
             switch status {
             case .fullAccess, .writeOnly:
-                // writeOnly is unexpected for our use, but treat fullAccess as authorized.
                 authorizationState = (status == .fullAccess) ? .authorized : .denied
             case .authorized:
                 authorizationState = .authorized
@@ -112,6 +163,16 @@ final class EventKitCalendarProvider: CalendarProvider {
             default:
                 authorizationState = .denied
             }
+        }
+    }
+
+    private func updateRemindersAuth() {
+        if #available(macOS 14.0, *) {
+            let status = EKEventStore.authorizationStatus(for: .reminder)
+            remindersAuthorized = (status == .fullAccess || status == .authorized)
+        } else {
+            let status = EKEventStore.authorizationStatus(for: .reminder)
+            remindersAuthorized = (status == .authorized)
         }
     }
 }

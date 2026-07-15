@@ -43,10 +43,17 @@ final class MediaRemoteHelper {
     private var getIsPlaying: MRMediaRemoteGetNowPlayingApplicationIsPlaying?
     private var observers: [NSObjectProtocol] = []
 
+    private var pollTimer: Timer?
+
     func run() -> Never {
         loadFramework()
         registerForNotifications()
         refresh()
+        // Poll as a safety net — some players don't always emit notifications
+        // into a non-com.apple helper process.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
         RunLoop.main.run()
         exit(0) // unreachable; RunLoop.main.run() never returns on its own
     }
@@ -138,4 +145,5 @@ final class MediaRemoteHelper {
     }
 }
 
-MediaRemoteHelper().run()
+let helper = MediaRemoteHelper()
+helper.run()

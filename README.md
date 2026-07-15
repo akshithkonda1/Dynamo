@@ -54,9 +54,12 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | AirDrop share action (File Shelf) | **Live** (per-item share button via `NSSharingService(named: .sendViaAirDrop)`) |
 | Webcam mirror widget | **Live** (`AVCaptureSession` + `AVCaptureVideoPreviewLayer`; camera runs only while the Webcam tab is actually visible — started/stopped by the view's appear/disappear, never by app launch or plugin registration) |
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
-| MediaRemoteAdapter helper process | **Live, unverified** (`DynamoMediaRemoteHelper`: a standalone binary that reads MediaRemote in its own process, streaming JSON over stdout; wired as a third fallback tier in `MediaRemoteNowPlayingProvider`, before AppleScript. No-ops safely if the helper binary isn't present. `project.yml` embeds it via an explicit, self-signing postbuild script rather than XcodeGen's `embed: true` — copying alone isn't enough, an unsigned nested executable fails Apple's notary check even if it runs fine locally. Still the one piece of Phase 4 genuinely unverifiable without a Mac) |
-| Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/notarize.sh`, `scripts/make-dmg.sh`, `.github/workflows/release.yml` — tooling only; nobody but you can supply the signing certificate + notary credentials it needs) |
-| Messages widget | **Live, unverified — read the "Messages setup" section before enabling** (reads recent iMessage/SMS conversations from Messages.app's own local database and replies via AppleScript, without leaving the notch; requires Full Disk Access, the broadest permission macOS has) |
+| MediaRemoteAdapter helper process | **Live** (`DynamoMediaRemoteHelper` — multi-path discovery, live publish, auto-restart; embedded by Xcode postbuild + `package-app.sh`; verified present in packaged `.app`) |
+| Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/release-local.sh`, `notarize.sh`, `make-dmg.sh`, `.github/workflows/release.yml`) |
+| Messages widget | **Live — FDA expected** (reads `chat.db`, replies via AppleScript; Full Disk Access required) |
+| Reminders peeks | **Live** (EventKit incomplete reminders due within ~5 min; listed under Calendar expanded view) |
+| Multi-display picker | **Live** (Settings → General → Display for notch) |
+| App icon | **Live** (regenerated notch/island mark for asset catalog + `.icns`) |
 
 ## Requirements
 
@@ -256,13 +259,25 @@ After building, run through **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)** before 
 - WeatherKit / paid-team signing can be soft-failed when testing ad-hoc builds.
 - **Messages + Full Disk Access is in-scope:** grant FDA, relaunch, verify read + reply. FDA is intentional for this feature (whole-disk access; revoke anytime in System Settings).
 
-## Next steps (post Phase 4)
+## Local release (DMG)
 
-- Optional: tie event-driven peek into more sources (e.g. a Reminders due date)
-- Optional: real app icon design (the current one is a generated placeholder)
-- Optional: MediaRemoteAdapter helper process verification on a real Mac —
-  confirm `embed: true` actually lands the binary in `Contents/MacOS/`
-- Optional: multi-display picker for which screen hosts the notch panel
+```bash
+# Ad-hoc package + DMG (no notary credentials required):
+./scripts/release-local.sh --skip-notary
+
+# Full Developer ID re-sign + notarize + DMG (needs env vars — see scripts/notarize.sh):
+export DEVELOPER_ID_IDENTITY="Developer ID Application: …"
+export NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_APP_PASSWORD=…
+./scripts/release-local.sh
+```
+
+WeatherKit-signed public releases should use the Xcode export path / GitHub Actions workflow with your paid team secrets.
+
+## Next steps
+
+- Optional: paid-team WeatherKit cold-start verification (left alone by design for now)
+- Optional: further icon polish by a designer
+- Optional: more event sources (e.g. Focus / Screen Time)
 
 ## License
 

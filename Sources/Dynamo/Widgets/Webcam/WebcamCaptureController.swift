@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 enum WebcamAuthState: Equatable {
@@ -46,7 +46,7 @@ final class WebcamCaptureController: ObservableObject {
         guard authState == .authorized else { return }
         configureIfNeeded()
         guard authState == .authorized else { return } // configureIfNeeded may downgrade to .unavailable
-        let session = self.session
+        nonisolated(unsafe) let session = self.session
         guard !session.isRunning else { return }
         DispatchQueue.global(qos: .userInitiated).async {
             session.startRunning()
@@ -55,7 +55,7 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     func stop() {
-        let session = self.session
+        nonisolated(unsafe) let session = self.session
         guard session.isRunning else {
             isRunning = false
             return

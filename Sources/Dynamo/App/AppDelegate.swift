@@ -75,7 +75,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             queue: .main
         ) { _ in
             MainActor.assumeIsolated {
-                notchRef.reposition()
+                notchRef.applyPreferredDisplay()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPreferredDisplayDidChange,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                notchRef.applyPreferredDisplay()
             }
         }
     }

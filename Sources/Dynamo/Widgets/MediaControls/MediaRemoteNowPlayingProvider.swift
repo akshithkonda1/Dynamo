@@ -98,18 +98,33 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     /// No-ops if the helper binary isn't bundled in this build — see
     /// `MediaRemoteHelperProcess.isAvailable`.
     private func startHelperProcess() {
-        guard helperProcess.isAvailable else { return }
+        guard helperProcess.isAvailable else {
+            NSLog("Dynamo: MediaRemote helper binary not found — using in-process + AppleScript only")
+            return
+        }
         helperProcess.onPayload = { [weak self] payload in
-            self?.latestHelperInfo = NowPlayingInfo(
+            guard let self else { return }
+            let info = NowPlayingInfo(
                 title: payload.title.isEmpty ? NowPlayingInfo.empty.title : payload.title,
                 artist: payload.artist,
                 album: payload.album,
                 isPlaying: payload.isPlaying,
                 artworkData: payload.artworkBase64.flatMap { Data(base64Encoded: $0) }
             )
+            self.latestHelperInfo = info
+            // Publish live from the helper when it has real media — don't wait
+            // for the in-process path to fail. This is the whole point of the
+            // helper on macOS 15.4+ where in-process MediaRemote is often empty.
+            if info.title != NowPlayingInfo.empty.title, !info.title.isEmpty {
+                self.publish(info)
+            }
         }
         helperProcess.start()
     }
+
+    /// Diagnostics for Settings / smoke tests.
+    var isHelperAvailable: Bool { helperProcess.isAvailable }
+    var helperPath: String? { helperProcess.resolvedPath }
 
     func togglePlayPause() {
         if send(MRCommand.togglePlayPause) { scheduleRefresh(); return }

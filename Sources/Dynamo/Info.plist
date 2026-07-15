@@ -24,6 +24,10 @@
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
 	<key>NSCameraUsageDescription</key>

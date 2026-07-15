@@ -9,6 +9,12 @@ struct CalendarEventItem: Identifiable, Equatable {
     let isAllDay: Bool
 }
 
+struct ReminderItem: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let due: Date
+}
+
 /// Hex-friendly color stored without importing AppKit into the protocol surface.
 struct CodableColor: Equatable {
     var red: Double
@@ -27,10 +33,16 @@ enum CalendarAuthState: Equatable {
 protocol CalendarProvider: AnyObject {
     var authorizationState: CalendarAuthState { get }
     var upcoming: [CalendarEventItem] { get }
+    /// Incomplete reminders due within the near window (for peeks + list).
+    var dueReminders: [ReminderItem] { get }
     var onChange: (() -> Void)? { get set }
 
     func start()
     func stop()
     func requestAccess() async
     func refresh()
+}
+
+extension CalendarProvider {
+    var dueReminders: [ReminderItem] { [] }
 }

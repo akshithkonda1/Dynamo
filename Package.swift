@@ -19,9 +19,16 @@ let package = Package(
         .executableTarget(
             name: "Dynamo",
             path: "Sources/Dynamo",
-            exclude: ["Info.plist", "Dynamo.entitlements"],
+            // Asset catalog lives in Resources for the Xcode app target only.
+            // Processing it via SPM triggers actool + codesign on a resource
+            // bundle that often fails with "resource fork … not allowed".
+            exclude: [
+                "Info.plist",
+                "Dynamo.entitlements",
+                "Resources/Assets.xcassets"
+            ],
             resources: [
-                .process("Resources")
+                .copy("Resources/AppIcon.icns")
             ]
         ),
         // Standalone MediaRemote helper process — see its own doc comment and
