@@ -4,7 +4,7 @@ macOS notch widget dock — a better-architected, better-designed alternative to
 
 Dynamo turns the MacBook notch into an interactive widget tray with a plugin architecture so widgets are cheap to add or remove.
 
-**Current release: [v0.4.0](https://github.com/akshithkonda1/Dynamo/releases/tag/v0.4.0)** — stability, Music/Spotify, Webcam mirror, day-driver UX. See [CHANGELOG.md](CHANGELOG.md).
+**Current version: 0.4.0** (on `main`) — stability, Music/Spotify, Webcam mirror, day-driver UX. See [CHANGELOG.md](CHANGELOG.md) and [PR #5](https://github.com/akshithkonda1/Dynamo/pull/5).
 
 ## Status
 
