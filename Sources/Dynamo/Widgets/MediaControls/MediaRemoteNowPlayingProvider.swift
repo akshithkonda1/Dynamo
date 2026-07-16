@@ -56,15 +56,15 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         startHelperProcess()
         refreshAll()
         // AppleScript path needs a slightly snappier poll so transport feels live.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Register once on `.common` only — double-adding a scheduledTimer also
+        // fires on `.default` and can double-toggle / thrash metadata.
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
             }
         }
-        // Keep timer firing while scrolling UI / tracking runs.
-        if let pollTimer {
-            RunLoop.main.add(pollTimer, forMode: .common)
-        }
+        RunLoop.main.add(t, forMode: .common)
+        pollTimer = t
     }
 
     func stop() {
@@ -113,10 +113,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         // `playpause` was toggling twice — play then immediately pause.
         let wantPlaying = !current.isPlaying
         var optimistic = current
-        if !Self.isEmpty(optimistic) {
-            optimistic.isPlaying = wantPlaying
-            publish(optimistic)
-        }
+        optimistic.isPlaying = wantPlaying
+        // Always update the play/pause glyph; metadata may catch up a moment later.
+        publish(optimistic)
 
         let scripted = AppleScriptMedia.shared
         if scripted.hasScriptablePlayer {

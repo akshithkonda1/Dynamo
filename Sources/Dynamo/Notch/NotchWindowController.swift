@@ -38,7 +38,8 @@ final class NotchWindowController: ObservableObject {
         return NSSize(width: metrics.width, height: metrics.height)
     }
     private let overlaySize = NSSize(width: 300, height: 40)
-    private let expandedSize = NSSize(width: 600, height: 200)
+    /// Tall enough for Media (art + timeline + transport) and Calendar lists.
+    private let expandedSize = NSSize(width: 620, height: 248)
     /// Grace before auto-collapse after the cursor leaves the panel.
     private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
@@ -79,6 +80,8 @@ final class NotchWindowController: ObservableObject {
         guard !isExpanded else { return }
         isExpanded = true
         animateFrame(to: expandedSize)
+        // Become key so the first click on transport / scrubber fires (nonactivating panel).
+        panel?.makeKey()
     }
 
     func collapse() {

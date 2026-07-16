@@ -13,8 +13,9 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     let controller = WebcamCaptureController()
 
     func start() {
-        // Keep auth state warm; do not start the camera until the view appears.
-        controller.requestAccessIfNeeded()
+        // Sync auth quietly only — never prompt or start the camera until the
+        // Webcam tab actually appears (privacy: no light on app launch).
+        controller.refreshAuthState(requestIfNeeded: false)
     }
 
     func stop() {

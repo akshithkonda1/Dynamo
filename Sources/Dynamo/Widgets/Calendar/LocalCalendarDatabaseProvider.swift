@@ -31,12 +31,12 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
 
     func start() {
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        if let timer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
+        // Register once on `.common` so tracking/scroll doesn't stall refreshes.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func stop() {
@@ -172,6 +172,8 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         let now = Date().timeIntervalSinceReferenceDate
         let end = now + 14 * 24 * 60 * 60
 
+        // Include in-progress events (end still ahead) plus anything starting
+        // within the next two weeks — not only start ≥ now.
         let sql = """
         SELECT
           ci.UUID,
@@ -188,10 +190,9 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         JOIN CalendarItem ci ON ci.ROWID = oc.event_id
         JOIN Calendar c ON c.ROWID = oc.calendar_id
         LEFT JOIN Location loc ON loc.ROWID = ci.location_id
-        WHERE oc.occurrence_start_date >= ?
+        WHERE oc.occurrence_end_date >= ?
           AND oc.occurrence_start_date <= ?
           AND IFNULL(ci.hidden, 0) = 0
-          AND (oc.next_reminder_date IS NULL)
         ORDER BY oc.occurrence_start_date ASC
         LIMIT 80;
         """
