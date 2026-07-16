@@ -53,7 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Default tray order. Settings can reorder without hosts knowing names.
         registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
-        registry.register(VolumePlugin())
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
