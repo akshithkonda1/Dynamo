@@ -38,8 +38,8 @@ final class NotchWindowController: ObservableObject {
         return NSSize(width: metrics.width, height: metrics.height)
     }
     private let overlaySize = NSSize(width: 300, height: 40)
-    /// Tall enough for Media (art + timeline + transport) and Calendar lists.
-    private let expandedSize = NSSize(width: 620, height: 248)
+    /// Tall enough for Media (art + timeline + volume + transport) and Calendar.
+    private let expandedSize = NSSize(width: 620, height: 268)
     /// Grace before auto-collapse after the cursor leaves the panel.
     private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
