@@ -152,7 +152,6 @@ private struct AmbientMediaView: View {
 
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
-    @ObservedObject private var volume = SystemVolumeController.shared
     /// Local scrub value while the user is dragging the timeline.
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
@@ -193,8 +192,6 @@ private struct ExpandedMediaView: View {
 
                 timelineBar
 
-                systemVolumeRow
-
                 playlistRow
 
                 Spacer(minLength: 4)
@@ -205,8 +202,6 @@ private struct ExpandedMediaView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .onAppear {
             plugin.refreshPlaylists()
-            SystemVolumeController.shared.start()
-            SystemVolumeController.shared.refreshFromSystem()
             displayElapsed = plugin.info.elapsed
             lastTick = .now
         }
@@ -324,47 +319,6 @@ private struct ExpandedMediaView: View {
         let m = total / 60
         let s = total % 60
         return String(format: "%d:%02d", m, s)
-    }
-
-    /// Live system output volume — same value as the volume keys / menu bar.
-    private var systemVolumeRow: some View {
-        HStack(spacing: 8) {
-            Button {
-                volume.toggleMute()
-            } label: {
-                Image(systemName: volumeIcon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(volume.isMuted ? "Unmute" : "Mute")
-
-            Slider(
-                value: Binding(
-                    get: { Double(volume.isMuted ? 0 : volume.level) },
-                    set: { volume.setLevel(Float($0)) }
-                ),
-                in: 0...1
-            )
-            .controlSize(.mini)
-            .tint(Color.white.opacity(0.85))
-            .help(volume.deviceName.map { "Output: \($0)" } ?? "System volume")
-
-            Text(volume.isMuted ? "Mute" : "\(Int((volume.level * 100).rounded()))%")
-                .font(NotchTheme.micro.monospacedDigit())
-                .foregroundStyle(NotchTheme.textTertiary)
-                .frame(width: 34, alignment: .trailing)
-        }
-        .padding(.top, 1)
-    }
-
-    private var volumeIcon: String {
-        if volume.isMuted || volume.level <= 0.001 { return "speaker.slash.fill" }
-        if volume.level < 0.33 { return "speaker.wave.1.fill" }
-        if volume.level < 0.66 { return "speaker.wave.2.fill" }
-        return "speaker.wave.3.fill"
     }
 
     @ViewBuilder
