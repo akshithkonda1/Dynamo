@@ -19,6 +19,16 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
     /// Full content shown when the notch is expanded and this widget is active.
     func expandedView() -> AnyView
 
+    /// Preferred height of the expanded panel while this widget is active.
+    /// Width is constant across every widget (so the tray icon row never
+    /// jumps horizontally on tab switch); height defaults to the size that
+    /// fits a full media player / scrollable list. Override only when a
+    /// widget's content is reliably much shorter than that in every state
+    /// (e.g. Battery) — the panel should expand to fit what's on screen, not
+    /// balloon to the same footprint as the busiest widget regardless of
+    /// content.
+    var expandedContentHeight: CGFloat { get }
+
     /// Called once when the plugin is registered. Use for timers, observers, etc.
     func start()
 
@@ -27,6 +37,7 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 }
 
 extension NotchWidgetPlugin {
+    var expandedContentHeight: CGFloat { 220 }
     func start() {}
     func stop() {}
 }

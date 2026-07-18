@@ -32,13 +32,21 @@ final class NotchWindowController: ObservableObject {
     /// Ignore hover-exit events until this date (covers frame animation churn).
     private var suppressHoverExitUntil: Date?
     private var isAnimatingFrame = false
+    private var cancellables = Set<AnyCancellable>()
 
     private var collapsedSize: NSSize {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
     private let overlaySize = NSSize(width: 320, height: 44)
-    private let expandedSize = NSSize(width: 640, height: 220)
+    private static let expandedWidth: CGFloat = 640
+    /// Height follows the active widget (`expandedContentHeight`) rather than
+    /// a single fixed value, so e.g. Battery doesn't balloon to the same
+    /// footprint as the media player. Width stays constant.
+    private var expandedSize: NSSize {
+        let height = registry?.activePlugin?.expandedContentHeight ?? 220
+        return NSSize(width: Self.expandedWidth, height: height)
+    }
     /// Grace before auto-collapse after the cursor leaves the panel.
     private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
@@ -53,12 +61,24 @@ final class NotchWindowController: ObservableObject {
         self.sneakPeek = sneakPeek
         if panel == nil {
             installPanel(registry: registry, hud: hud, sneakPeek: sneakPeek)
+            // Re-size an already-expanded panel when the user switches tabs to
+            // a widget with a different preferred height (e.g. Battery <->
+            // Media) — otherwise it would stay pinned to whichever widget was
+            // active when the panel first opened.
+            registry.$activePluginID
+                .sink { [weak self] _ in self?.activeWidgetDidChange() }
+                .store(in: &cancellables)
         } else if let hostingView {
             hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
         isHiddenModeEnabled = UserDefaults.standard.bool(forKey: Self.hiddenModeKey)
         reposition()
         applyInitialVisibility()
+    }
+
+    private func activeWidgetDidChange() {
+        guard isExpanded, !isAnimatingFrame else { return }
+        animateFrame(to: expandedSize)
     }
 
     // MARK: - Expansion
@@ -268,6 +288,7 @@ final class NotchWindowController: ObservableObject {
         cancelRetreat()
         cancelCollapse()
         removePeekSensor()
+        cancellables.removeAll()
         panel?.orderOut(nil)
         panel = nil
         hostingView = nil

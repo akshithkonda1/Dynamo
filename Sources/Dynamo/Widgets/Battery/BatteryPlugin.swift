@@ -30,6 +30,10 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin {
     func expandedView() -> AnyView {
         AnyView(ExpandedBatteryView(snapshot: snapshot))
     }
+
+    // A percent readout and a single progress bar never need the full
+    // media-player-sized panel — see the doc comment on the protocol default.
+    var expandedContentHeight: CGFloat { 132 }
 }
 
 // MARK: - Views
