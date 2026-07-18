@@ -20,6 +20,7 @@ final class SystemHUDController: ObservableObject {
     @Published private(set) var state: SystemHUDState?
 
     private var localMonitor: Any?
+    private var globalMonitor: Any?
     private var hideWorkItem: DispatchWorkItem?
     private weak var notch: NotchWindowController?
 
@@ -33,6 +34,10 @@ final class SystemHUDController: ObservableObject {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
         hideWorkItem?.cancel()
         state = nil
     }
@@ -44,8 +49,13 @@ final class SystemHUDController: ObservableObject {
             self?.handleSystemDefined(event)
             return event
         }
-        // Also watch globally so we see keys when Dynamo is not key.
-        NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
+        // Also watch globally so we see keys when Dynamo is not key. The
+        // returned token must be captured (unlike the local monitor's return
+        // value being reused directly above) so teardown() can actually
+        // remove it — addGlobalMonitorForEvents has no other way to
+        // unregister, and a discarded token would leak this monitor for the
+        // life of the process regardless of teardown().
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
             Task { @MainActor in
                 self?.handleSystemDefined(event)
             }

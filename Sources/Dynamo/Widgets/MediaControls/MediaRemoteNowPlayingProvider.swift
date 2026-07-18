@@ -73,7 +73,6 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         pollTimer = nil
         for observer in observers {
             DistributedNotificationCenter.default().removeObserver(observer)
-            NotificationCenter.default.removeObserver(observer)
         }
         observers.removeAll()
         if let frameworkHandle {
@@ -162,6 +161,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     private func registerForNotifications() {
+        // MediaRemote posts these via DistributedNotificationCenter only —
+        // the poster is whatever process actually owns "now playing" state
+        // (e.g. Music.app, Spotify), a different process than Dynamo, and
+        // plain NotificationCenter never delivers across processes. A local
+        // registration for the same names would just be a no-op that never
+        // fires; this codebase used to register both, unnecessarily.
         let names = [
             "kMRMediaRemoteNowPlayingInfoDidChangeNotification",
             "kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification",
@@ -170,8 +175,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             "MRMediaRemoteNowPlayingInfoDidChangeNotification",
             "MRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification"
         ]
+        let center = DistributedNotificationCenter.default()
         for name in names {
-            let center = DistributedNotificationCenter.default()
             let token = center.addObserver(
                 forName: Notification.Name(name),
                 object: nil,
@@ -180,15 +185,6 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 Task { @MainActor in self?.refreshAll() }
             }
             observers.append(token)
-
-            let local = NotificationCenter.default.addObserver(
-                forName: Notification.Name(name),
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in self?.refreshAll() }
-            }
-            observers.append(local)
         }
     }
 

@@ -42,7 +42,11 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
     private var timer: Timer?
     private var selectedChatRowID: Int64?
 
-    private static let refreshInterval: TimeInterval = 5
+    // 10s keeps the sneak-peek "new message" experience reasonably responsive
+    // without being the most aggressive poll in the app by a wide margin
+    // (Battery is 30s, Calendar 60s) for a SQLite file another process is
+    // also actively writing to.
+    private static let refreshInterval: TimeInterval = 10
     private static let conversationLimit: Int32 = 12
     private static let messageLimit: Int32 = 40
 
@@ -71,10 +75,17 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
     func selectConversation(guid: String, rowID: Int64) {
         selectedChatGUID = guid
         selectedChatRowID = rowID
-        refreshMessages()
+        if let db = openDatabase() {
+            defer { sqlite3_close(db) }
+            refreshMessages(db)
+        }
         onChange?()
     }
 
+    /// One connection per refresh cycle, shared across all three queries —
+    /// not one open/close per query. This runs on a timer for as long as the
+    /// widget is enabled, so tripling the file-open overhead every tick
+    /// forever was real, avoidable waste.
     func refresh() {
         recheckAccess()
         guard accessState == .granted else {
@@ -84,13 +95,19 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
             onChange?()
             return
         }
-        refreshConversations()
+        guard let db = openDatabase() else {
+            onChange?()
+            return
+        }
+        defer { sqlite3_close(db) }
+
+        refreshConversations(db)
         if selectedChatGUID == nil, let first = conversations.first {
             selectedChatGUID = first.id
             selectedChatRowID = first.chatRowID
         }
-        refreshMessages()
-        refreshLatestIncoming()
+        refreshMessages(db)
+        refreshLatestIncoming(db)
         onChange?()
     }
 
@@ -117,10 +134,7 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
 
     // MARK: - Reads
 
-    private func refreshConversations() {
-        guard let db = openDatabase() else { return }
-        defer { sqlite3_close(db) }
-
+    private func refreshConversations(_ db: OpaquePointer) {
         let sql = """
         SELECT c.ROWID, c.guid, c.display_name, c.chat_identifier,
                (SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) AS participant_count,
@@ -172,9 +186,8 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
         conversations = results
     }
 
-    private func refreshMessages() {
-        guard accessState == .granted, let rowID = selectedChatRowID, let db = openDatabase() else { return }
-        defer { sqlite3_close(db) }
+    private func refreshMessages(_ db: OpaquePointer) {
+        guard let rowID = selectedChatRowID else { return }
 
         let sql = """
         SELECT m.ROWID, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, h.id
@@ -217,10 +230,7 @@ final class ChatDatabaseMessagesProvider: MessagesProvider {
         messages = results.reversed()
     }
 
-    private func refreshLatestIncoming() {
-        guard let db = openDatabase() else { return }
-        defer { sqlite3_close(db) }
-
+    private func refreshLatestIncoming(_ db: OpaquePointer) {
         let sql = """
         SELECT m.ROWID, m.guid, m.text, m.attributedBody, m.date, h.id, c.display_name, c.chat_identifier
         FROM message m
