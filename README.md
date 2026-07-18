@@ -63,6 +63,23 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | Multi-display picker | **Live** (Settings → General → Display for notch) |
 | App icon | **Live** (regenerated notch/island mark for asset catalog + `.icns`) |
 
+### Phase 5 — stability, consistency & resource efficiency
+
+A dedicated audit pass, not a feature pass. Every timer, poll loop, monitor
+token, and notification registration in the app was re-read end to end to
+separate real leaks/waste from patterns that only look concerning at a glance.
+
+| Area | State |
+|------|--------|
+| Leaked global event monitor (`SystemHUDController`) | **Fixed** — `NSEvent.addGlobalMonitorForEvents`'s return value was previously discarded, so `teardown()` could never remove it; the volume/brightness key monitor leaked for the life of the process. Token is now captured and removed alongside the local monitor. |
+| Dead notification registration (`MediaRemoteNowPlayingProvider`) | **Fixed** — every MediaRemote notification name was registered on both `DistributedNotificationCenter` and plain `NotificationCenter`. MediaRemote only ever posts distributed (poster is Music/Spotify, a different process), so the local registration was a permanent no-op doubling observer bookkeeping. Removed. |
+| Redundant SQLite connections (`ChatDatabaseMessagesProvider`) | **Fixed** — `refresh()` opened and closed three separate connections to `chat.db` per poll tick (conversations, messages, latest-incoming). Now one connection shared across all three queries per cycle. Poll interval also raised 5s → 10s, still well below Calendar's 60s / Battery's 30s, against a database another process is actively writing to. |
+| Retain-cycle sweep | **Checked, none found** — every `Timer.scheduledTimer` and `DispatchWorkItem` closure in the codebase already captures `self` weakly. |
+| Clipboard poll (`ClipboardStore`, 0.5s) | **Reviewed, unchanged** — already cheap (`NSPasteboard.changeCount` comparison; real work only fires on an actual change). |
+| Weather location fetch (`WeatherKitWeatherProvider`) | **Reviewed, unchanged** — one-shot `requestLocation()`, not continuous tracking. |
+| Webcam capture teardown (`WebcamCaptureController`) | **Reviewed, unchanged** — `AVCaptureSession.stopRunning()` already releases the real (camera hardware) resource on view disappearance. |
+| Checklist item growth (`ChecklistStore`) | **Reviewed, intentionally left uncapped** — unlike Clipboard (20-item cap) and Shelf (24-item cap), checklist items are explicit user-authored to-dos with no implicit expiry. Silently evicting old ones would be data loss, a worse outcome than the unbounded (and in practice small) growth of a personal to-do list. |
+
 ## Requirements
 
 - macOS 13+
@@ -275,11 +292,15 @@ export NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_APP_PASSWORD=…
 
 WeatherKit-signed public releases should use the Xcode export path / GitHub Actions workflow with your paid team secrets.
 
-## Next steps
+## Next steps (post Phase 5)
 
 - Optional: paid-team WeatherKit cold-start verification (left alone by design for now)
-- Optional: further icon polish by a designer
-- Optional: more event sources (e.g. Focus / Screen Time)
+- Optional: further icon polish by a designer (the current one is a generated placeholder)
+- Optional: more event sources (e.g. Focus / Screen Time, a Reminders due date)
+- Optional: MediaRemoteAdapter helper process verification on a real Mac —
+  confirm the `project.yml` postbuild script actually copies and signs the
+  binary into `Contents/MacOS/`
+- Optional: multi-display picker for which screen hosts the notch panel
 
 ## License
 
