@@ -13,8 +13,8 @@ struct SystemHUDState: Equatable {
     var isMuted: Bool
 }
 
-/// Shows a brief volume/brightness HUD in the notch without adding a third
-/// hover expansion state. Triggered by system-defined media keys.
+/// Shows a brief volume/brightness HUD in the notch. Tracks real machine
+/// volume via `SystemVolumeController` (keys, Control Center, Dynamo slider).
 @MainActor
 final class SystemHUDController: ObservableObject {
     @Published private(set) var state: SystemHUDState?
@@ -23,9 +23,14 @@ final class SystemHUDController: ObservableObject {
     private var globalMonitor: Any?
     private var hideWorkItem: DispatchWorkItem?
     private weak var notch: NotchWindowController?
+    private let volume = SystemVolumeController.shared
 
     func attach(notch: NotchWindowController) {
         self.notch = notch
+        volume.start()
+        volume.onExternalChange = { [weak self] in
+            self?.presentVolumeFromLiveState()
+        }
         installKeyMonitor()
     }
 
@@ -39,22 +44,21 @@ final class SystemHUDController: ObservableObject {
             self.globalMonitor = nil
         }
         hideWorkItem?.cancel()
+        volume.onExternalChange = nil
+        volume.stop()
         state = nil
     }
 
     private func installKeyMonitor() {
-        // System-defined events (volume / brightness keys) arrive as NSEvents
-        // with subtype .screenChanged (or raw 8) on many macOS versions.
+        // Volume / brightness keys as system-defined NSEvents.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .systemDefined) { [weak self] event in
             self?.handleSystemDefined(event)
             return event
         }
         // Also watch globally so we see keys when Dynamo is not key. The
-        // returned token must be captured (unlike the local monitor's return
-        // value being reused directly above) so teardown() can actually
-        // remove it — addGlobalMonitorForEvents has no other way to
-        // unregister, and a discarded token would leak this monitor for the
-        // life of the process regardless of teardown().
+        // returned token must be captured so teardown() can actually remove it —
+        // addGlobalMonitorForEvents has no other way to unregister, and a
+        // discarded token would leak this monitor for the life of the process.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
             Task { @MainActor in
                 self?.handleSystemDefined(event)
@@ -75,7 +79,11 @@ final class SystemHUDController: ObservableObject {
 
         switch keyCode {
         case 0, 1, 7: // sound up, sound down, mute
-            presentVolume()
+            // Sample after the system applies the key (a few ms lag).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+                self?.volume.refreshFromSystem(announceExternal: false)
+                self?.presentVolumeFromLiveState()
+            }
         case 2, 3: // brightness up / down
             presentBrightness()
         default:
@@ -83,14 +91,13 @@ final class SystemHUDController: ObservableObject {
         }
     }
 
-    private func presentVolume() {
-        let level = SystemLevelReader.outputVolume() ?? 0
-        let muted = SystemLevelReader.isMuted()
+    private func presentVolumeFromLiveState() {
+        let level = volume.level
+        let muted = volume.isMuted
         show(SystemHUDState(kind: .volume, level: muted ? 0 : level, isMuted: muted))
     }
 
     private func presentBrightness() {
-        // Brightness may lag the keypress by a frame; sample after a tiny delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             let level = SystemLevelReader.displayBrightness() ?? 0.5
             self?.show(SystemHUDState(kind: .brightness, level: level, isMuted: false))
@@ -99,7 +106,6 @@ final class SystemHUDController: ObservableObject {
 
     private func show(_ newState: SystemHUDState) {
         state = newState
-        // Ensure the notch is visible for the meter even in Hidden mode.
         notch?.presentForOverlay()
         hideWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in

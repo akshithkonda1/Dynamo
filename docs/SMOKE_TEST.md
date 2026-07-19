@@ -8,7 +8,6 @@ Use this after a local build (Xcode target preferred) to confirm the app is usab
 | Item | Decision |
 |------|----------|
 | WeatherKit / paid team signing | Leave alone for now |
-| Messages Full Disk Access (FDA) | **Yes — enable and verify** |
 
 Check boxes as you go. Prefer a cold launch each major section.
 
@@ -118,44 +117,7 @@ Check boxes as you go. Prefer a cold launch each major section.
 
 ---
 
-## 11. Messages + Full Disk Access (**required this pass**)
-
-Messages is intentionally enabled. FDA is required to read `~/Library/Messages/chat.db`.
-
-### 11a. Grant Full Disk Access
-
-- [ ] Expand **Messages** in the notch (or open **Settings → Messages**)
-- [ ] If status is not granted: **Open Full Disk Access Settings** / **Open Privacy Settings**
-- [ ] System Settings → Privacy & Security → **Full Disk Access**
-- [ ] Enable **Dynamo** (or add `Dynamo.app` via + if missing)
-  - Use the same binary you launched (Xcode build vs `dist/Dynamo.app` are different entries)
-- [ ] **Quit and relaunch Dynamo** after toggling FDA (macOS often requires this)
-- [ ] In Messages widget: **Check Again** → status **“Full Disk Access granted”**
-
-### 11b. Read path
-
-- [ ] Conversation chips appear (recent threads)
-- [ ] Select a thread → bubbles show (incoming + outgoing)
-- [ ] Empty database / no chats → calm empty state, not a crash
-- [ ] Incoming message from someone else (while Dynamo running) → notch sneak peek with sender + preview
-
-### 11c. Send path (Automation)
-
-- [ ] Select a thread you own / a test contact
-- [ ] Type a short reply and send
-- [ ] First send: allow **Automation** for Dynamo → Messages when macOS prompts
-- [ ] Message appears in Messages.app and in the notch thread after refresh
-- [ ] Confirm Dynamo did **not** write message bodies into Application Support (only in-memory / chat.db remains source of truth)
-
-### 11d. Safety / privacy (acceptance)
-
-- [ ] Understood: FDA is whole-disk access, not Messages-only
-- [ ] Understood: content is not persisted by Dynamo
-- [ ] FDA can be revoked later in the same System Settings pane
-
----
-
-## 12. Launch at Login *(optional)*
+## 11. Launch at Login *(optional)*
 
 - [ ] Settings → Launch at Login on
 - [ ] Log out/in or reboot → Dynamo starts (best with a real `.app` bundle)
@@ -163,7 +125,7 @@ Messages is intentionally enabled. FDA is required to read `~/Library/Messages/c
 
 ---
 
-## 13. Stability pass
+## 12. Stability pass
 
 - [ ] Enable all intended widgets; leave running 10+ minutes
 - [ ] No beachball on hover expand/collapse
@@ -181,16 +143,4 @@ Messages is intentionally enabled. FDA is required to read `~/Library/Messages/c
 | macOS version | |
 | Machine | MacBook / desktop |
 | WeatherKit live data | Pass / soft-fail (ad-hoc) / N/A |
-| Messages + FDA | Pass / Fail |
 | Notes | |
-
----
-
-## Quick FDA reference (Messages)
-
-```
-System Settings → Privacy & Security → Full Disk Access → Dynamo ON
-→ Quit Dynamo → Relaunch → Messages tab → Check Again
-```
-
-Deep link from the app: **Open Privacy Settings** (Messages expanded view or Settings → Messages).

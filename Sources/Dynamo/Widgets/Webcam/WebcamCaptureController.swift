@@ -43,6 +43,12 @@ final class WebcamCaptureController: ObservableObject {
         } else {
             isMirrored = UserDefaults.standard.bool(forKey: Self.mirrorKey)
         }
+        // Seed from remembered OS grant so we don't flash "Requesting…" every launch.
+        switch PermissionsStore.shared.status(for: .camera) {
+        case .granted: authState = .authorized
+        case .denied: authState = .denied
+        default: break
+        }
         // Sync published auth from system without prompting yet.
         refreshAuthState(requestIfNeeded: false)
     }
@@ -56,12 +62,18 @@ final class WebcamCaptureController: ObservableObject {
         stopWorkItem?.cancel()
         stopWorkItem = nil
 
+        // Always trust live OS status (not only remembered grants).
         refreshAuthState(requestIfNeeded: false)
-        guard authState == .authorized || authState == .notDetermined else { return }
 
-        if authState == .notDetermined {
-            requestAccessIfNeeded()
+        switch authState {
+        case .notDetermined:
+            // First open of the Webcam tab — prompt once, then start on grant.
+            refreshAuthState(requestIfNeeded: true)
             return
+        case .denied, .unavailable:
+            return
+        case .authorized:
+            break
         }
 
         configureIfNeeded()
@@ -110,10 +122,13 @@ final class WebcamCaptureController: ObservableObject {
         }
     }
 
-    private func refreshAuthState(requestIfNeeded: Bool) {
+    /// Syncs `authState` from the OS. Set `requestIfNeeded` only when the user
+    /// is actively opening Webcam — never from plugin registration / app launch.
+    func refreshAuthState(requestIfNeeded: Bool) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             authState = .authorized
+            PermissionsStore.shared.recordGranted(.camera)
         case .notDetermined:
             authState = .notDetermined
             if requestIfNeeded {
@@ -121,13 +136,17 @@ final class WebcamCaptureController: ObservableObject {
                     Task { @MainActor in
                         self?.authState = granted ? .authorized : .denied
                         if granted {
+                            PermissionsStore.shared.recordGranted(.camera)
                             self?.start()
+                        } else {
+                            PermissionsStore.shared.recordDenied(.camera)
                         }
                     }
                 }
             }
         case .denied, .restricted:
             authState = .denied
+            PermissionsStore.shared.recordDenied(.camera)
         @unknown default:
             authState = .denied
         }

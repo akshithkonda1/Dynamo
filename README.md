@@ -58,7 +58,6 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
 | MediaRemoteAdapter helper process | **Live** (`DynamoMediaRemoteHelper` — multi-path discovery, live publish, auto-restart; embedded by Xcode postbuild + `package-app.sh`; verified present in packaged `.app`) |
 | Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/release-local.sh`, `notarize.sh`, `make-dmg.sh`, `.github/workflows/release.yml`) |
-| Messages widget | **Live — FDA expected** (reads `chat.db`, replies via AppleScript; Full Disk Access required) |
 | Reminders peeks | **Live** (EventKit incomplete reminders due within ~5 min; listed under Calendar expanded view) |
 | Multi-display picker | **Live** (Settings → General → Display for notch) |
 | App icon | **Live** (regenerated notch/island mark for asset catalog + `.icns`) |
@@ -129,7 +128,7 @@ The script produces an ad-hoc signed `dist/Dynamo.app` — good for Launch at
 Login and every widget **except** Weather (ad-hoc signing can't carry the
 WeatherKit entitlement; build the Xcode target for that).
 
-Calendar access is requested on first launch. Grant it under **System Settings → Privacy & Security → Calendars** if prompted. Location (for Weather) is requested the same way — or set a location manually in Settings. Messages needs Full Disk Access, which has no in-app request flow — see "Messages setup" below before enabling that widget.
+Calendar may need **Full Disk Access** (Dynamo reads Calendar.app’s database read-only). Location (for Weather) is requested on first use — or set a location manually in Settings.
 
 ## Architecture principles
 
@@ -139,7 +138,6 @@ Calendar access is requested on first launch. Grant it under **System Settings �
 - **External data sources sit behind a small protocol** so mock and real implementations swap without touching UI.
 - **Two-state hover model** for the tray: `NotchWindowController.isExpanded`, driven by an `NSTrackingArea` on the notch (not a global mouse-moved monitor). Hidden↔Peek (top-edge proximity) and transient overlays (System HUD, now-playing sneak peek — both via `presentForOverlay()`/`overlayDidHide()`) are separate layers stacked on top — not extra expansion states.
 - **Shared `NotchTheme`** for spacing, type, color roles, and spring motion; panel uses `NSVisualEffectView` vibrancy.
-- **Externally-sourced sensitive data is never persisted by Dynamo.** Messages content is re-read from Messages.app's own database on each poll and held only in memory — no local copy in `AppSupportStore`. (Contrast with Clipboard/Checklist/Shelf, which persist happily because that's data the user created *in* Dynamo.)
 - **Shared `NotchIconButtonStyle`** (`.buttonStyle(.notchIcon(...))`) for every small utility button (delete, pin, reveal, clear, transport, refresh) — one hover-highlight + press-scale treatment, not each widget hand-rolling its own.
 - **Collapsed size is fixed to notch geometry** (`NotchGeometry`), never driven by widget content — an `ambientView()` (see `NotchAmbientProviding`) must fit within the notch, not push the panel wider. The width is derived from the screen's `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` (the real cutout), with an approximate fallback.
 
@@ -182,56 +180,6 @@ require the **Xcode app target** and a **paid Apple Developer team** (see
 **Why Weather replaced Stocks:** the same tray slot now leans on a first-party,
 key-free Apple framework instead of a third-party quote API that needed a
 manually-provisioned Finnhub key.
-
-## Messages setup — Full Disk Access (enabled by design)
-
-The Messages widget is registered in the default tray. **Full Disk Access is
-required and expected** if you use it. Grant FDA via System Settings (or the
-in-app “Open Privacy Settings” button), then quit and relaunch Dynamo.
-
-The Messages widget reads recent iMessage/SMS conversations and lets you
-reply, all from the notch. **Understand what it does:**
-
-- **It reads `~/Library/Messages/chat.db` directly** — Messages.app's own
-  local SQLite database — read-only, via `ChatDatabaseMessagesProvider`.
-  This is the same technique a number of established, non–App-Store Mac
-  utilities use; it is not a private/hidden trick, just reading a file you own.
-- **It requires Full Disk Access** (System Settings → Privacy & Security →
-  Full Disk Access → add Dynamo), because `chat.db` sits behind that
-  protection. **This is the broadest permission macOS has** — it grants
-  access to your entire filesystem, not just Messages. There is no API for
-  Dynamo to request this for you or to scope it down to just this one file;
-  granting it is a deliberate action only you can take, and you can revoke it
-  at any time in the same System Settings pane. The widget's expanded view
-  and its Settings panel both surface the current status and a button that
-  jumps straight to that Settings pane.
-- **Replies are sent by scripting Messages.app via AppleScript**
-  (`MessagesSendService`, `tell application "Messages" to send ... to chat id
-  ...`) — the exact same pattern this app already uses to control Music and
-  Spotify (`AppleScriptMedia`), and the same sanctioned automation surface
-  Apple has shipped in Messages.app's own scripting dictionary for years. The
-  recipient receives a completely ordinary message; nothing about delivery is
-  different from typing it into Messages.app yourself. macOS will prompt for
-  **Automation** access (System Settings → Privacy & Security → Automation)
-  the first time you actually send a reply — that prompt is the OS, not Dynamo.
-- **Nothing is persisted.** Unlike Clipboard/Checklist/Shelf, message content
-  is never written to Dynamo's own storage — it's re-read from chat.db on
-  each ~5s poll and held only in memory. The source of truth stays exactly
-  where you already trust it.
-- **Event-driven peek:** a new incoming message (from anyone, not just the
-  open conversation) briefly peeks the notch with the sender and preview text,
-  the same mechanic as the Calendar/Weather peeks.
-
-**Unverified like the rest of this app's newest work** — written and pushed
-from a Linux environment with no macOS, no Messages.app, and no real chat.db
-to test against. The chat.db schema is stable but entirely
-Apple-undocumented, and message-text storage changed around macOS Ventura
-(many rows now store an archived `NSAttributedString` in `attributedBody`
-instead of plain `text`, which this implementation decodes — see the doc
-comment in `ChatDatabaseMessagesProvider.swift`). Treat the exact SQL and
-column semantics as best-effort against a community-documented, not
-Apple-documented, format, and verify against your own Messages history before
-relying on it.
 
 ## Notarization & DMG releases
 
@@ -276,7 +224,7 @@ archive / notarytool flow — treat the first real tag push as the test.
 After building, run through **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)** before treating a build as daily-driver ready.
 
 - WeatherKit / paid-team signing can be soft-failed when testing ad-hoc builds.
-- **Messages + Full Disk Access is in-scope:** grant FDA, relaunch, verify read + reply. FDA is intentional for this feature (whole-disk access; revoke anytime in System Settings).
+- Calendar may need Full Disk Access for the local database path; grant only if events don’t load.
 
 ## Local release (DMG)
 

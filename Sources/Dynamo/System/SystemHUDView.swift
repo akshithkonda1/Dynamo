@@ -1,8 +1,22 @@
 import SwiftUI
 
 /// Compact volume / brightness meter shown over the notch tray.
+/// Volume HUD reflects live Core Audio levels (keys, Control Center, or Dynamo).
 struct SystemHUDView: View {
     let state: SystemHUDState
+    @ObservedObject private var volume = SystemVolumeController.shared
+
+    /// Prefer live machine volume when showing the volume HUD.
+    private var displayLevel: Float {
+        if state.kind == .volume {
+            return volume.isMuted ? 0 : volume.level
+        }
+        return state.level
+    }
+
+    private var displayMuted: Bool {
+        state.kind == .volume ? volume.isMuted : state.isMuted
+    }
 
     var body: some View {
         HStack(spacing: NotchTheme.spaceMD) {
@@ -17,7 +31,7 @@ struct SystemHUDView: View {
                         .fill(NotchTheme.chipFill)
                     Capsule()
                         .fill(Color.white.opacity(0.9))
-                        .frame(width: max(state.isMuted ? 0 : 6, geo.size.width * CGFloat(state.level)))
+                        .frame(width: max(displayMuted ? 0 : 6, geo.size.width * CGFloat(displayLevel)))
                 }
             }
             .frame(height: 6)
@@ -35,9 +49,9 @@ struct SystemHUDView: View {
     private var iconName: String {
         switch state.kind {
         case .volume:
-            if state.isMuted || state.level <= 0.001 { return "speaker.slash.fill" }
-            if state.level < 0.33 { return "speaker.wave.1.fill" }
-            if state.level < 0.66 { return "speaker.wave.2.fill" }
+            if displayMuted || displayLevel <= 0.001 { return "speaker.slash.fill" }
+            if displayLevel < 0.33 { return "speaker.wave.1.fill" }
+            if displayLevel < 0.66 { return "speaker.wave.2.fill" }
             return "speaker.wave.3.fill"
         case .brightness:
             return "sun.max.fill"
@@ -45,7 +59,7 @@ struct SystemHUDView: View {
     }
 
     private var percentLabel: String {
-        if state.kind == .volume, state.isMuted { return "Mute" }
-        return "\(Int((state.level * 100).rounded()))%"
+        if state.kind == .volume, displayMuted { return "Mute" }
+        return "\(Int((displayLevel * 100).rounded()))%"
     }
 }
