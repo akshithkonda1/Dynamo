@@ -49,28 +49,70 @@ enum SystemLevelReader {
 
     // MARK: - Volume
 
-    /// Output volume in 0...1, or nil if unavailable.
+    /// Output volume in 0...1 matching the menu-bar / keyboard volume as closely
+    /// as Core Audio allows. Tries virtual main volume, then channel scalars.
     static func outputVolume() -> Float? {
         guard let deviceID = defaultOutputDeviceID() else { return nil }
-        var volume: Float32 = 0
-        var size = UInt32(MemoryLayout<Float32>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: virtualMainVolume,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var volStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
-        if volStatus != noErr {
-            address.mSelector = kAudioDevicePropertyVolumeScalar
-            address.mElement = 1
-            size = UInt32(MemoryLayout<Float32>.size)
-            volStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
+
+        // 1) Virtual main volume ('vvol') — same scalar the system UI uses on most devices.
+        if let v = floatProperty(
+            deviceID,
+            selector: virtualMainVolume,
+            scope: kAudioDevicePropertyScopeOutput,
+            element: kAudioObjectPropertyElementMain
+        ) {
+            return min(1, max(0, v))
         }
-        guard volStatus == noErr else { return nil }
-        return min(1, max(0, volume))
+
+        // 2) Average left/right scalar (or first available channel).
+        var samples: [Float] = []
+        for channel: UInt32 in [1, 2] {
+            if let v = floatProperty(
+                deviceID,
+                selector: kAudioDevicePropertyVolumeScalar,
+                scope: kAudioDevicePropertyScopeOutput,
+                element: channel
+            ) {
+                samples.append(v)
+            }
+        }
+        if !samples.isEmpty {
+            let avg = samples.reduce(0, +) / Float(samples.count)
+            return min(1, max(0, avg))
+        }
+
+        // 3) Last resort: main-element scalar.
+        if let v = floatProperty(
+            deviceID,
+            selector: kAudioDevicePropertyVolumeScalar,
+            scope: kAudioDevicePropertyScopeOutput,
+            element: kAudioObjectPropertyElementMain
+        ) {
+            return min(1, max(0, v))
+        }
+        return nil
+    }
+
+    private static func floatProperty(
+        _ deviceID: AudioDeviceID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        element: AudioObjectPropertyElement
+    ) -> Float? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: element
+        )
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
+        guard status == noErr else { return nil }
+        return value
     }
 
     /// Set system output volume (0...1). Unmutes when setting above silence.
+    /// Writes virtual main **and** per-channel scalars so read-back matches.
     @discardableResult
     static func setOutputVolume(_ value: Float) -> Bool {
         guard let deviceID = defaultOutputDeviceID() else { return false }
@@ -81,26 +123,34 @@ enum SystemLevelReader {
 
         var volume = Float32(clamped)
         var size = UInt32(MemoryLayout<Float32>.size)
+        var anyOK = false
+
         var address = AudioObjectPropertyAddress(
             mSelector: virtualMainVolume,
             mScope: kAudioDevicePropertyScopeOutput,
             mElement: kAudioObjectPropertyElementMain
         )
-        var status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &volume)
-        if status != noErr {
-            // Per-channel scalar fallback (stereo).
-            address.mSelector = kAudioDevicePropertyVolumeScalar
-            var ok = false
-            for channel: UInt32 in [1, 2] {
-                address.mElement = channel
-                size = UInt32(MemoryLayout<Float32>.size)
-                if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &volume) == noErr {
-                    ok = true
-                }
-            }
-            status = ok ? noErr : status
+        if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &volume) == noErr {
+            anyOK = true
         }
-        return status == noErr
+
+        // Always try channel scalars too — some devices only honor these.
+        address.mSelector = kAudioDevicePropertyVolumeScalar
+        for channel: UInt32 in [1, 2] {
+            address.mElement = channel
+            size = UInt32(MemoryLayout<Float32>.size)
+            if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &volume) == noErr {
+                anyOK = true
+            }
+        }
+
+        address.mElement = kAudioObjectPropertyElementMain
+        size = UInt32(MemoryLayout<Float32>.size)
+        if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &volume) == noErr {
+            anyOK = true
+        }
+
+        return anyOK
     }
 
     static func isMuted() -> Bool {

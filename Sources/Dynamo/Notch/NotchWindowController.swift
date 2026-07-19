@@ -40,8 +40,9 @@ final class NotchWindowController: ObservableObject {
     private let overlaySize = NSSize(width: 300, height: 40)
     /// Tall enough for Media (art + timeline + volume card + transport) / Shelf.
     private let expandedSize = NSSize(width: 640, height: 300)
-    /// Grace before auto-collapse after the cursor leaves the panel.
-    private let collapseDelay: TimeInterval = 0.55
+    /// How long the expanded tray stays open after the cursor leaves the notch.
+    /// While the mouse is over the panel (or near it), we keep it open indefinitely.
+    private let collapseDelay: TimeInterval = 10.0
     private let retreatDelay: TimeInterval = 1.0
     /// Extra padding around the panel when deciding if the mouse is "still near".
     private let nearPadding: CGFloat = 14
@@ -77,16 +78,27 @@ final class NotchWindowController: ObservableObject {
         // Frame animation under the cursor often synthesizes mouseExited — ignore
         // those for a beat so the tray doesn't slam shut.
         suppressHoverExitUntil = Date().addingTimeInterval(0.65)
-        guard !isExpanded else { return }
-        isExpanded = true
-        animateFrame(to: expandedSize)
-        // Become key so the first click on transport / scrubber fires (nonactivating panel).
-        panel?.makeKey()
+        let wasExpanded = isExpanded
+        if !wasExpanded {
+            isExpanded = true
+            animateFrame(to: expandedSize)
+            // Become key so the first click on transport / scrubber fires (nonactivating panel).
+            panel?.makeKey()
+        }
+        // If we opened without the cursor (menu “Show Notch”), start the 10s timer.
+        // If the cursor is already over us, hover keeps it open.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self, self.isExpanded else { return }
+            if !self.mouseIsNearPanel() {
+                self.scheduleCollapse()
+            }
+        }
     }
 
     func collapse() {
         guard isExpanded else { return }
         isExpanded = false
+        cancelCollapse()
         suppressHoverExitUntil = Date().addingTimeInterval(0.35)
         animateFrame(to: collapsedSize)
     }
@@ -94,6 +106,7 @@ final class NotchWindowController: ObservableObject {
     // MARK: - Hover
 
     private func hoverEntered() {
+        // Cursor is on the notch — stay open (cancel any pending 10s close).
         cancelCollapse()
         cancelRetreat()
         expand()
@@ -103,19 +116,22 @@ final class NotchWindowController: ObservableObject {
         if let until = suppressHoverExitUntil, Date() < until {
             return
         }
-        // Debounce: give the user a chance to re-enter (and ignore resize noise).
+        // Cursor left: keep expanded for `collapseDelay` (10s), then close if still away.
         scheduleCollapse()
     }
 
     private func scheduleCollapse() {
         cancelCollapse()
+        let delay = collapseDelay
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             if self.mouseIsNearPanel() {
-                // Still over/near us — stay expanded.
+                // Mouse came back — stay expanded; next exit will reschedule.
                 return
             }
             if self.activeOverlayCount > 0 {
+                // Volume HUD / sneak peek — try again shortly after overlay ends.
+                self.scheduleCollapse()
                 return
             }
             self.collapse()
@@ -124,7 +140,7 @@ final class NotchWindowController: ObservableObject {
             }
         }
         collapseWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func cancelCollapse() {

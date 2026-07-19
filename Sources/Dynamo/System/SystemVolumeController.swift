@@ -29,8 +29,8 @@ final class SystemVolumeController: ObservableObject {
         refreshFromSystem()
         installHardwareListener()
         rebindDeviceListeners()
-        // Fallback poll if a device doesn't deliver volume property notifications.
-        let t = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
+        // Snappy poll so Media / HUD track keyboard & Control Center volume.
+        let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshFromSystem(announceExternal: true) }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -48,18 +48,25 @@ final class SystemVolumeController: ObservableObject {
     // MARK: - Control
 
     func setLevel(_ value: Float) {
-        suppressExternalUntil = Date().addingTimeInterval(0.35)
+        suppressExternalUntil = Date().addingTimeInterval(0.4)
         let clamped = min(1, max(0, value))
         _ = SystemLevelReader.setOutputVolume(clamped)
-        level = SystemLevelReader.outputVolume() ?? clamped
+        // Optimistic UI, then re-read true Core Audio level.
+        level = clamped
         isMuted = SystemLevelReader.isMuted()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.refreshFromSystem(announceExternal: false)
+        }
     }
 
     func setMuted(_ muted: Bool) {
-        suppressExternalUntil = Date().addingTimeInterval(0.35)
+        suppressExternalUntil = Date().addingTimeInterval(0.4)
         _ = SystemLevelReader.setMuted(muted)
-        isMuted = SystemLevelReader.isMuted()
+        isMuted = muted
         level = SystemLevelReader.outputVolume() ?? level
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.refreshFromSystem(announceExternal: false)
+        }
     }
 
     func toggleMute() {
@@ -67,21 +74,31 @@ final class SystemVolumeController: ObservableObject {
     }
 
     func nudge(by delta: Float) {
-        setLevel(level + delta)
+        let base = SystemLevelReader.outputVolume() ?? level
+        setLevel(base + delta)
     }
 
     // MARK: - Refresh
 
     func refreshFromSystem(announceExternal: Bool = false) {
-        let newLevel = SystemLevelReader.outputVolume() ?? level
+        guard let newLevel = SystemLevelReader.outputVolume() else {
+            // Keep last known; don't zero the UI when a read fails briefly.
+            let newMuted = SystemLevelReader.isMuted()
+            if newMuted != isMuted {
+                isMuted = newMuted
+            }
+            return
+        }
         let newMuted = SystemLevelReader.isMuted()
         let newName = SystemLevelReader.defaultOutputDeviceName()
-        let changed = abs(newLevel - level) > 0.004 || newMuted != isMuted || newName != deviceName
+        let changed = abs(newLevel - level) > 0.002 || newMuted != isMuted || newName != deviceName
+        guard changed else { return }
+
         level = newLevel
         isMuted = newMuted
         deviceName = newName
 
-        guard announceExternal, changed else { return }
+        guard announceExternal else { return }
         if let until = suppressExternalUntil, Date() < until { return }
         onExternalChange?()
     }
