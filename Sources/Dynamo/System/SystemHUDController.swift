@@ -55,6 +55,10 @@ final class SystemHUDController: ObservableObject {
             self?.handleSystemDefined(event)
             return event
         }
+        // Also watch globally so we see keys when Dynamo is not key. The
+        // returned token must be captured so teardown() can actually remove it —
+        // addGlobalMonitorForEvents has no other way to unregister, and a
+        // discarded token would leak this monitor for the life of the process.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
             Task { @MainActor in
                 self?.handleSystemDefined(event)
