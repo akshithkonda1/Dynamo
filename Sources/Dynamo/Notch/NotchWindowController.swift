@@ -38,8 +38,8 @@ final class NotchWindowController: ObservableObject {
         return NSSize(width: metrics.width, height: metrics.height)
     }
     private let overlaySize = NSSize(width: 300, height: 40)
-    /// Tall enough for Media (art + timeline + volume + transport) and Calendar.
-    private let expandedSize = NSSize(width: 620, height: 268)
+    /// Tall enough for Media (art + timeline + volume card + transport) / Shelf.
+    private let expandedSize = NSSize(width: 640, height: 300)
     /// Grace before auto-collapse after the cursor leaves the panel.
     private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
@@ -412,17 +412,29 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
         canAccept(sender)
     }
 
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        canAccept(sender) ? .copy : []
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+        // Prefer file-URL read; also accept promises / path strings from some apps.
+        var urls = (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
         ]) as? [URL]) ?? []
+        if urls.isEmpty {
+            urls = (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL])?
+                .filter(\.isFileURL) ?? []
+        }
         guard !urls.isEmpty else { return false }
         return onFileDrop?(urls) ?? false
     }
 
     private func canAccept(_ sender: NSDraggingInfo) -> Bool {
-        sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [
+        if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
-        ])
+        ]) {
+            return true
+        }
+        return sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: nil)
     }
 }

@@ -157,8 +157,13 @@ private struct ExpandedMediaView: View {
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
     @State private var lastTick: Date = .now
-    /// System volume lives in a collapsible subsection under Media (not a tray tab).
-    @State private var showSystemVolume: Bool = UserDefaults.standard.bool(forKey: "dynamo.media.showSystemVolume")
+    /// System volume card under Media. Defaults **open** on first use when maximized.
+    @State private var showSystemVolume: Bool = {
+        if UserDefaults.standard.object(forKey: "dynamo.media.showSystemVolume") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "dynamo.media.showSystemVolume")
+    }()
 
     private var hasTrack: Bool {
         plugin.info.isPlaying || plugin.info.title != NowPlayingInfo.empty.title
@@ -328,58 +333,123 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Collapsible subsection under Media — system output volume (Core Audio).
+    /// System volume card under Media (maximized). Collapses to a slim header.
     private var systemVolumeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header — always visible; toggles the maximized controls.
             Button {
-                withAnimation(.easeOut(duration: 0.15)) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                     showSystemVolume.toggle()
                     UserDefaults.standard.set(showSystemVolume, forKey: "dynamo.media.showSystemVolume")
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(showSystemVolume ? 90 : 0))
                         .foregroundStyle(NotchTheme.textQuaternary)
+                        .frame(width: 10)
+
                     Image(systemName: volumeIcon)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .frame(width: 18)
+
                     Text("System Volume")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
+                        .font(NotchTheme.caption.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textSecondary)
+
                     Spacer(minLength: 0)
-                    Text(volume.isMuted ? "Mute" : "\(Int((volume.level * 100).rounded()))%")
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textQuaternary)
+
+                    Text(volume.isMuted ? "Muted" : "\(volumePercent)%")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(NotchTheme.textPrimary)
+
+                    // Live mini meter in the header when collapsed.
+                    if !showSystemVolume {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(NotchTheme.chipFill)
+                                Capsule()
+                                    .fill(Color.white.opacity(0.85))
+                                    .frame(width: max(
+                                        volume.isMuted ? 0 : 3,
+                                        geo.size.width * CGFloat(volume.isMuted ? 0 : volume.level)
+                                    ))
+                            }
+                        }
+                        .frame(width: 52, height: 4)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(showSystemVolume ? "Hide system volume" : "Show system volume controls")
+            .help(showSystemVolume ? "Collapse system volume" : "Expand system volume")
 
             if showSystemVolume {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Divider().overlay(NotchTheme.separator)
+
                     if let name = volume.deviceName, !name.isEmpty {
-                        Text(name)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Image(systemName: "hifispeaker.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                            Text(name)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("Mac output")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                        }
                     }
 
-                    HStack(spacing: 8) {
-                        Button {
-                            volume.toggleMute()
-                        } label: {
+                    // Large percent + full-width track for maximized mode.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(volume.isMuted ? "—" : "\(volumePercent)")
+                            .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textPrimary)
+                        Text(volume.isMuted ? "muted" : "%")
+                            .font(NotchTheme.caption)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Spacer(minLength: 0)
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(NotchTheme.chipFill)
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.75), Color.white.opacity(0.95)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(
+                                    volume.isMuted || volume.level <= 0.001 ? 0 : 8,
+                                    geo.size.width * CGFloat(volume.isMuted ? 0 : volume.level)
+                                ))
+                        }
+                    }
+                    .frame(height: 8)
+
+                    HStack(spacing: 10) {
+                        Button { volume.toggleMute() } label: {
                             Image(systemName: volumeIcon)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(NotchTheme.textPrimary)
-                                .frame(width: 28, height: 28)
+                                .frame(width: 34, height: 34)
                                 .background(Circle().fill(NotchTheme.chipFillActive))
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
-                        .help(volume.isMuted ? "Unmute" : "Mute")
+                        .help(volume.isMuted ? "Unmute system output" : "Mute system output")
 
                         Slider(
                             value: Binding(
@@ -388,36 +458,49 @@ private struct ExpandedMediaView: View {
                             ),
                             in: 0...1
                         )
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.9))
-                        .help("Change Mac system volume")
+                        .controlSize(.small)
+                        .tint(Color.white.opacity(0.92))
+                        .help("Drag to set Mac system volume")
 
-                        Button {
-                            volume.nudge(by: -0.0625)
-                        } label: {
+                        Button { volume.nudge(by: -0.0625) } label: {
                             Image(systemName: "minus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .frame(width: 28, height: 28)
                                 .background(Circle().fill(NotchTheme.chipFill))
                         }
                         .buttonStyle(.plain)
+                        .help("Volume down")
 
-                        Button {
-                            volume.nudge(by: 0.0625)
-                        } label: {
+                        Button { volume.nudge(by: 0.0625) } label: {
                             Image(systemName: "plus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .frame(width: 28, height: 28)
                                 .background(Circle().fill(NotchTheme.chipFill))
                         }
                         .buttonStyle(.plain)
+                        .help("Volume up")
                     }
                 }
-                .padding(.leading, 4)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.top, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(NotchTheme.chipFill.opacity(0.65))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(NotchTheme.separator.opacity(0.8), lineWidth: 1)
+                )
+        )
+        .padding(.top, 4)
+    }
+
+    private var volumePercent: Int {
+        Int((volume.level * 100).rounded())
     }
 
     private var volumeIcon: String {
