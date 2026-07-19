@@ -25,8 +25,10 @@ private struct NotchIconButtonBody: View {
     var body: some View {
         configuration.label
             .frame(width: diameter, height: diameter)
-            .background(Circle().fill(fillColor))
-            .contentShape(Circle())
+            // Slightly larger than the visual circle so first-clicks land.
+            .frame(minWidth: diameter + 4, minHeight: diameter + 4)
+            .background(Circle().fill(fillColor).frame(width: diameter, height: diameter))
+            .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.12), value: isHovering)

@@ -33,7 +33,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Dynamo can show a live camera mirror in the notch. The camera only runs while you have the Webcam tab open — never in the background.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Dynamo sends Apple Events to Messages so you can reply to iMessages from the notch. Reading past messages requires Full Disk Access, granted separately in System Settings.</string>
+	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, and playlists in the notch.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

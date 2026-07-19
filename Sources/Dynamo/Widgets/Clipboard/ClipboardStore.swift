@@ -21,11 +21,13 @@ final class ClipboardStore: ObservableObject {
         load()
         lastChangeCount = NSPasteboard.general.changeCount
         // ~2 Hz is enough for the "within ~1s" requirement without thrashing.
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollPasteboard()
             }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func stop() {

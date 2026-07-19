@@ -42,6 +42,7 @@ final class SettingsWindowController: NSObject {
 struct SettingsView: View {
     @ObservedObject var registry: WidgetRegistry
     @ObservedObject var notch: NotchWindowController
+    @ObservedObject private var permissions = PermissionsStore.shared
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
 
@@ -57,6 +58,7 @@ struct SettingsView: View {
                 }
 
                 generalSection
+                permissionsSection
                 widgetsSection
 
                 // Per-widget configuration, discovered generically via
@@ -75,6 +77,7 @@ struct SettingsView: View {
         .onAppear {
             launchAtLogin = LaunchAtLogin.isEnabled
             launchStatus = LaunchAtLogin.statusDescription
+            PermissionsStore.shared.refreshFromSystem()
         }
         .onReceive(NotificationCenter.default.publisher(for: .dynamoWidgetConfigurationDidChange)) { _ in
             WidgetSettingsStore.shared.persist(from: registry)
@@ -126,6 +129,65 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var permissionsSection: some View {
+        SettingsSection(title: "Permissions") {
+            Text("Dynamo remembers the last status it saw and re-checks when you open Settings or return to the app. Grants are still stored by macOS — Dynamo never re-prompts once authorized.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(DynamoPermission.allCases, id: \.rawValue) { permission in
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(statusColor(permissions.status(for: permission)))
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(permission.displayName)
+                            .font(.body.weight(.medium))
+                        Text(permission.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(statusLabel(permissions.status(for: permission)))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if permissions.status(for: permission) != .granted {
+                        Button("Open") {
+                            permissions.openSystemSettings(for: permission)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Button("Refresh permissions") {
+                permissions.refreshFromSystem()
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func statusColor(_ status: PermissionMemoryStatus) -> Color {
+        switch status {
+        case .granted: return .green
+        case .denied: return .red
+        case .notDetermined: return .orange
+        case .unknown: return .gray
+        }
+    }
+
+    private func statusLabel(_ status: PermissionMemoryStatus) -> String {
+        switch status {
+        case .granted: return "Granted (remembered)"
+        case .denied: return "Denied — open System Settings to change"
+        case .notDetermined: return "Not asked yet"
+        case .unknown: return "Unknown (app may be closed)"
         }
     }
 

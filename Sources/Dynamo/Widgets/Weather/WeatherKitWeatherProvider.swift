@@ -60,9 +60,11 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
             Task { await refresh() }
         }
 
-        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func stop() {
@@ -134,7 +136,16 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
             }
             lastError = nil
         } catch {
-            lastError = "Weather unavailable: \(error.localizedDescription)"
+            let raw = error.localizedDescription
+            // Ad-hoc / free-team builds can't call WeatherKit — show a calm hint.
+            if raw.localizedCaseInsensitiveContains("weatherkit")
+                || raw.localizedCaseInsensitiveContains("entitlement")
+                || raw.localizedCaseInsensitiveContains("not authorized")
+                || raw.localizedCaseInsensitiveContains("unauthorized") {
+                lastError = "Weather needs a paid Apple Developer team + WeatherKit entitlement (Xcode-signed build). Use Settings → Weather to set a city for when that's available, or leave this widget off for ad-hoc builds."
+            } else {
+                lastError = "Weather unavailable: \(raw)"
+            }
         }
         onChange?()
     }

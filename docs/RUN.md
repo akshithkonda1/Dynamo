@@ -33,7 +33,7 @@ Then:
 
 ### What you should see when expanded
 
-Tray icons for: Media · Calendar · Clipboard · Checklist · Weather · Battery · Shelf · Webcam · Messages  
+Tray icons for: Media · Calendar · Clipboard · Checklist · Weather · Battery · Shelf · Webcam  
 (Some tabs need permissions; empty/error states still *render*.)
 
 ---
@@ -52,8 +52,7 @@ Tray icons for: Media · Calendar · Clipboard · Checklist · Weather · Batter
 | Feature | Missing until you… |
 |---------|---------------------|
 | **Live Weather** | Paid Apple Developer team + `xcodegen generate` + Xcode Signing (WeatherKit entitlement). Ad-hoc still shows the Weather *UI* with an error/empty state. |
-| **Calendar events / meeting peeks** | Grant **Calendars** (and **Reminders** for due peeks). |
-| **Messages threads / reply** | Grant **Full Disk Access** to this exact `Dynamo.app`, quit/relaunch; first reply needs **Automation → Messages**. |
+| **Calendar events / meeting peeks** | Grant **Full Disk Access** if Calendar DB is blocked (Dynamo reads Calendar.app’s files read-only). |
 | **Webcam** | Grant **Camera** when the Webcam tab is opened. |
 | **Location weather** | Grant **Location**, or set a city in Settings → Weather. |
 | **Launch at Login** | Toggle in Settings (works best with the packaged `.app`). |

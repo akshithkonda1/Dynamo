@@ -37,8 +37,9 @@ final class NotchWindowController: ObservableObject {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    private let overlaySize = NSSize(width: 320, height: 44)
-    private let expandedSize = NSSize(width: 640, height: 220)
+    private let overlaySize = NSSize(width: 300, height: 40)
+    /// Tall enough for Media (art + timeline + volume + transport) and Calendar.
+    private let expandedSize = NSSize(width: 620, height: 268)
     /// Grace before auto-collapse after the cursor leaves the panel.
     private let collapseDelay: TimeInterval = 0.55
     private let retreatDelay: TimeInterval = 1.0
@@ -79,6 +80,8 @@ final class NotchWindowController: ObservableObject {
         guard !isExpanded else { return }
         isExpanded = true
         animateFrame(to: expandedSize)
+        // Become key so the first click on transport / scrubber fires (nonactivating panel).
+        panel?.makeKey()
     }
 
     func collapse() {
@@ -373,6 +376,15 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
     var onMouseExited: (() -> Void)?
 
     private var hoverTrackingArea: NSTrackingArea?
+
+    /// Critical for accessory / nonactivating panels: the first click must
+    /// reach SwiftUI buttons, not only focus the window.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
+        super.mouseDown(with: event)
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

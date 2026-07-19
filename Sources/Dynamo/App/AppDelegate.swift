@@ -37,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         LaunchAtLogin.applyStoredPreference()
 
+        // Restore last-known permission grants, then re-probe the OS quietly
+        // (no prompts). Widgets seed their UI from this memory.
+        _ = PermissionsStore.shared
+        PermissionsStore.shared.refreshFromSystem()
+
         let registry = WidgetRegistry()
         let notchController = NotchWindowController()
         let hudController = SystemHUDController()
@@ -55,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(BatteryPlugin())
         registry.register(ShelfPlugin())
         registry.register(WebcamPlugin())
-        registry.register(MessagesPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
@@ -63,6 +67,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sneakPeekController.attach(registry: registry, notch: notchController)
 
         installStatusItem()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettings),
+            name: .dynamoOpenSettings,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
 
         let registryRef = registry
         NotificationCenter.default.addObserver(
@@ -149,11 +167,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSettings() {
         MainActor.assumeIsolated {
+            PermissionsStore.shared.refreshFromSystem()
             guard let registry, let notchController else { return }
             if settingsController == nil {
                 settingsController = SettingsWindowController(registry: registry, notch: notchController)
             }
             settingsController?.show()
+        }
+    }
+
+    @objc private func appDidBecomeActive() {
+        MainActor.assumeIsolated {
+            // User may have toggled FDA / Camera / Automation in System Settings.
+            PermissionsStore.shared.refreshFromSystem()
+            NotificationCenter.default.post(name: .dynamoPermissionsDidRefresh, object: nil)
         }
     }
 
