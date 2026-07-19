@@ -206,12 +206,9 @@ final class PermissionsStore: ObservableObject {
         if status == .unknown, statuses[permission] == .granted {
             return
         }
-        if statuses[permission] != status {
-            statuses[permission] = status
-            objectWillChange.send()
-        } else if statuses[permission] == nil {
-            statuses[permission] = status
-        }
+        guard statuses[permission] != status else { return }
+        statuses[permission] = status
+        objectWillChange.send()
     }
 
     private struct Snapshot: Codable {

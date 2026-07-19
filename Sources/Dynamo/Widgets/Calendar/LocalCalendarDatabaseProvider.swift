@@ -20,6 +20,12 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
 
     private var timer: Timer?
     private var lastSnapshotPath: URL?
+    /// mtime+size fingerprint of the source db (+ its `-wal` sidecar) as of the
+    /// last snapshot. Skips re-copying the whole database on every 30s tick
+    /// when Calendar hasn't actually written anything since — the query still
+    /// re-runs against the existing snapshot with a fresh `now`, so events
+    /// that ended in the meantime are still pruned correctly.
+    private var lastSourceFingerprint: String?
 
     /// Calendar.app’s shared group container DB (modern macOS).
     private static var databaseURL: URL {
@@ -43,9 +49,13 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         timer?.invalidate()
         timer = nil
         if let lastSnapshotPath {
-            try? FileManager.default.removeItem(at: lastSnapshotPath)
+            let fm = FileManager.default
+            try? fm.removeItem(at: lastSnapshotPath)
+            try? fm.removeItem(atPath: lastSnapshotPath.path + "-wal")
+            try? fm.removeItem(atPath: lastSnapshotPath.path + "-shm")
             self.lastSnapshotPath = nil
         }
+        lastSourceFingerprint = nil
     }
 
     func requestAccess() async {
@@ -68,9 +78,34 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             return
         }
 
-        // Snapshot the DB so we never hold a write lock against CalendarAgent.
-        // Copy main db + WAL + SHM for a consistent read when possible.
-        guard let snapshot = makeSnapshot(of: url) else {
+        // A stat()-based fingerprint alone isn't proof FDA is still granted —
+        // unlike content reads, stat() can keep succeeding after FDA is
+        // revoked in System Settings. Verify real read access with a cheap
+        // open/close every cycle so revocation is still caught within one
+        // tick, same as before this snapshot cache existed; only the
+        // expensive full-file copy below is what the cache actually skips.
+        guard Self.isEffectivelyReadable(url) else {
+            authorizationState = .denied
+            PermissionsStore.shared.recordDenied(.fullDiskAccess)
+            upcoming = []
+            dueReminders = []
+            onChange?()
+            return
+        }
+
+        // Snapshot the DB so we never hold a write lock against CalendarAgent —
+        // but only re-copy when the source has actually changed since the last
+        // snapshot; otherwise reuse it and just re-run the (cheap, indexed)
+        // time-window query below.
+        let snapshot: URL
+        let fingerprint = Self.sourceFingerprint(of: url)
+        if let lastSnapshotPath, fingerprint != nil, fingerprint == lastSourceFingerprint,
+           FileManager.default.fileExists(atPath: lastSnapshotPath.path) {
+            snapshot = lastSnapshotPath
+        } else if let fresh = makeSnapshot(of: url) {
+            snapshot = fresh
+            lastSourceFingerprint = fingerprint
+        } else {
             authorizationState = .denied
             PermissionsStore.shared.recordDenied(.fullDiskAccess)
             upcoming = []
@@ -123,6 +158,33 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     }
 
     // MARK: - Snapshot
+
+    /// True if the db can actually be opened for reading right now — a real
+    /// content-read check, not just a stat(), so a revoked Full Disk Access
+    /// grant is caught even though file metadata may still be stat-able.
+    private static func isEffectivelyReadable(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        try? handle.close()
+        return true
+    }
+
+    /// Cheap "has the source changed" check — mtime + size of the main db and
+    /// its `-wal` sidecar (WAL mode means real writes land there, not in the
+    /// main file, until a checkpoint). Returns nil if the main db can't be
+    /// stat'd, which safely forces a fresh snapshot attempt.
+    private static func sourceFingerprint(of dbURL: URL) -> String? {
+        let fm = FileManager.default
+        guard let mainAttrs = try? fm.attributesOfItem(atPath: dbURL.path) else { return nil }
+        let mainMTime = (mainAttrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let mainSize = (mainAttrs[.size] as? Int) ?? 0
+
+        let walPath = dbURL.path + "-wal"
+        let walAttrs = try? fm.attributesOfItem(atPath: walPath)
+        let walMTime = (walAttrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+        let walSize = (walAttrs?[.size] as? Int) ?? -1
+
+        return "\(mainMTime)|\(mainSize)|\(walMTime)|\(walSize)"
+    }
 
     private func makeSnapshot(of dbURL: URL) -> URL? {
         let fm = FileManager.default

@@ -100,43 +100,24 @@ struct NotchContentView: View {
 }
 
 /// Tray-row control that works inside a nonactivating notch panel.
-/// Uses an explicit tap gesture + large hit target so the first click fires.
+/// Uses a real `Button` (not Image + onTapGesture, which — same as the
+/// transport row in MediaControlsPlugin — often eats the first click on a
+/// nonactivating panel) and the shared `.notchIcon` hover/press style.
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
     let isActive: Bool
     let action: () -> Void
 
-    @State private var isHovering = false
-    @State private var isPressed = false
-
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-            .frame(width: 26, height: 26)
-            .background(Circle().fill(fillColor))
-            .scaleEffect(isPressed ? 0.9 : 1.0)
-            .contentShape(Rectangle().size(CGSize(width: 32, height: 32)))
-            .onHover { isHovering = $0 }
-            .onTapGesture {
-                action()
-            }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in isPressed = true }
-                    .onEnded { _ in isPressed = false }
-            )
-            .help(displayName)
-            .animation(.easeOut(duration: 0.1), value: isHovering)
-            .animation(.easeOut(duration: 0.1), value: isPressed)
-            .accessibilityLabel(displayName)
-            .accessibilityAddTraits(.isButton)
-    }
-
-    private var fillColor: Color {
-        if isActive { return NotchTheme.chipFillActive }
-        return isHovering ? NotchTheme.chipFill : .clear
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+        }
+        .buttonStyle(.notchIcon(diameter: 26, prominent: isActive))
+        .help(displayName)
+        .accessibilityLabel(displayName)
     }
 }
 
