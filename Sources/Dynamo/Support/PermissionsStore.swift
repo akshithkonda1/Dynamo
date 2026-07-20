@@ -174,20 +174,16 @@ final class PermissionsStore: ObservableObject {
     /// to explicit user action.
     private static func probeReminders() -> PermissionMemoryStatus {
         let status = EKEventStore.authorizationStatus(for: .reminder)
-        if #available(macOS 14.0, *) {
-            switch status {
-            case .fullAccess, .authorized: return .granted
-            case .notDetermined: return .notDetermined
-            case .denied, .restricted, .writeOnly: return .denied
-            @unknown default: return .unknown
-            }
-        } else {
-            switch status {
-            case .authorized: return .granted
-            case .notDetermined: return .notDetermined
-            case .denied, .restricted: return .denied
-            @unknown default: return .unknown
-            }
+        // Exhaustive for current SDKs (includes .fullAccess / .writeOnly on macOS 14+).
+        switch status {
+        case .fullAccess, .authorized:
+            return .granted
+        case .notDetermined:
+            return .notDetermined
+        case .denied, .restricted, .writeOnly:
+            return .denied
+        @unknown default:
+            return .unknown
         }
     }
 
