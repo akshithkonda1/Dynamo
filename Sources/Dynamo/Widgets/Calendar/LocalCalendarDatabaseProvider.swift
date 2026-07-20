@@ -1,12 +1,19 @@
 import AppKit
+import EventKit
 import Foundation
 import SQLite3
 
 /// Read-only mirror of Calendar.app’s local database
 /// (`~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb`).
 ///
-/// No EventKit permission prompt — Dynamo only *reads* the same store Calendar
-/// already maintains. Nothing is written. Clicking an event opens Calendar.app.
+/// No EventKit permission prompt for *events* — Dynamo only *reads* the same
+/// store Calendar already maintains. Nothing is written. Clicking an event
+/// opens Calendar.app.
+///
+/// Reminders are a separate data store EventKit doesn't expose any file-based
+/// read path for, so due reminders use a dedicated, reminders-only
+/// `EKEventStore` — a distinct permission grant from Calendar's file access,
+/// requested only in response to explicit user action (never at launch).
 ///
 /// Access may require Full Disk Access on some macOS configurations. If the DB
 /// can’t be opened, `accessState`
@@ -16,10 +23,13 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     private(set) var authorizationState: CalendarAuthState = .notDetermined
     private(set) var upcoming: [CalendarEventItem] = []
     private(set) var dueReminders: [ReminderItem] = []
+    private(set) var remindersAuthState: CalendarAuthState = .notDetermined
     var onChange: (() -> Void)?
 
     private var timer: Timer?
     private var lastSnapshotPath: URL?
+    private let reminderStore = EKEventStore()
+    private var remindersFetchToken: Any?
     /// mtime+size fingerprint of the source db (+ its `-wal` sidecar) as of the
     /// last snapshot. Skips re-copying the whole database on every 30s tick
     /// when Calendar hasn't actually written anything since — the query still
@@ -48,6 +58,10 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let remindersFetchToken {
+            reminderStore.cancelFetchRequest(remindersFetchToken)
+            self.remindersFetchToken = nil
+        }
         if let lastSnapshotPath {
             let fm = FileManager.default
             try? fm.removeItem(at: lastSnapshotPath)
@@ -63,7 +77,37 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         refresh()
     }
 
+    /// Prompts for Reminders access — only call this from explicit user
+    /// action (e.g. an "Allow Reminders" button). Unlike `requestAccess()`,
+    /// this shows a real system dialog the first time it's called.
+    func requestRemindersAccess() async {
+        do {
+            let granted: Bool
+            if #available(macOS 14.0, *) {
+                granted = try await reminderStore.requestFullAccessToReminders()
+            } else {
+                granted = try await reminderStore.requestAccess(to: .reminder)
+            }
+            remindersAuthState = granted ? .authorized : .denied
+        } catch {
+            remindersAuthState = .denied
+        }
+        if remindersAuthState == .authorized {
+            fetchReminders()
+        } else {
+            onChange?()
+        }
+    }
+
     func refresh() {
+        refreshEvents()
+        refreshReminders()
+    }
+
+    /// Calendar events — read-only file access, independent of Reminders'
+    /// separate EventKit grant below. Never touches `dueReminders`; a
+    /// Calendar-DB read failure shouldn't hide already-fetched reminders.
+    private func refreshEvents() {
         // Optimistic seed from last successful FDA/calendar read.
         if PermissionsStore.shared.isGranted(.fullDiskAccess), authorizationState != .authorized {
             authorizationState = .authorized
@@ -73,7 +117,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         guard FileManager.default.fileExists(atPath: url.path) else {
             authorizationState = .denied
             upcoming = []
-            dueReminders = []
             onChange?()
             return
         }
@@ -88,7 +131,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             authorizationState = .denied
             PermissionsStore.shared.recordDenied(.fullDiskAccess)
             upcoming = []
-            dueReminders = []
             onChange?()
             return
         }
@@ -109,7 +151,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             authorizationState = .denied
             PermissionsStore.shared.recordDenied(.fullDiskAccess)
             upcoming = []
-            dueReminders = []
             onChange?()
             return
         }
@@ -119,13 +160,83 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             upcoming = events
             authorizationState = .authorized
             PermissionsStore.shared.recordGranted(.fullDiskAccess)
-            dueReminders = [] // Reminders live in a different store; keep EventKit-free for now.
         } catch {
             NSLog("Dynamo Calendar DB read failed: %@", error.localizedDescription)
             authorizationState = .denied
             upcoming = []
         }
         onChange?()
+    }
+
+    // MARK: - Reminders (separate EventKit grant, requested explicitly only)
+
+    /// Passive status check only — never prompts. `requestRemindersAccess()`
+    /// is the only path that can trigger the system dialog, and only in
+    /// response to explicit user action.
+    private func refreshReminders() {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        remindersAuthState = Self.mapReminderAuthStatus(status)
+        guard remindersAuthState == .authorized else {
+            if !dueReminders.isEmpty {
+                dueReminders = []
+                onChange?()
+            }
+            return
+        }
+        fetchReminders()
+    }
+
+    private func fetchReminders() {
+        if let remindersFetchToken {
+            reminderStore.cancelFetchRequest(remindersFetchToken)
+        }
+        let end = Date().addingTimeInterval(24 * 60 * 60)
+        let predicate = reminderStore.predicateForIncompleteReminders(
+            withDueDateStarting: nil,
+            ending: end,
+            calendars: nil
+        )
+        remindersFetchToken = reminderStore.fetchReminders(matching: predicate) { [weak self] reminders in
+            Task { @MainActor in
+                guard let self else { return }
+                self.remindersFetchToken = nil
+                let now = Date()
+                let items = (reminders ?? [])
+                    .compactMap { reminder -> ReminderItem? in
+                        guard let components = reminder.dueDateComponents,
+                              let due = Calendar.current.date(from: components)
+                        else { return nil }
+                        guard due.timeIntervalSince(now) <= 24 * 60 * 60,
+                              due.timeIntervalSince(now) > -60 * 60
+                        else { return nil }
+                        return ReminderItem(
+                            id: reminder.calendarItemIdentifier,
+                            title: reminder.title ?? "Reminder",
+                            due: due
+                        )
+                    }
+                    .sorted { $0.due < $1.due }
+                    .prefix(8)
+                self.dueReminders = Array(items)
+                self.onChange?()
+            }
+        }
+    }
+
+    private static func mapReminderAuthStatus(_ status: EKAuthorizationStatus) -> CalendarAuthState {
+        if #available(macOS 14.0, *) {
+            switch status {
+            case .fullAccess, .authorized: return .authorized
+            case .notDetermined: return .notDetermined
+            default: return .denied
+            }
+        } else {
+            switch status {
+            case .authorized: return .authorized
+            case .notDetermined: return .notDetermined
+            default: return .denied
+            }
+        }
     }
 
     func openEvent(id: String) {

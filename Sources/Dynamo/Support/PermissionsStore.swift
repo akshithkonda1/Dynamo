@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import CoreLocation
+import EventKit
 import Foundation
 
 /// High-level permission Dynamo cares about. OS TCC still owns the real grant;
@@ -11,6 +12,7 @@ enum DynamoPermission: String, CaseIterable, Codable {
     case camera
     case location
     case fullDiskAccess
+    case reminders
     case automationMusic
     case automationSpotify
 
@@ -19,6 +21,7 @@ enum DynamoPermission: String, CaseIterable, Codable {
         case .camera: return "Camera"
         case .location: return "Location"
         case .fullDiskAccess: return "Full Disk Access"
+        case .reminders: return "Reminders"
         case .automationMusic: return "Control Music"
         case .automationSpotify: return "Control Spotify"
         }
@@ -29,6 +32,7 @@ enum DynamoPermission: String, CaseIterable, Codable {
         case .camera: return "Webcam mirror"
         case .location: return "Weather (automatic)"
         case .fullDiskAccess: return "Calendar local database"
+        case .reminders: return "Due reminders peek in Calendar"
         case .automationMusic: return "Play/pause, skip, cover art, playlists"
         case .automationSpotify: return "Play/pause, skip, cover art"
         }
@@ -84,6 +88,7 @@ final class PermissionsStore: ObservableObject {
         update(.camera, to: Self.probeCamera())
         update(.location, to: Self.probeLocation())
         update(.fullDiskAccess, to: Self.probeFullDiskAccess())
+        update(.reminders, to: Self.probeReminders())
         update(.automationMusic, to: Self.probeAutomation(bundleID: "com.apple.Music"))
         update(.automationSpotify, to: Self.probeAutomation(bundleID: "com.spotify.client"))
         persist()
@@ -106,6 +111,11 @@ final class PermissionsStore: ObservableObject {
             urls = [
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+            ]
+        case .reminders:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Reminders"
             ]
         case .automationMusic, .automationSpotify:
             urls = [
@@ -155,6 +165,30 @@ final class PermissionsStore: ObservableObject {
         if calOK { return .granted }
         if calExists { return .denied }
         return .unknown
+    }
+
+    /// Passive status read only — `EKEventStore.authorizationStatus(for:)`
+    /// never prompts; only `requestFullAccessToReminders()` /
+    /// `requestAccess(to:)` do, and those are only ever called from
+    /// `LocalCalendarDatabaseProvider.requestRemindersAccess()` in response
+    /// to explicit user action.
+    private static func probeReminders() -> PermissionMemoryStatus {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if #available(macOS 14.0, *) {
+            switch status {
+            case .fullAccess, .authorized: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted, .writeOnly: return .denied
+            @unknown default: return .unknown
+            }
+        } else {
+            switch status {
+            case .authorized: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted: return .denied
+            @unknown default: return .unknown
+            }
+        }
     }
 
     /// True if we can open the file for reading (stronger than `isReadableFile`).
