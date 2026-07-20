@@ -58,7 +58,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
 | MediaRemoteAdapter helper process | **Live** (`DynamoMediaRemoteHelper` — multi-path discovery, live publish, auto-restart; embedded by Xcode postbuild + `package-app.sh`; verified present in packaged `.app`) |
 | Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/release-local.sh`, `notarize.sh`, `make-dmg.sh`, `.github/workflows/release.yml`) |
-| Reminders peeks | **Live** (EventKit incomplete reminders due within ~5 min; listed under Calendar expanded view) |
+| Reminders peeks | **Live, opt-in** — restored in Phase 6.1 via a dedicated reminders-only `EKEventStore` inside `LocalCalendarDatabaseProvider`, independent of Calendar's own file-based access. Reminders are a separate data store EventKit has no file-based read path for, so this grant is requested only when you tap "Allow Reminders" in the Calendar tab — never at launch, and never bundled with Calendar's own (EventKit-free) access. |
 | Multi-display picker | **Live** (Settings → General → Display for notch) |
 | App icon | **Live** (regenerated notch/island mark for asset catalog + `.icns`) |
 
@@ -78,6 +78,33 @@ separate real leaks/waste from patterns that only look concerning at a glance.
 | Weather location fetch (`WeatherKitWeatherProvider`) | **Reviewed, unchanged** — one-shot `requestLocation()`, not continuous tracking. |
 | Webcam capture teardown (`WebcamCaptureController`) | **Reviewed, unchanged** — `AVCaptureSession.stopRunning()` already releases the real (camera hardware) resource on view disappearance. |
 | Checklist item growth (`ChecklistStore`) | **Reviewed, intentionally left uncapped** — unlike Clipboard (20-item cap) and Shelf (24-item cap), checklist items are explicit user-authored to-dos with no implicit expiry. Silently evicting old ones would be data loss, a worse outcome than the unbounded (and in practice small) growth of a personal to-do list. |
+
+### Phase 6 — post-merge bug sweep
+
+A second pass after the Calendar/Music/Permissions rewrite (real Calendar
+database reads, absolute play/pause, scrubbable timeline, playlist switching,
+remembered permissions) landed and the Messages widget was removed.
+
+| Area | State |
+|------|--------|
+| Redundant Spotify artwork fetches (`AppleScriptMedia`) | **Fixed** — before a track's artwork finished its async fetch, every ~1s poll re-issued both the AppleScript "artwork url" query and a fresh network download for the same image. Now guarded by an in-flight set (`pendingSpotifyArtworkKeys`) so only one fetch runs per track. |
+| Unbounded helper-process restart loop (`MediaRemoteHelperProcess`) | **Fixed** — a helper binary that crashed immediately on every launch would relaunch every 2s forever. Now gives up after 5 consecutive crashes that each ran under 3s, falling back to the existing MediaRemote/AppleScript tiers for the rest of the session. |
+| Tray-row first click (`TrayIconButton` in `NotchContentView`) | **Fixed** — the widget-switcher and Settings-gear buttons used `Image` + `.onTapGesture`, the exact pattern the codebase's own transport-button fix already identified as unreliable on a nonactivating panel ("first click focuses, second click presses"). Converted to a real `Button` with the shared `.notchIcon` style, consistent with the transport row. |
+| Full calendar DB copy every 30s (`LocalCalendarDatabaseProvider`) | **Fixed** — `refresh()` unconditionally copied the entire `Calendar.sqlitedb` (+ WAL/SHM) to a temp file every poll tick regardless of whether Calendar had written anything. Now compares an mtime+size fingerprint of the source (including the `-wal` sidecar, since WAL-mode writes land there first) and reuses the existing snapshot when unchanged. A cheap open/close read-check still runs every cycle regardless, so a Full-Disk-Access revocation is still caught within one tick — only the expensive full-file copy is skipped, not the permission check. |
+| Reminders status corrected in this README | **Fixed** — see the Phase 4 entry above; it claimed live EventKit reminders that the current default provider doesn't produce. |
+
+### Phase 6.1 — Reminders due-date peeks (restored)
+
+`NSRemindersUsageDescription` / `NSRemindersFullAccessUsageDescription` were
+already declared in `Info.plist` from before Phase 6 disconnected reminders —
+this wires the feature back up properly rather than leaving the strings
+orphaned.
+
+| Area | State |
+|------|--------|
+| Reminders access | **Live** — `LocalCalendarDatabaseProvider` gains a second, reminders-only `EKEventStore` (`requestRemindersAccess()`), entirely separate from Calendar's own file-based access. A Calendar-DB read failure no longer clears already-fetched reminders and vice versa — they're independent `CalendarProvider` properties (`authorizationState` vs `remindersAuthState`) with independent failure/retry paths. |
+| No-launch-prompt guarantee | **Live** — `refresh()` only ever calls the passive `EKEventStore.authorizationStatus(for: .reminder)` (never prompts); the real system dialog fires only from `requestRemindersAccess()`, wired to an explicit "Allow Reminders" button in the Calendar tab's expanded view, matching the existing no-prompt-at-launch pattern already used for the Webcam tab. |
+| Settings visibility | **Live** — added `.reminders` to `PermissionsStore`'s `DynamoPermission` enum, so it shows up automatically in Settings → Permissions (remembered status, "Open Settings" deep link) with no bespoke UI needed. |
 
 ## Requirements
 
@@ -240,11 +267,11 @@ export NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_APP_PASSWORD=…
 
 WeatherKit-signed public releases should use the Xcode export path / GitHub Actions workflow with your paid team secrets.
 
-## Next steps (post Phase 5)
+## Next steps (post Phase 6.1)
 
 - Optional: paid-team WeatherKit cold-start verification (left alone by design for now)
 - Optional: further icon polish by a designer (the current one is a generated placeholder)
-- Optional: more event sources (e.g. Focus / Screen Time, a Reminders due date)
+- Optional: more event sources (e.g. Focus / Screen Time — no stable public API for either as of this writing)
 - Optional: MediaRemoteAdapter helper process verification on a real Mac —
   confirm the `project.yml` postbuild script actually copies and signs the
   binary into `Contents/MacOS/`

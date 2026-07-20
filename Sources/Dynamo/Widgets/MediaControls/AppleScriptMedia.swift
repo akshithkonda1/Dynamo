@@ -12,6 +12,12 @@ final class AppleScriptMedia {
 
     private var artworkCache: [String: Data] = [:]
     private var lastArtworkKey: String?
+    /// Track keys with a Spotify artwork fetch already in flight — without
+    /// this, every ~1s poll before the async fetch completes re-issues both
+    /// the AppleScript "artwork url" query and a fresh network request for
+    /// the same image, piling up redundant Apple Events + downloads for as
+    /// long as the fetch is slow to land.
+    private var pendingSpotifyArtworkKeys: Set<String> = []
     private var playlistCache: [String] = []
     private var playlistCacheAt: Date?
 
@@ -282,19 +288,25 @@ final class AppleScriptMedia {
         if let cached = artworkCache[key] { return cached }
         if let last = lastArtworkKey, last != key {
             artworkCache.removeValue(forKey: last)
+            pendingSpotifyArtworkKeys.remove(last)
         }
         lastArtworkKey = key
 
-        let data: Data?
         switch player {
-        case .music: data = fetchMusicArtworkData()
-        case .spotify: data = fetchSpotifyArtworkData()
+        case .music:
+            // Synchronous, in-process (no network) — safe to just re-run each poll.
+            if let data = fetchMusicArtworkData(), !data.isEmpty {
+                artworkCache[key] = data
+                return data
+            }
+            return nil
+        case .spotify:
+            // Async — only kick off one fetch per track, not one per poll tick.
+            guard !pendingSpotifyArtworkKeys.contains(key) else { return nil }
+            pendingSpotifyArtworkKeys.insert(key)
+            fetchSpotifyArtworkData(for: key)
+            return nil
         }
-        if let data, !data.isEmpty {
-            artworkCache[key] = data
-            return data
-        }
-        return nil
     }
 
     private func fetchMusicArtworkData() -> Data? {
@@ -321,7 +333,12 @@ final class AppleScriptMedia {
         return nil
     }
 
-    private func fetchSpotifyArtworkData() -> Data? {
+    /// Fires the AppleScript + network round trip for `key` exactly once;
+    /// caller (`fetchArtworkIfNeeded`) guards re-entry via `pendingSpotifyArtworkKeys`.
+    /// Always clears that guard when the fetch resolves, so a transient
+    /// failure (Spotify mid-transition, a network hiccup) gets retried on a
+    /// later poll instead of leaving artwork permanently stuck as "pending".
+    private func fetchSpotifyArtworkData(for key: String) {
         let script = """
         tell application id "\(Self.spotifyBundle)"
             try
@@ -335,18 +352,20 @@ final class AppleScriptMedia {
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !urlString.isEmpty,
               let url = URL(string: urlString)
-        else { return nil }
+        else {
+            pendingSpotifyArtworkKeys.remove(key)
+            return
+        }
 
-        let key = lastArtworkKey
         Task { [weak self] in
             let data = await Task.detached { try? Data(contentsOf: url) }.value
-            guard let data, !data.isEmpty else { return }
             await MainActor.run {
-                guard let self, let key, self.lastArtworkKey == key else { return }
+                guard let self else { return }
+                self.pendingSpotifyArtworkKeys.remove(key)
+                guard let data, !data.isEmpty, self.lastArtworkKey == key else { return }
                 self.artworkCache[key] = data
             }
         }
-        return nil
     }
 
     private func parse(_ raw: String?, source: MediaPlayerApp) -> NowPlayingInfo? {

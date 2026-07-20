@@ -10,6 +10,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     @Published private(set) var events: [CalendarEventItem] = []
     @Published private(set) var dueReminders: [ReminderItem] = []
     @Published private(set) var authState: CalendarAuthState = .notDetermined
+    @Published private(set) var remindersAuthState: CalendarAuthState = .notDetermined
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: CalendarProvider
@@ -20,6 +21,8 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     init(provider: CalendarProvider? = nil) {
         // Default: read-only snapshot of Calendar.app’s local SQLite store —
         // no EventKit API, no write access. Click opens Calendar.app.
+        // Reminders (separate EventKit grant) are opt-in via the "Allow
+        // Reminders" button — never requested automatically.
         let resolved = provider ?? LocalCalendarDatabaseProvider()
         self.provider = resolved
         resolved.onChange = { [weak self] in
@@ -27,6 +30,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
             self.events = self.provider.upcoming
             self.dueReminders = self.provider.dueReminders
             self.authState = self.provider.authorizationState
+            self.remindersAuthState = self.provider.remindersAuthState
             self.checkUpcomingEvents()
             self.checkDueReminders()
         }
@@ -37,6 +41,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         events = provider.upcoming
         dueReminders = provider.dueReminders
         authState = provider.authorizationState
+        remindersAuthState = provider.remindersAuthState
         // Local DB path: requestAccess just re-checks file readability (no TCC).
         if authState != .authorized {
             Task { await provider.requestAccess() }
@@ -51,6 +56,12 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     func requestAccess() {
         Task { await provider.requestAccess() }
+    }
+
+    /// Explicit user action only — this is what triggers the Reminders
+    /// system permission dialog on first call.
+    func requestRemindersAccess() {
+        Task { await provider.requestRemindersAccess() }
     }
 
     func openEvent(_ event: CalendarEventItem) {
@@ -176,6 +187,9 @@ private struct ExpandedCalendarView: View {
                     }
                 }
             case .authorized:
+                if plugin.remindersAuthState != .authorized {
+                    remindersPrompt
+                }
                 if plugin.events.isEmpty && plugin.dueReminders.isEmpty {
                     Text("No upcoming events in the next two weeks.")
                         .font(NotchTheme.body)
@@ -206,6 +220,31 @@ private struct ExpandedCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Reminders use a separate EventKit grant from Calendar's file access —
+    /// only requested here, in response to an explicit tap, never at launch.
+    @ViewBuilder
+    private var remindersPrompt: some View {
+        HStack(spacing: 6) {
+            Image(systemName: plugin.remindersAuthState == .denied ? "exclamationmark.circle" : "checklist")
+                .font(.system(size: 10, weight: .semibold))
+            if plugin.remindersAuthState == .denied {
+                Button("Reminders access denied — open Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button("Allow Reminders to show due items here") {
+                    plugin.requestRemindersAccess()
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .font(NotchTheme.micro)
+        .foregroundStyle(NotchTheme.textTertiary)
     }
 
     private struct DayGroup {

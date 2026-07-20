@@ -22,6 +22,14 @@ final class MediaRemoteHelperProcess {
     private var stdoutPipe: Pipe?
     private var buffer = Data()
     private var restartWorkItem: DispatchWorkItem?
+    private var lastStartAt: Date?
+    /// Consecutive crashes that happened almost immediately after launch.
+    /// Without this, a helper that crashes on every launch (e.g. missing a
+    /// dependency, a bad build) would relaunch every 2s forever — the
+    /// existing MediaRemote/AppleScript fallback tiers already cover
+    /// functionality without it, so give up rather than spin indefinitely.
+    private var consecutiveQuickFailures = 0
+    private static let maxConsecutiveQuickFailures = 5
 
     /// Locates the helper binary next to the running executable, then falls
     /// back to common SPM / dev layouts so local `swift build` runs can use it
@@ -94,6 +102,13 @@ final class MediaRemoteHelperProcess {
                 self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
                 self.process = nil
                 self.stdoutPipe = nil
+
+                let ranBriefly = self.lastStartAt.map { Date().timeIntervalSince($0) < 3 } ?? true
+                self.consecutiveQuickFailures = ranBriefly ? self.consecutiveQuickFailures + 1 : 0
+                guard self.consecutiveQuickFailures < Self.maxConsecutiveQuickFailures else {
+                    NSLog("Dynamo: MediaRemote helper crashed repeatedly on launch — giving up for this session")
+                    return
+                }
                 // Auto-restart after a crash (rate-limited) so media stays alive.
                 self.scheduleRestart()
             }
@@ -102,6 +117,7 @@ final class MediaRemoteHelperProcess {
             try task.run()
             process = task
             stdoutPipe = outPipe
+            lastStartAt = Date()
             NSLog("Dynamo: MediaRemote helper started at %@", helperURL.path)
         } catch {
             process = nil
