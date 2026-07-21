@@ -60,12 +60,15 @@ struct NotchContentView: View {
     private var expandedBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                // Main tray icons (Webcam is pinned next to Settings, not here).
+                // Main tray icons (Shelf + Webcam are pinned next to Settings).
                 ForEach(leadingTrayPlugins, id: \.id) { plugin in
                     trayButton(for: plugin)
                 }
                 Spacer(minLength: 0)
-                // Webcam sits immediately left of Settings (gear).
+                // Fixed trailing cluster: Shelf · Webcam · Settings.
+                if let shelf = shelfPlugin {
+                    trayButton(for: shelf)
+                }
                 if let webcam = webcamPlugin {
                     trayButton(for: webcam)
                 }
@@ -91,9 +94,13 @@ struct NotchContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Everything except Webcam — Webcam is always drawn beside Settings.
+    /// Plugins drawn in normal order — excludes trailing-pinned Shelf + Webcam.
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
-        registry.plugins.filter { $0.id != "webcam" }
+        registry.plugins.filter { $0.id != "webcam" && $0.id != "shelf" }
+    }
+
+    private var shelfPlugin: (any NotchWidgetPlugin)? {
+        registry.plugins.first { $0.id == "shelf" }
     }
 
     private var webcamPlugin: (any NotchWidgetPlugin)? {
