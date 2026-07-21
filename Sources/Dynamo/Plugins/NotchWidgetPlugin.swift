@@ -37,8 +37,8 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 }
 
 extension NotchWidgetPlugin {
-    /// Default fits a full media-style layout; override only when content is reliably shorter.
-    var expandedContentHeight: CGFloat { 240 }
+    /// Default content height (panel adds `NotchTheme.expandedChromeHeight` for tray/clock).
+    var expandedContentHeight: CGFloat { 250 }
     func start() {}
     func stop() {}
 }

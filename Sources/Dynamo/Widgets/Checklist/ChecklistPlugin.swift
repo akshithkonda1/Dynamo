@@ -9,7 +9,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
     let store = ChecklistStore()
     @Published var draft: String = ""
 
-    var expandedContentHeight: CGFloat { 250 }
+    var expandedContentHeight: CGFloat { 255 }
 
     func start() {
         store.start()

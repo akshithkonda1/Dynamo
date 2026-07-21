@@ -9,7 +9,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let displayName = "Media"
     let systemImage = "music.note"
 
-    var expandedContentHeight: CGFloat { 250 }
+    var expandedContentHeight: CGFloat { 255 }
 
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
@@ -131,7 +131,7 @@ private struct AmbientMediaView: View {
             MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12, color: NotchTheme.mediaGlow.opacity(0.95))
                 .fixedSize()
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

@@ -40,13 +40,16 @@ final class NotchWindowController: ObservableObject {
     }
     private let overlaySize = NSSize(width: 320, height: 44)
     private static let expandedWidth: CGFloat = 660
-    /// Height follows the active widget (`expandedContentHeight`) plus chrome
-    /// for the dynamic quick-action dock under the tray.
+    /// Widget content height + shared chrome (tray / clock / divider).
+    /// Chrome is owned by `NotchTheme.expandedChromeHeight` so SwiftUI layout
+    /// and AppKit frame stay in lockstep — mismatched values caused clipping
+    /// and “jumpy” tab switches.
     private var expandedSize: NSSize {
         let content = registry?.activePlugin?.expandedContentHeight ?? 240
-        // Tray + clock + hairline ≈ 62pt.
-        let chrome: CGFloat = 62
-        return NSSize(width: Self.expandedWidth, height: content + chrome)
+        return NSSize(
+            width: Self.expandedWidth,
+            height: content + NotchTheme.expandedChromeHeight
+        )
     }
     /// Stay open while the cursor is over the notch; collapse after leave
     /// (delay from Settings — 3 / 10 / 30s, or hover-only = 0).
@@ -126,7 +129,15 @@ final class NotchWindowController: ObservableObject {
     }
 
     private func activeWidgetDidChange() {
-        guard isExpanded, !isAnimatingFrame else { return }
+        guard isExpanded else { return }
+        // If a frame animation is in flight, retry after it settles so tab
+        // switches don’t keep a stale height (Battery → Media looked “broken”).
+        if isAnimatingFrame {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) { [weak self] in
+                self?.activeWidgetDidChange()
+            }
+            return
+        }
         animateFrame(to: expandedSize)
     }
 

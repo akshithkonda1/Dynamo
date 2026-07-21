@@ -109,7 +109,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         AnyView(ExpandedCalendarView(plugin: self))
     }
 
-    var expandedContentHeight: CGFloat { 260 }
+    var expandedContentHeight: CGFloat { 255 }
 
     private func checkUpcomingEvents() {
         notifiedEventIDs.formIntersection(Set(events.map(\.id)))
@@ -177,7 +177,7 @@ private struct AmbientCalendarView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

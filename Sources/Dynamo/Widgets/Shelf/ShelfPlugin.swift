@@ -8,7 +8,7 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
     let displayName = "Shelf"
     let systemImage = "tray.and.arrow.down.fill"
 
-    var expandedContentHeight: CGFloat { 260 }
+    var expandedContentHeight: CGFloat { 255 }
 
     let store = ShelfStore()
 

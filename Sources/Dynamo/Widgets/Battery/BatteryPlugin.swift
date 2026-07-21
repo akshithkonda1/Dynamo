@@ -69,7 +69,7 @@ private struct AmbientBatteryView: View {
                 .foregroundStyle(tint)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

@@ -7,7 +7,7 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
     let systemImage = "doc.on.clipboard"
 
     /// Tall enough for Pinned + History without compressing content upward.
-    var expandedContentHeight: CGFloat { 280 }
+    var expandedContentHeight: CGFloat { 260 }
 
     let store = ClipboardStore()
 

@@ -8,30 +8,44 @@ struct NotchContentView: View {
     @ObservedObject var hud: SystemHUDController
     @ObservedObject var sneakPeek: NotchSneakPeekController
 
+    private var cornerRadius: CGFloat {
+        controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             glassBackground
 
-            if let hudState = hud.state {
-                SystemHUDView(state: hudState)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            } else if let peek = sneakPeek.peek, !controller.isExpanded {
-                NotchSneakPeekView(peek: peek)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            } else if controller.isExpanded {
-                expandedBody
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top)),
-                            removal: .opacity
-                        )
-                    )
-            } else {
-                collapsedBody
-                    .transition(.opacity)
+            Group {
+                if let hudState = hud.state {
+                    SystemHUDView(state: hudState)
+                } else if let peek = sneakPeek.peek, !controller.isExpanded {
+                    NotchSneakPeekView(peek: peek)
+                } else if controller.isExpanded {
+                    expandedBody
+                } else {
+                    collapsedBody
+                }
             }
+            .transition(.opacity)
         }
-        .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
+        .clipShape(NotchShape(cornerRadius: cornerRadius))
+        // Border uses the *same* shape as the clip — RoundedRectangle was misaligned.
+        .overlay(
+            NotchShape(cornerRadius: cornerRadius)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(controller.isExpanded ? 0.24 : 0.10),
+                            Color.white.opacity(controller.isExpanded ? 0.06 : 0.03)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: controller.isExpanded ? 1 : 0.6
+                )
+                .allowsHitTesting(false)
+        )
         .overlay {
             if !controller.isExpanded {
                 AmbientBreathingRim(accent: ambientAccent)
@@ -39,15 +53,15 @@ struct NotchContentView: View {
             }
         }
         .shadow(
-            color: controller.isExpanded ? NotchTheme.shadowExpanded : ambientAccent.opacity(0.22),
+            color: controller.isExpanded ? NotchTheme.shadowExpanded : ambientAccent.opacity(0.20),
             radius: controller.isExpanded ? NotchTheme.shadowRadius : 5,
             y: controller.isExpanded ? NotchTheme.shadowY : 0
         )
+        // Only animate structural state — not ambient ticks (that caused jank).
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
-        .animation(NotchTheme.contentSpring, value: hud.state)
-        .animation(NotchTheme.contentSpring, value: sneakPeek.peek)
-        .animation(NotchTheme.contentSpring, value: registry.ambientRevision)
+        .animation(NotchTheme.quick, value: hud.state != nil)
+        .animation(NotchTheme.quick, value: sneakPeek.peek?.title)
     }
 
     private var ambientAccent: Color {
@@ -63,32 +77,14 @@ struct NotchContentView: View {
         VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
             .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
             .overlay(
-                // Layered sheen — top highlight + faint bottom depth
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(controller.isExpanded ? 0.10 : 0.05),
+                        Color.white.opacity(controller.isExpanded ? 0.09 : 0.045),
                         Color.clear,
-                        Color.black.opacity(controller.isExpanded ? 0.12 : 0.06)
+                        Color.black.opacity(controller.isExpanded ? 0.10 : 0.05)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
-                )
-            )
-            .overlay(
-                RoundedRectangle(
-                    cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed,
-                    style: .continuous
-                )
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(controller.isExpanded ? 0.26 : 0.12),
-                            Color.white.opacity(controller.isExpanded ? 0.06 : 0.03)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: controller.isExpanded ? 1 : 0.6
                 )
             )
     }
@@ -105,7 +101,7 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Tray row
+            // Tray
             HStack(spacing: 4) {
                 ForEach(leadingTrayPlugins, id: \.id) { plugin in
                     trayButton(for: plugin)
@@ -125,39 +121,42 @@ struct NotchContentView: View {
                     NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
                 }
             }
-            .padding(.horizontal, NotchTheme.spaceMD)
+            .padding(.horizontal, NotchTheme.contentInset)
             .padding(.top, 11)
             .padding(.bottom, 6)
+            .frame(height: NotchTheme.chromeTray)
 
-            // Clock below tray (clear of notch camera)
+            // Clock under tray
             liveClockPill
-                .padding(.bottom, 8)
+                .frame(height: NotchTheme.chromeClock)
 
-            // Refined hairline
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.clear,
-                            NotchTheme.separator,
-                            NotchTheme.separator,
-                            Color.clear
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
+            // Hairline (fixed chrome slot)
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.clear,
+                                NotchTheme.separator,
+                                NotchTheme.separator,
+                                Color.clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
-                )
-                .frame(height: 0.75)
-                .padding(.horizontal, NotchTheme.spaceLG)
-                .padding(.bottom, 10)
+                    .frame(height: 0.75)
+                    .padding(.horizontal, NotchTheme.spaceLG)
+                Spacer(minLength: 0)
+            }
+            .frame(height: NotchTheme.chromeDivider)
 
             if let active = registry.activePlugin {
                 active.expandedView()
                     .id(active.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, NotchTheme.spaceMD)
-                    .padding(.bottom, 16)
-                    .transition(.opacity)
+                    .padding(.horizontal, NotchTheme.contentInset)
+                    .padding(.bottom, NotchTheme.chromeContentBottom)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -184,17 +183,11 @@ struct NotchContentView: View {
                     .fill(NotchTheme.chipFill)
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.04)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.6
-                            )
+                            .strokeBorder(NotchTheme.hairline.opacity(0.55), lineWidth: 0.5)
                     )
             )
         }
+        .frame(maxWidth: .infinity)
         .help("Local time")
     }
 

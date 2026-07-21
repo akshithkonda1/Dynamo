@@ -10,6 +10,25 @@ enum NotchTheme {
     static let spaceLG: CGFloat = 16
     static let spaceXL: CGFloat = 20
 
+    /// Horizontal inset for expanded content + ambient rows (keep all widgets aligned).
+    static let contentInset: CGFloat = 12
+    /// Horizontal inset for collapsed ambient (clock / media / weather).
+    static let ambientInset: CGFloat = 12
+
+    // MARK: Expanded chrome (must match NotchContentView measurements)
+    /// Tray row: top 11 + icon 32 + bottom 6
+    static let chromeTray: CGFloat = 49
+    /// Clock pill under tray: ~24 + bottom 8
+    static let chromeClock: CGFloat = 32
+    /// Hairline + bottom spacing
+    static let chromeDivider: CGFloat = 12
+    /// Bottom padding under widget content
+    static let chromeContentBottom: CGFloat = 14
+    /// Total height added above a widget’s `expandedContentHeight`
+    static var expandedChromeHeight: CGFloat {
+        chromeTray + chromeClock + chromeDivider + chromeContentBottom
+    }
+
     // MARK: Radii — slightly tighter for a more jewel-like island
     static let radiusCollapsed: CGFloat = 12
     static let radiusExpanded: CGFloat = 26

@@ -11,7 +11,7 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     let systemImage = "web.camera"
 
     /// Preferred expanded panel height for the square mirror tile + chrome.
-    var expandedContentHeight: CGFloat { 260 }
+    var expandedContentHeight: CGFloat { 255 }
 
     let controller = WebcamCaptureController()
 

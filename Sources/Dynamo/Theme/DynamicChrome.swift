@@ -9,9 +9,10 @@ struct AmbientBreathingRim: View {
     @State private var breathe = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: NotchTheme.radiusCollapsed, style: .continuous)
-            .strokeBorder(accent.opacity(breathe ? 0.42 : 0.14), lineWidth: 0.9)
-            .shadow(color: accent.opacity(breathe ? 0.32 : 0.08), radius: breathe ? 6 : 2, y: 0)
+        // Same silhouette as the panel clip — not a rounded rect that fights NotchShape.
+        NotchShape(cornerRadius: NotchTheme.radiusCollapsed)
+            .strokeBorder(accent.opacity(breathe ? 0.40 : 0.12), lineWidth: 0.9)
+            .shadow(color: accent.opacity(breathe ? 0.28 : 0.08), radius: breathe ? 5 : 2, y: 0)
             .onAppear {
                 withAnimation(NotchTheme.pulse) { breathe = true }
             }
@@ -75,7 +76,7 @@ struct AmbientClockView: View {
                     .frame(width: 5, height: 5)
                     .shadow(color: NotchTheme.positive.opacity(0.6), radius: 3)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, NotchTheme.ambientInset)
             // Push below the camera cutout / top edge of the physical notch.
             .padding(.top, 10)
             .padding(.bottom, 2)

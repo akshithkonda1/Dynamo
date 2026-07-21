@@ -9,7 +9,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
     let displayName = "Weather"
     let systemImage = "cloud.sun"
 
-    var expandedContentHeight: CGFloat { 220 }
+    var expandedContentHeight: CGFloat { 230 }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []
@@ -151,7 +151,7 @@ private struct AmbientWeatherView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
