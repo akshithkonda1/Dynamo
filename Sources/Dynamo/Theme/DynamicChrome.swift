@@ -53,9 +53,8 @@ enum DynamoClock {
 }
 
 /// Collapsed ambient when nothing else is active — elegant live clock.
+/// Content is biased downward so it clears the physical camera housing.
 struct AmbientClockView: View {
-    @State private var now = Date()
-
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 6) {
@@ -77,7 +76,10 @@ struct AmbientClockView: View {
                     .shadow(color: NotchTheme.positive.opacity(0.6), radius: 3)
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Push below the camera cutout / top edge of the physical notch.
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
     }
 }

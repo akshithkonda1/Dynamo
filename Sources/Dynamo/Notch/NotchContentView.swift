@@ -108,15 +108,13 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Top chrome: tray + live clock + quick actions
-            VStack(spacing: 6) {
+            // Top chrome: tray icons, then quick actions + clock (lower row)
+            VStack(spacing: 8) {
                 HStack(spacing: 5) {
                     ForEach(leadingTrayPlugins, id: \.id) { plugin in
                         trayButton(for: plugin)
                     }
-                    Spacer(minLength: 4)
-                    liveClockPill
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 0)
                     if let shelf = shelfPlugin {
                         trayButton(for: shelf)
                     }
@@ -132,7 +130,7 @@ struct NotchContentView: View {
                     }
                 }
 
-                // Dynamic quick-action dock
+                // Dynamic quick-action dock — clock sits here (farther down, clear of notch)
                 HStack(spacing: 8) {
                     DynamoQuickAction(
                         systemImage: volume.isMuted || volume.level < 0.01
@@ -165,7 +163,9 @@ struct NotchContentView: View {
                         NotificationCenter.default.post(name: .dynamoQuickNext, object: nil)
                     }
 
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 4)
+                    liveClockPill
+                    Spacer(minLength: 4)
 
                     DynamoQuickAction(
                         systemImage: "tray.and.arrow.down.fill",
