@@ -1,16 +1,35 @@
 import AppKit
 import SwiftUI
 
-/// Webcam mirror widget. Camera runs only while this tab is active in the
-/// expanded notch (not on app launch). Mirror-on is the default and is
-/// **remembered** across relaunches via UserDefaults.
+/// Webcam mirror widget — presentation modeled after Boring Notch’s
+/// `CameraPreviewView`: square, always-mirrored, rounded (circle by default),
+/// dark “Mirror” placeholder, tap to start/stop.
 @MainActor
 final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding {
     let id = "webcam"
     let displayName = "Webcam"
-    let systemImage = "camera.fill"
+    let systemImage = "web.camera"
+
+    /// Preferred expanded panel height for the square mirror tile + chrome.
+    var expandedContentHeight: CGFloat { 220 }
 
     let controller = WebcamCaptureController()
+
+    private static let shapeKey = "dynamo.webcam.mirrorShape"
+
+    /// `true` = circle (Boring Notch style), `false` = rounded rectangle.
+    @Published var isCircular: Bool {
+        didSet { UserDefaults.standard.set(isCircular, forKey: Self.shapeKey) }
+    }
+
+    init() {
+        if UserDefaults.standard.object(forKey: Self.shapeKey) == nil {
+            // Default to circle like Boring Notch’s popular mirror look.
+            isCircular = true
+        } else {
+            isCircular = UserDefaults.standard.bool(forKey: Self.shapeKey)
+        }
+    }
 
     func start() {
         // Sync auth quietly only — never prompt or start the camera until the
@@ -31,96 +50,151 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     }
 }
 
-// MARK: - Expanded view
+// MARK: - Expanded (Boring Notch–style mirror tile)
 
 private struct ExpandedWebcamView: View {
     @ObservedObject var plugin: WebcamPlugin
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-            HStack {
-                Text("Webcam")
-                    .font(NotchTheme.section)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .textCase(.uppercase)
-                Spacer()
-                if plugin.controller.authState == .authorized {
-                    Toggle(isOn: Binding(
-                        get: { plugin.controller.isMirrored },
-                        set: { plugin.controller.isMirrored = $0 }
-                    )) {
-                        Text("Mirror")
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    }
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .help("Flip horizontally like a bathroom mirror. Preference is saved.")
-                }
-            }
+    private var controller: WebcamCaptureController { plugin.controller }
 
-            content
+    private var cornerRadius: CGFloat {
+        plugin.isCircular ? 1000 : 13
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            mirrorTile
+                .frame(maxWidth: 168, maxHeight: 168)
+                .aspectRatio(1, contentMode: .fit)
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topTrailing) {
+            if controller.authState == .authorized || controller.authState == .notDetermined {
+                shapeToggle
+                    .padding(.trailing, 2)
+                    .padding(.top, 2)
+            }
+        }
         .onAppear {
-            plugin.controller.start()
+            // Match Boring Notch: open tab → request/start when possible.
+            controller.requestAccessIfNeeded()
+            if controller.authState == .authorized {
+                controller.start()
+            }
         }
         .onDisappear {
-            // Debounced inside the controller so animation churn doesn't cut the feed.
-            plugin.controller.stop()
+            controller.stop()
         }
-        .onChange(of: plugin.controller.authState) { newValue in
+        .onChange(of: controller.authState) { newValue in
             if newValue == .authorized {
-                plugin.controller.start()
+                controller.start()
             }
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch plugin.controller.authState {
-        case .notDetermined:
-            Text("Requesting camera access…")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .denied:
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Camera access denied.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                Text("Enable it in System Settings → Privacy & Security → Camera, then reopen this tab.")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Open Camera Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .controlSize(.small)
+    private var shapeToggle: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                plugin.isCircular.toggle()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        case .unavailable:
-            Text("No camera available on this Mac.")
-                .font(NotchTheme.caption)
+        } label: {
+            Image(systemName: plugin.isCircular ? "circle" : "rectangle.roundedtop")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(NotchTheme.textTertiary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .authorized:
-            ZStack {
-                WebcamPreviewView(
-                    session: plugin.controller.session,
-                    isMirrored: plugin.controller.isMirrored,
-                    isRunning: plugin.controller.isRunning
-                )
-                .clipShape(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous))
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(NotchTheme.chipFill))
+        }
+        .buttonStyle(.plain)
+        .help(plugin.isCircular ? "Use rounded square" : "Use circle")
+    }
 
-                if !plugin.controller.isRunning {
-                    ProgressView()
-                        .controlSize(.small)
+    private var mirrorTile: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            ZStack {
+                // Live feed — square + aspect-fill, optional selfie mirror
+                // (default ON, same as Boring Notch).
+                if controller.authState == .authorized {
+                    WebcamPreviewView(
+                        session: controller.session,
+                        isMirrored: controller.isMirrored,
+                        isRunning: controller.isRunning
+                    )
+                    .opacity(controller.isRunning ? 1 : 0)
+                }
+
+                // Placeholder when idle / denied — dark tile + camera icon.
+                if !controller.isRunning {
+                    placeholder(side: side)
                 }
             }
+            .frame(width: side, height: side)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onTapGesture { handleTap() }
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    private func placeholder(side: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color(red: 20 / 255, green: 20 / 255, blue: 20 / 255))
+            VStack(spacing: 8) {
+                Image(systemName: placeholderIcon)
+                    .font(.system(size: max(22, side / 3.5), weight: .regular))
+                    .foregroundStyle(Color.gray)
+                Text(placeholderTitle)
+                    .font(.caption2)
+                    .foregroundStyle(Color.gray)
+            }
+            if controller.authState == .notDetermined || (controller.authState == .authorized && !controller.isRunning) {
+                // Subtle “tap to start” affordance while idle/authorized.
+            }
+        }
+    }
+
+    private var placeholderIcon: String {
+        switch controller.authState {
+        case .denied: return "exclamationmark.triangle"
+        case .unavailable: return "video.slash"
+        default: return "web.camera"
+        }
+    }
+
+    private var placeholderTitle: String {
+        switch controller.authState {
+        case .denied: return "Access Denied"
+        case .unavailable: return "No Camera"
+        case .notDetermined: return "Mirror"
+        case .authorized: return controller.isRunning ? "" : "Mirror"
+        }
+    }
+
+    private func handleTap() {
+        switch controller.authState {
+        case .authorized:
+            if controller.isRunning {
+                controller.stopNow()
+            } else {
+                controller.start()
+            }
+        case .notDetermined:
+            controller.requestAccessIfNeeded()
+        case .denied:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
+                NSWorkspace.shared.open(url)
+            }
+        case .unavailable:
+            break
         }
     }
 }
@@ -131,12 +205,16 @@ private struct WebcamSettingsView: View {
     @ObservedObject var plugin: WebcamPlugin
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Toggle("Mirror video (selfie flip)", isOn: Binding(
                 get: { plugin.controller.isMirrored },
                 set: { plugin.controller.isMirrored = $0 }
             ))
-            Text("When on, the feed is flipped horizontally like a real mirror. This setting is remembered across relaunches. The camera only runs while the Webcam tab is open.")
+            Toggle("Circular mirror", isOn: Binding(
+                get: { plugin.isCircular },
+                set: { plugin.isCircular = $0 }
+            ))
+            Text("Presentation matches Boring Notch: a square mirror tile, tap to start/stop the camera. The camera only runs while this tab is open.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -163,7 +241,7 @@ private struct WebcamSettingsView: View {
     private var statusText: String {
         switch plugin.controller.authState {
         case .authorized:
-            return plugin.controller.isRunning ? "Camera running" : "Camera idle (open Webcam tab to start)"
+            return plugin.controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
         case .denied: return "Camera access denied"
         case .unavailable: return "No camera available"
         case .notDetermined: return "Camera permission not requested yet"
