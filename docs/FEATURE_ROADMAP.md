@@ -22,29 +22,26 @@ Visual polish ships continuously. This plan sequences **new capabilities** by us
 | Continuity Camera | Done |
 | Collapse delay 5–10s | Done |
 | No top transport strip (media stays in Media tab) | Done |
-| Refined glass + clock under tray | This pass |
+| Refined glass + clock under tray | Done |
+| **Meeting Mode** (suppress peeks during Now events) | **Done** |
+| **Global hotkeys** ⌃⌥D/P/M/S/C | **Done** |
+| Usefulness plan | `Docs/USEFULNESS_PLAN.md` |
 
 ---
 
 ## Near-term (next 2–4 weeks)
 
-### F1 — Focus Mode (“Meeting Mode”)
-When Calendar event is **Now**:
-- Suppress non-critical sneak peeks (track changes, weather minor)
-- Optional dim of ambient music art
-- Toggle in Settings → General
+### F1 — Focus Mode (“Meeting Mode”) — **shipped**
+Toggle in Settings / menu. Critical peeks still show.
 
-**Why:** Dynamo becomes meeting-aware without another SaaS.
-
-### F2 — Global hotkeys
+### F2 — Global hotkeys — **shipped**
 | Shortcut | Action |
 |----------|--------|
 | ⌃⌥D | Show / expand notch |
 | ⌃⌥P | Play / Pause |
 | ⌃⌥M | Mute |
 | ⌃⌥S | Focus Shelf |
-
-Uses `MASShortcut` or `Carbon` hotkeys; Settings list + conflict detect.
+| ⌃⌥C | Focus Calendar |
 
 ### F3 — Drop Stack polish
 - Stash **copies** into Application Support (true pocket, not aliases only)

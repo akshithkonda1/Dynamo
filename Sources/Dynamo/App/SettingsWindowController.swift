@@ -130,6 +130,17 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Meeting Mode", isOn: Binding(
+                get: { MeetingMode.shared.isEnabled },
+                set: { MeetingMode.shared.isEnabled = $0 }
+            ))
+            Text("While a calendar event is in progress (Now), suppress routine sneak peeks like track changes. Critical alerts still show. Global hotkeys: ⌃⌥D show notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -170,6 +181,9 @@ struct SettingsView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Button("Show Notch") {
                     notch.revealAndExpand()
@@ -177,6 +191,10 @@ struct SettingsView: View {
                 .controlSize(.small)
                 Button("Focus File Shelf") {
                     notch.focusPlugin(id: "shelf")
+                }
+                .controlSize(.small)
+                Button("Focus Calendar") {
+                    notch.focusPlugin(id: "calendar")
                 }
                 .controlSize(.small)
             }

@@ -50,6 +50,11 @@ final class NotchSneakPeekController: ObservableObject {
     }
 
     private func show(_ content: NotchSneakPeek) {
+        // Meeting Mode: drop routine peeks while a calendar event is Now.
+        if MeetingMode.shared.shouldSuppress(peek: content) {
+            return
+        }
+
         peek = content
         // Claim overlay once per session; later peeks only refresh content + timer.
         if !holdingOverlay {

@@ -9,7 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var settingsController: SettingsWindowController?
     private var hiddenModeMenuItem: NSMenuItem?
+    private var meetingModeMenuItem: NSMenuItem?
     private weak var mediaPlugin: MediaControlsPlugin?
+    private let hotKeys = GlobalHotKeys()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
@@ -19,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
+            hotKeys.uninstall()
             registry?.stopAll()
             hudController?.teardown()
             sneakPeekController?.teardown()
@@ -70,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sneakPeekController.attach(registry: registry, notch: notchController)
 
         installStatusItem()
+        installHotKeys()
 
         NotificationCenter.default.addObserver(
             self,
@@ -133,10 +137,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.addItem(NSMenuItem(title: "Show Notch", action: #selector(showNotch), keyEquivalent: "n"))
         menu.addItem(NSMenuItem(title: "Focus File Shelf", action: #selector(focusShelf), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: "Focus Calendar", action: #selector(focusCalendar), keyEquivalent: "c"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Play/Pause", action: #selector(menuPlayPause), keyEquivalent: "p"))
         menu.addItem(NSMenuItem(title: "Mute / Unmute", action: #selector(menuMute), keyEquivalent: "m"))
         menu.addItem(NSMenuItem.separator())
+        let meetingItem = NSMenuItem(title: "Meeting Mode", action: #selector(toggleMeetingMode), keyEquivalent: "")
+        meetingItem.state = MeetingMode.shared.isEnabled ? .on : .off
+        menu.addItem(meetingItem)
+        meetingModeMenuItem = meetingItem
         let hiddenItem = NSMenuItem(title: "Hidden mode", action: #selector(toggleHiddenMode), keyEquivalent: "")
         hiddenItem.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
         menu.addItem(hiddenItem)
@@ -147,6 +156,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit Dynamo", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
+    }
+
+    @MainActor
+    private func installHotKeys() {
+        hotKeys.onAction = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .showNotch:
+                self.notchController?.revealAndExpand()
+            case .playPause:
+                self.mediaPlugin?.togglePlayPause()
+            case .mute:
+                SystemVolumeController.shared.toggleMute()
+            case .focusShelf:
+                self.notchController?.focusPlugin(id: "shelf")
+            case .focusCalendar:
+                self.notchController?.focusPlugin(id: "calendar")
+            }
+        }
+        hotKeys.install()
     }
 
     /// Force the notch panel on-screen and expanded — useful when the collapsed
@@ -163,6 +192,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func focusCalendar() {
+        MainActor.assumeIsolated {
+            notchController?.focusPlugin(id: "calendar")
+        }
+    }
+
     @objc private func menuPlayPause() {
         MainActor.assumeIsolated {
             mediaPlugin?.togglePlayPause()
@@ -175,10 +210,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func toggleMeetingMode() {
+        MainActor.assumeIsolated {
+            MeetingMode.shared.isEnabled.toggle()
+            meetingModeMenuItem?.state = MeetingMode.shared.isEnabled ? .on : .off
+        }
+    }
+
     // Keep the checkmark in sync if Hidden mode was toggled from Settings.
     func menuWillOpen(_ menu: NSMenu) {
         MainActor.assumeIsolated {
             hiddenModeMenuItem?.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
+            meetingModeMenuItem?.state = MeetingMode.shared.isEnabled ? .on : .off
         }
     }
 

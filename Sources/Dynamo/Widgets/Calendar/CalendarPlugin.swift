@@ -55,11 +55,20 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         }
     }
 
+    /// True when a non–all-day event is in progress (for Meeting Mode).
+    var isMeetingNow: Bool {
+        ambientEvent.map { $0.phase() == .now } ?? false
+    }
+
     func ambientView() -> AnyView {
         AnyView(AmbientCalendarView(event: ambientEvent))
     }
 
     func start() {
+        // Wire Meeting Mode to this calendar source (protocol-free callback).
+        MeetingMode.shared.isInActiveMeeting = { [weak self] in
+            self?.isMeetingNow == true
+        }
         provider.start()
         applyProviderSnapshot()
         // Local DB path: requestAccess just re-checks file readability (no TCC).
