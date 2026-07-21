@@ -4,10 +4,12 @@ import SwiftUI
 /// Notch weather widget. Talks only to `WeatherProvider`, so the WeatherKit
 /// implementation can be swapped for a mock without touching any view.
 @MainActor
-final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding, NotchSneakPeekProviding {
+final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding, NotchSneakPeekProviding, NotchAmbientProviding {
     let id = "weather"
     let displayName = "Weather"
     let systemImage = "cloud.sun"
+
+    var expandedContentHeight: CGFloat { 220 }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []
@@ -118,6 +120,40 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
 
     func expandedView() -> AnyView { AnyView(ExpandedWeatherView(plugin: self)) }
     func settingsView() -> AnyView { AnyView(WeatherSettingsView(plugin: self)) }
+
+    // MARK: - Ambient
+
+    var isAmbientActive: Bool { snapshot != nil }
+    /// Below calendar/media/battery so weather is the calm idle fallback (above clock).
+    var ambientPriority: Int { 28 }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientWeatherView(snapshot: snapshot))
+    }
+}
+
+private struct AmbientWeatherView: View {
+    let snapshot: WeatherSnapshot?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let snapshot {
+                Image(systemName: snapshot.symbolName)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(TemperatureFormat.short(snapshot.temperature))
+                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(NotchTheme.textPrimary)
+                Text(snapshot.conditionDescription)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 }
 
 // MARK: - Temperature formatting

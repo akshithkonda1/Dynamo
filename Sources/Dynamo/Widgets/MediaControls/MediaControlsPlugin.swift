@@ -112,14 +112,23 @@ private struct AmbientMediaView: View {
             artThumb
                 .onTapGesture { plugin.openConnectedApp() }
                 .help("Open \(playerLabel)")
-            if let remainingLabel {
-                Text(remainingLabel)
-                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(NotchTheme.textSecondary)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 0) {
+                if !plugin.info.title.isEmpty, plugin.info.title != NowPlayingInfo.empty.title {
+                    Text(plugin.info.title)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                }
+                if let remainingLabel {
+                    Text(remainingLabel)
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .lineLimit(1)
+                }
             }
+            .frame(maxWidth: 90, alignment: .leading)
             Spacer(minLength: 0)
-            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 11)
+            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12, color: NotchTheme.mediaGlow.opacity(0.95))
                 .fixedSize()
         }
         .padding(.horizontal, 10)
@@ -509,40 +518,42 @@ private struct ExpandedMediaView: View {
     @ViewBuilder
     private var artwork: some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        Group {
-            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(1, contentMode: .fill)
-                    .frame(width: 108, height: 108)
-                    .clipShape(shape)
-                    .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.40), radius: 14, y: 5)
-            } else {
-                shape
-                    .fill(
-                        LinearGradient(
-                            colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        PlayingArtRing(isPlaying: plugin.info.isPlaying) {
+            Group {
+                if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(1, contentMode: .fill)
+                        .frame(width: 108, height: 108)
+                        .clipShape(shape)
+                        .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.40), radius: 14, y: 5)
+                } else {
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 108, height: 108)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 30, weight: .medium))
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    )
-                    .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
+                        .frame(width: 108, height: 108)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 30, weight: .medium))
+                                .foregroundStyle(NotchTheme.textTertiary)
+                        )
+                        .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
+                }
             }
-        }
-        .contentShape(shape)
-        .overlay(alignment: .bottomTrailing) {
-            Image(systemName: "arrow.up.right.square.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-                .padding(7)
+            .contentShape(shape)
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "arrow.up.right.square.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+                    .padding(7)
+            }
         }
     }
 

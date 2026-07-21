@@ -113,6 +113,7 @@ private struct ExpandedShelfView: View {
                 Image(systemName: isDropTargeted ? "tray.and.arrow.down.fill" : "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isDropTargeted ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                    .scaleEffect(isDropTargeted ? 1.12 : 1.0)
                 Text(isDropTargeted ? "Drop to stash" : "Drop files here")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textSecondary)
@@ -126,10 +127,13 @@ private struct ExpandedShelfView: View {
         .overlay(
             RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                 .strokeBorder(
-                    isDropTargeted ? Color.white.opacity(0.35) : Color.clear,
-                    lineWidth: 1.5
+                    isDropTargeted ? NotchTheme.mediaGlow : Color.clear,
+                    lineWidth: isDropTargeted ? 2 : 0
                 )
+                .shadow(color: isDropTargeted ? NotchTheme.mediaGlow.opacity(0.5) : .clear, radius: 10)
         )
+        .scaleEffect(isDropTargeted ? 1.02 : 1.0)
+        .animation(NotchTheme.snappy, value: isDropTargeted)
     }
 
     private func row(_ item: ShelfItem) -> some View {

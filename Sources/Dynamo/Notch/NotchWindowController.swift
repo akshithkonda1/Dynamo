@@ -39,13 +39,14 @@ final class NotchWindowController: ObservableObject {
         return NSSize(width: metrics.width, height: metrics.height)
     }
     private let overlaySize = NSSize(width: 320, height: 44)
-    private static let expandedWidth: CGFloat = 640
-    /// Height follows the active widget (`expandedContentHeight`) rather than
-    /// a single fixed value, so e.g. Battery doesn't balloon to the same
-    /// footprint as the media player. Width stays constant.
+    private static let expandedWidth: CGFloat = 660
+    /// Height follows the active widget (`expandedContentHeight`) plus chrome
+    /// for the dynamic quick-action dock under the tray.
     private var expandedSize: NSSize {
-        let height = registry?.activePlugin?.expandedContentHeight ?? 240
-        return NSSize(width: Self.expandedWidth, height: height)
+        let content = registry?.activePlugin?.expandedContentHeight ?? 240
+        // Tray + clock row + quick actions + dividers ≈ 78pt.
+        let chrome: CGFloat = 78
+        return NSSize(width: Self.expandedWidth, height: content + chrome)
     }
     /// Stay open while the cursor is over the notch; collapse after leave
     /// (delay from Settings — 3 / 10 / 30s, or hover-only = 0).

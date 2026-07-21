@@ -13,9 +13,13 @@ struct NotchSneakPeekView: View {
             Image(systemName: peek.systemImage)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(accentColor)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(isCritical ? NotchTheme.caution.opacity(0.22) : NotchTheme.chipFill))
-                .shadow(color: isCritical ? NotchTheme.caution.opacity(0.85) : .clear, radius: isCritical ? 6 : 0)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(isCritical ? NotchTheme.caution.opacity(0.22) : NotchTheme.chipFillActive)
+                        .overlay(Circle().strokeBorder(accentColor.opacity(0.25), lineWidth: 0.5))
+                )
+                .shadow(color: isCritical ? NotchTheme.caution.opacity(0.85) : NotchTheme.mediaGlow.opacity(0.35), radius: isCritical ? 6 : 4)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(peek.title)
