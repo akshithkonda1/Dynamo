@@ -100,15 +100,30 @@ private struct ExpandedWebcamView: View {
 
     private var controlsColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if controller.availableDevices.count > 1 {
+            // Always offer a camera menu when any device exists (Continuity can
+            // appear as the only entry or join later via hotplug).
+            if !controller.availableDevices.isEmpty {
                 Menu {
+                    Button {
+                        controller.followSystemPreferredCamera = true
+                    } label: {
+                        HStack {
+                            Text("Auto (system preferred)")
+                            if controller.followSystemPreferredCamera {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    Divider()
                     ForEach(controller.availableDevices) { device in
                         Button {
+                            controller.followSystemPreferredCamera = false
                             controller.selectDevice(id: device.id)
                         } label: {
                             HStack {
-                                Text(device.name)
-                                if device.id == controller.selectedDeviceID {
+                                Text(device.displayName)
+                                if !controller.followSystemPreferredCamera,
+                                   device.id == controller.selectedDeviceID {
                                     Image(systemName: "checkmark")
                                 }
                             }
@@ -116,14 +131,20 @@ private struct ExpandedWebcamView: View {
                     }
                 } label: {
                     NotchChipLabel(
-                        title: currentDeviceName,
-                        systemImage: "web.camera",
-                        active: false
+                        title: currentDeviceChipTitle,
+                        systemImage: currentDeviceIsContinuity ? "iphone" : "web.camera",
+                        active: currentDeviceIsContinuity
                     )
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Choose camera")
+                .help("Choose camera · Continuity Camera supported")
+            }
+
+            if currentDeviceIsContinuity {
+                Text("Continuity Camera")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
 
             HStack(spacing: 6) {
@@ -179,10 +200,28 @@ private struct ExpandedWebcamView: View {
         .buttonStyle(.plain)
     }
 
-    private var currentDeviceName: String {
-        if let id = controller.selectedDeviceID,
-           let match = controller.availableDevices.first(where: { $0.id == id }) {
-            return match.name
+    private var currentDevice: WebcamDeviceOption? {
+        if let id = controller.selectedDeviceID {
+            return controller.availableDevices.first(where: { $0.id == id })
+        }
+        return controller.availableDevices.first
+    }
+
+    private var currentDeviceIsContinuity: Bool {
+        currentDevice?.isContinuity == true || currentDevice?.isDeskView == true
+    }
+
+    private var currentDeviceChipTitle: String {
+        if controller.followSystemPreferredCamera {
+            if let name = currentDevice?.name {
+                let short = name.count > 18 ? String(name.prefix(16)) + "…" : name
+                return "Auto · \(short)"
+            }
+            return "Auto camera"
+        }
+        if let device = currentDevice {
+            let short = device.name.count > 20 ? String(device.name.prefix(18)) + "…" : device.name
+            return short
         }
         return "Camera"
     }
@@ -318,19 +357,30 @@ private struct WebcamSettingsView: View {
                 get: { plugin.isCircular },
                 set: { plugin.isCircular = $0 }
             ))
+            Toggle("Follow system camera (Continuity)", isOn: Binding(
+                get: { controller.followSystemPreferredCamera },
+                set: { controller.followSystemPreferredCamera = $0 }
+            ))
+            Text("When on, Dynamo tracks the system-preferred camera — Continuity Camera (iPhone) switches in automatically when available, like FaceTime.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if controller.availableDevices.count > 1 {
+            if !controller.availableDevices.isEmpty {
                 Picker("Camera", selection: Binding(
                     get: { controller.selectedDeviceID ?? "" },
-                    set: { controller.selectDevice(id: $0) }
+                    set: {
+                        controller.followSystemPreferredCamera = false
+                        controller.selectDevice(id: $0)
+                    }
                 )) {
                     ForEach(controller.availableDevices) { device in
-                        Text(device.name).tag(device.id)
+                        Text(device.displayName).tag(device.id)
                     }
                 }
             }
 
-            Text("Presentation matches Boring Notch: a square mirror tile, tap to start/stop the camera. Snapshot copies a still to the clipboard. The camera only runs while this tab is open.")
+            Text("Uses Continuity Camera when your iPhone is nearby and unlocked. The camera only runs while this tab is open.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -358,6 +408,13 @@ private struct WebcamSettingsView: View {
         switch controller.authState {
         case .authorized:
             if controller.isFrozen { return "Frame frozen" }
+            if let device = controller.availableDevices.first(where: { $0.id == controller.selectedDeviceID }) {
+                let kind = device.isContinuity || device.isDeskView ? " · Continuity" : ""
+                if controller.isRunning {
+                    return "Live: \(device.name)\(kind)"
+                }
+                return "Ready: \(device.name)\(kind)"
+            }
             return controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
         case .denied: return "Camera access denied"
         case .unavailable: return "No camera available"

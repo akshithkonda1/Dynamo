@@ -31,7 +31,10 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Dynamo can show a live camera mirror in the notch. The camera only runs while you have the Webcam tab open — never in the background.</string>
+	<string>Dynamo can show a live camera mirror in the notch, including Continuity Camera (iPhone). The camera only runs while you have the Webcam tab open — never in the background.</string>
+	<!-- Required so Continuity Camera devices appear as .continuityCamera (not mislabeled built-in). -->
+	<key>NSCameraUseContinuityCameraDeviceType</key>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, and playlists in the notch.</string>
 	<key>NSHighResolutionCapable</key>
