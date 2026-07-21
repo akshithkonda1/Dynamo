@@ -25,16 +25,37 @@
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
+	<string>Dynamo reads and updates your Apple Reminders in the Checklist tab so you can list, create, complete, and delete reminders from the notch.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
+	<string>Dynamo needs full Reminders access to read, create, complete, and delete reminders from the Checklist tab. Changes sync with the Reminders app.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Dynamo can show a live camera mirror in the notch. The camera only runs while you have the Webcam tab open — never in the background.</string>
+	<string>Dynamo can show a live camera mirror in the notch, including Continuity Camera (iPhone). The camera only runs while you have the Webcam tab open — never in the background.</string>
+	<!-- Required so Continuity Camera devices appear as .continuityCamera (not mislabeled built-in). -->
+	<key>NSCameraUseContinuityCameraDeviceType</key>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, and playlists in the notch.</string>
+	<!-- Live peek equalizer samples system / player audio (Core Audio process tap). -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer to the beat and tone of what’s playing. Audio is analyzed on-device only and never recorded or sent anywhere.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dynamo uses the microphone only when you enable Listen in Meeting Mode for optional speech-to-text notes, or for on-device music equalizer analysis. Audio is processed on this Mac and is never uploaded by Dynamo.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Dynamo can turn your speech into Meeting Mode notes when you enable Listen. Recognition prefers on-device processing when available. Notes stay on this Mac unless you export them.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.akshithkonda.Dynamo</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dynamo</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -55,10 +55,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         registerForNotifications()
         startHelperProcess()
         refreshAll()
-        // AppleScript path needs a slightly snappier poll so transport feels live.
-        // Register once on `.common` only — double-adding a scheduledTimer also
-        // fires on `.default` and can double-toggle / thrash metadata.
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // MediaRemote notifications drive most updates; poll is a safety net.
+        // 1.5s balances live transport with lower AppleScript / helper cost.
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
             }
@@ -136,8 +135,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         } else {
             _ = send(MRCommand.nextTrack)
         }
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.7)
+        // Dense refreshes so track-change peeks fire promptly after skip.
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.55)
+        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 1.6)
     }
 
     func previousTrack() {
@@ -147,8 +150,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         } else {
             _ = send(MRCommand.previousTrack)
         }
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.7)
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.55)
+        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 1.6)
     }
 
     func openConnectedApp() {

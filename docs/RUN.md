@@ -1,39 +1,40 @@
 # Run Dynamo and actually *see* it
 
-## Status on this machine (verified)
+## Status on this machine
 
 | Check | Result |
 |-------|--------|
-| Code tree | `~/Documents/Dynamo` and `~/Dynamo` both on `main` |
-| Build | `swift build` + `./scripts/package-app.sh debug` succeed |
-| Process | Launches; MediaRemote helper starts |
-| On-screen window | **Yes** — CGWindow at top center (~160×28, layer 25) hugging the notch |
+| Code tree | **`~/Documents/Dynamo` only** (older `~/Dynamo` tree removed) |
+| Daily app | **`~/Documents/Dynamo/dist/Dynamo.app`** — kill other Dynamo processes first |
+| Build | `./scripts/package-app.sh debug` |
 | Dock icon | **None** (by design: `LSUIElement` / menu-bar app) |
 
-Nothing major is missing for a basic visual render. The collapsed UI is intentionally tiny so it disappears into the MacBook notch — easy to think “nothing rendered.”
+The collapsed UI is intentionally tiny so it disappears into the MacBook notch — easy to think “nothing rendered.” Hover the physical notch, or use the menu-bar **Show Notch** action.
 
 ---
 
-## Fastest path to render (today)
+## Fastest path (daily driver)
 
 ```bash
 export DEVELOPER_DIR=/Users/akshithkonda/Downloads/Xcode-beta.app/Contents/Developer
 cd ~/Documents/Dynamo
 
+pkill -x Dynamo 2>/dev/null; pkill -x DynamoMediaRemoteHelper 2>/dev/null
 ./scripts/package-app.sh debug
 open dist/Dynamo.app
 ```
 
 Then:
 
-1. **Menu bar (top-right)** — look for the **notch / rectangle** template icon (Dynamo).  
-2. Click it → **Show Notch** (forces expand if you can’t find the strip).  
-3. Or **hover the top-center of the built-in display** (the physical notch) to expand.  
-4. **Settings…** from the same menu opens the real settings window.
+1. **Menu bar (top-right)** — notch / rectangle template icon (Dynamo).  
+2. **Show Notch** · **Focus File Shelf** · **Play/Pause** · **Mute** · **Settings…**  
+3. Or **hover the top-center** of the preferred display to expand.  
+4. **Settings → General**: collapse delay (3 / 10 / 30s / hover-only).
 
 ### What you should see when expanded
 
-Tray icons for: Media · Calendar · Clipboard · Checklist · Weather · Battery · Shelf · Webcam  
+Tray: Media · Calendar · Clipboard · Checklist · Weather · Battery · **Shelf · Webcam · Settings** (trailing cluster).  
+Collapsed ambient: music art/bars, next meeting, or low battery (priority order).  
 (Some tabs need permissions; empty/error states still *render*.)
 
 ---

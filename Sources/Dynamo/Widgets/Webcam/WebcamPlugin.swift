@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Webcam mirror widget — presentation modeled after Boring Notch’s
 /// `CameraPreviewView`: square, always-mirrored, rounded (circle by default),
-/// dark “Mirror” placeholder, tap to start/stop.
+/// dark “Mirror” placeholder, tap to start/stop. Plus device / zoom / snapshot.
 @MainActor
 final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding {
     let id = "webcam"
@@ -11,7 +11,7 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     let systemImage = "web.camera"
 
     /// Preferred expanded panel height for the square mirror tile + chrome.
-    var expandedContentHeight: CGFloat { 220 }
+    var expandedContentHeight: CGFloat { 255 }
 
     let controller = WebcamCaptureController()
 
@@ -54,31 +54,35 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
 
 private struct ExpandedWebcamView: View {
     @ObservedObject var plugin: WebcamPlugin
+    /// Must observe the controller separately — it's its own ObservableObject;
+    /// watching only `plugin` left isRunning/freeze/snap UI stuck.
+    @ObservedObject private var controller: WebcamCaptureController
 
-    private var controller: WebcamCaptureController { plugin.controller }
+    init(plugin: WebcamPlugin) {
+        self.plugin = plugin
+        self._controller = ObservedObject(wrappedValue: plugin.controller)
+    }
 
     private var cornerRadius: CGFloat {
         plugin.isCircular ? 1000 : 13
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
+        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
             mirrorTile
                 .frame(maxWidth: 168, maxHeight: 168)
                 .aspectRatio(1, contentMode: .fit)
-            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 8) {
+                controlsColumn
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .topTrailing) {
-            if controller.authState == .authorized || controller.authState == .notDetermined {
-                shapeToggle
-                    .padding(.trailing, 2)
-                    .padding(.top, 2)
-            }
-        }
         .onAppear {
             // Match Boring Notch: open tab → request/start when possible.
+            controller.refreshDevices()
             controller.requestAccessIfNeeded()
             if controller.authState == .authorized {
                 controller.start()
@@ -94,40 +98,172 @@ private struct ExpandedWebcamView: View {
         }
     }
 
-    private var shapeToggle: some View {
-        Button {
-            withAnimation(.easeOut(duration: 0.15)) {
-                plugin.isCircular.toggle()
+    private var controlsColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Always offer a camera menu when any device exists (Continuity can
+            // appear as the only entry or join later via hotplug).
+            if !controller.availableDevices.isEmpty {
+                Menu {
+                    Button {
+                        controller.followSystemPreferredCamera = true
+                    } label: {
+                        HStack {
+                            Text("Auto (system preferred)")
+                            if controller.followSystemPreferredCamera {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    Divider()
+                    ForEach(controller.availableDevices) { device in
+                        Button {
+                            controller.followSystemPreferredCamera = false
+                            controller.selectDevice(id: device.id)
+                        } label: {
+                            HStack {
+                                Text(device.displayName)
+                                if !controller.followSystemPreferredCamera,
+                                   device.id == controller.selectedDeviceID {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    NotchChipLabel(
+                        title: currentDeviceChipTitle,
+                        systemImage: currentDeviceIsContinuity ? "iphone" : "web.camera",
+                        active: currentDeviceIsContinuity
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Choose camera · Continuity Camera supported")
             }
+
+            if currentDeviceIsContinuity {
+                Text("Continuity Camera")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+
+            HStack(spacing: 6) {
+                zoomChip("1×", 1.0)
+                zoomChip("1.5×", 1.5)
+                zoomChip("2×", 2.0)
+            }
+
+            HStack(spacing: 6) {
+                Button {
+                    controller.snapshotToPasteboard(saveToDesktop: false)
+                } label: {
+                    NotchChipLabel(title: "Snap", systemImage: "camera.viewfinder")
+                }
+                .buttonStyle(.plain)
+                .help("Copy snapshot to clipboard")
+                .disabled(!controller.isRunning && controller.frozenImage == nil)
+
+                Button {
+                    controller.toggleFreeze()
+                } label: {
+                    NotchChipLabel(
+                        title: controller.isFrozen ? "Live" : "Freeze",
+                        systemImage: controller.isFrozen ? "play.fill" : "pause.fill",
+                        active: controller.isFrozen
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(controller.isFrozen ? "Resume live feed" : "Freeze frame")
+                .disabled(!controller.isRunning && !controller.isFrozen)
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        plugin.isCircular.toggle()
+                    }
+                } label: {
+                    NotchChipLabel(
+                        title: plugin.isCircular ? "Circle" : "Square",
+                        systemImage: plugin.isCircular ? "circle" : "rectangle.roundedtop"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func zoomChip(_ title: String, _ factor: CGFloat) -> some View {
+        Button {
+            controller.setZoom(factor)
         } label: {
-            Image(systemName: plugin.isCircular ? "circle" : "rectangle.roundedtop")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchTheme.textTertiary)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(NotchTheme.chipFill))
+            NotchChipLabel(title: title, active: abs(controller.zoomFactor - factor) < 0.05)
         }
         .buttonStyle(.plain)
-        .help(plugin.isCircular ? "Use rounded square" : "Use circle")
+    }
+
+    private var currentDevice: WebcamDeviceOption? {
+        if let id = controller.selectedDeviceID {
+            return controller.availableDevices.first(where: { $0.id == id })
+        }
+        return controller.availableDevices.first
+    }
+
+    private var currentDeviceIsContinuity: Bool {
+        currentDevice?.isContinuity == true || currentDevice?.isDeskView == true
+    }
+
+    private var currentDeviceChipTitle: String {
+        if controller.followSystemPreferredCamera {
+            if let name = currentDevice?.name {
+                let short = name.count > 18 ? String(name.prefix(16)) + "…" : name
+                return "Auto · \(short)"
+            }
+            return "Auto camera"
+        }
+        if let device = currentDevice {
+            let short = device.name.count > 20 ? String(device.name.prefix(18)) + "…" : device.name
+            return short
+        }
+        return "Camera"
     }
 
     private var mirrorTile: some View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
             ZStack {
-                // Live feed — square + aspect-fill, optional selfie mirror
-                // (default ON, same as Boring Notch).
-                if controller.authState == .authorized {
+                // Frozen still
+                if controller.isFrozen, let image = controller.frozenImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(1, contentMode: .fill)
+                        .scaleEffect(controller.zoomFactor)
+                        .scaleEffect(x: controller.isMirrored ? -1 : 1, y: 1)
+                } else if controller.authState == .authorized {
+                    // Live feed — square + aspect-fill, optional selfie mirror
                     WebcamPreviewView(
                         session: controller.session,
                         isMirrored: controller.isMirrored,
                         isRunning: controller.isRunning
                     )
+                    .scaleEffect(controller.zoomFactor)
                     .opacity(controller.isRunning ? 1 : 0)
                 }
 
                 // Placeholder when idle / denied — dark tile + camera icon.
-                if !controller.isRunning {
+                if !controller.isRunning && !controller.isFrozen {
                     placeholder(side: side)
+                }
+
+                if controller.isFrozen {
+                    VStack {
+                        Spacer()
+                        Text("Frozen")
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                            .padding(.bottom, 10)
+                    }
                 }
             }
             .frame(width: side, height: side)
@@ -156,9 +292,6 @@ private struct ExpandedWebcamView: View {
                     .font(.caption2)
                     .foregroundStyle(Color.gray)
             }
-            if controller.authState == .notDetermined || (controller.authState == .authorized && !controller.isRunning) {
-                // Subtle “tap to start” affordance while idle/authorized.
-            }
         }
     }
 
@@ -180,6 +313,10 @@ private struct ExpandedWebcamView: View {
     }
 
     private func handleTap() {
+        if controller.isFrozen {
+            controller.toggleFreeze()
+            return
+        }
         switch controller.authState {
         case .authorized:
             if controller.isRunning {
@@ -203,18 +340,47 @@ private struct ExpandedWebcamView: View {
 
 private struct WebcamSettingsView: View {
     @ObservedObject var plugin: WebcamPlugin
+    @ObservedObject private var controller: WebcamCaptureController
+
+    init(plugin: WebcamPlugin) {
+        self.plugin = plugin
+        self._controller = ObservedObject(wrappedValue: plugin.controller)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Mirror video (selfie flip)", isOn: Binding(
-                get: { plugin.controller.isMirrored },
-                set: { plugin.controller.isMirrored = $0 }
+                get: { controller.isMirrored },
+                set: { controller.isMirrored = $0 }
             ))
             Toggle("Circular mirror", isOn: Binding(
                 get: { plugin.isCircular },
                 set: { plugin.isCircular = $0 }
             ))
-            Text("Presentation matches Boring Notch: a square mirror tile, tap to start/stop the camera. The camera only runs while this tab is open.")
+            Toggle("Follow system camera (Continuity)", isOn: Binding(
+                get: { controller.followSystemPreferredCamera },
+                set: { controller.followSystemPreferredCamera = $0 }
+            ))
+            Text("When on, Dynamo tracks the system-preferred camera — Continuity Camera (iPhone) switches in automatically when available, like FaceTime.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !controller.availableDevices.isEmpty {
+                Picker("Camera", selection: Binding(
+                    get: { controller.selectedDeviceID ?? "" },
+                    set: {
+                        controller.followSystemPreferredCamera = false
+                        controller.selectDevice(id: $0)
+                    }
+                )) {
+                    ForEach(controller.availableDevices) { device in
+                        Text(device.displayName).tag(device.id)
+                    }
+                }
+            }
+
+            Text("Uses Continuity Camera when your iPhone is nearby and unlocked. The camera only runs while this tab is open.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -231,17 +397,25 @@ private struct WebcamSettingsView: View {
     }
 
     private var statusColor: Color {
-        switch plugin.controller.authState {
-        case .authorized: return plugin.controller.isRunning ? .green : .yellow
+        switch controller.authState {
+        case .authorized: return controller.isRunning ? .green : .yellow
         case .denied, .unavailable: return .red
         case .notDetermined: return .orange
         }
     }
 
     private var statusText: String {
-        switch plugin.controller.authState {
+        switch controller.authState {
         case .authorized:
-            return plugin.controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
+            if controller.isFrozen { return "Frame frozen" }
+            if let device = controller.availableDevices.first(where: { $0.id == controller.selectedDeviceID }) {
+                let kind = device.isContinuity || device.isDeskView ? " · Continuity" : ""
+                if controller.isRunning {
+                    return "Live: \(device.name)\(kind)"
+                }
+                return "Ready: \(device.name)\(kind)"
+            }
+            return controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
         case .denied: return "Camera access denied"
         case .unavailable: return "No camera available"
         case .notDetermined: return "Camera permission not requested yet"

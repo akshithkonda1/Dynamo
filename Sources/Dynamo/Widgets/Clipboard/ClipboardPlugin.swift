@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -5,6 +6,8 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
     let id = "clipboard"
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
+
+    var expandedContentHeight: CGFloat { 255 }
 
     let store = ClipboardStore()
 
@@ -24,10 +27,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
         AnyView(ExpandedClipboardView(plugin: self))
     }
 
-    func copy(_ text: String) {
-        store.copyToPasteboard(text)
-    }
-
     func saveDraftSnippet() {
         let body = draftBody.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
@@ -42,126 +41,202 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 
 private struct ExpandedClipboardView: View {
     @ObservedObject var plugin: ClipboardPlugin
+    @ObservedObject private var store: ClipboardStore
+
+    init(plugin: ClipboardPlugin) {
+        self.plugin = plugin
+        self._store = ObservedObject(wrappedValue: plugin.store)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Pinned")
-            if plugin.store.snippets.isEmpty && !plugin.isAddingSnippet {
-                Text("No pinned snippets yet.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            } else {
-                ForEach(plugin.store.snippets) { snippet in
-                    snippetRow(snippet)
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            NotchSectionHeader("Pinned")
+                .padding(.bottom, 8)
 
-            if plugin.isAddingSnippet {
-                addSnippetForm
-            } else {
-                Button {
-                    plugin.isAddingSnippet = true
-                } label: {
-                    Label("Add snippet", systemImage: "plus")
-                        .font(NotchTheme.caption)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(NotchTheme.textSecondary)
-            }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    pinnedSection
 
-            Divider().overlay(NotchTheme.separator)
-
-            HStack {
-                sectionHeader("History")
-                Spacer()
-                if !plugin.store.history.isEmpty {
-                    Button("Clear") { plugin.store.clearHistory() }
-                        .buttonStyle(.plain)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                }
-            }
-
-            if plugin.store.history.isEmpty {
-                Text("Copy anything system-wide — it shows up here.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(plugin.store.history) { item in
-                            historyRow(item)
+                    if plugin.isAddingSnippet {
+                        addSnippetForm
+                    } else {
+                        Button {
+                            plugin.isAddingSnippet = true
+                        } label: {
+                            NotchChipLabel(title: "Add snippet", systemImage: "plus")
                         }
+                        .buttonStyle(.plain)
                     }
+
+                    Divider()
+                        .overlay(NotchTheme.separator)
+                        .padding(.vertical, 4)
+
+                    NotchSectionHeader(
+                        "History",
+                        trailing: store.history.isEmpty
+                            ? nil
+                            : AnyView(
+                                Button("Clear") { store.clearHistory() }
+                                    .buttonStyle(.plain)
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textTertiary)
+                            )
+                    )
+
+                    historySection
                 }
+                .padding(.bottom, 4)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(NotchTheme.section)
-            .foregroundStyle(NotchTheme.textTertiary)
-            .textCase(.uppercase)
+    @ViewBuilder
+    private var pinnedSection: some View {
+        if store.snippets.isEmpty && !plugin.isAddingSnippet {
+            Text("No pins yet — pin from History or add text.")
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(store.snippets) { snippet in
+                    snippetRow(snippet)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if store.history.isEmpty {
+            Text("Copy text or a screenshot — it shows up here.")
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(store.history) { item in
+                    historyRow(item)
+                }
+            }
+        }
     }
 
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             Button {
-                plugin.copy(snippet.text)
+                store.copySnippet(snippet)
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snippet.title)
-                        .font(NotchTheme.body.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                    Text(snippet.text)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    if snippet.kind == .image {
+                        thumb(fileName: snippet.imageFileName)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snippet.title)
+                            .font(NotchTheme.body.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textPrimary)
+                            .lineLimit(1)
+                        if snippet.kind == .text {
+                            Text(snippet.text)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .lineLimit(1)
+                        } else {
+                            Text("Image")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Copy")
 
             Button {
-                plugin.store.deleteSnippet(id: snippet.id)
+                store.deleteSnippet(id: snippet.id)
             } label: {
                 Image(systemName: "trash")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             .buttonStyle(.notchIcon(diameter: 24))
-            .help("Delete snippet")
+            .help("Delete pin")
         }
-        .padding(.vertical, 2)
+        .notchRowBackground()
     }
 
     private func historyRow(_ item: ClipboardHistoryItem) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             Button {
-                plugin.copy(item.text)
+                store.copyHistoryItem(item)
             } label: {
-                Text(item.text)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    if item.kind == .image {
+                        thumb(fileName: item.imageFileName)
+                    }
+                    Group {
+                        if item.kind == .text {
+                            Text(item.text)
+                                .font(NotchTheme.caption)
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .lineLimit(2)
+                        } else {
+                            Text("Image")
+                                .font(NotchTheme.caption)
+                                .foregroundStyle(NotchTheme.textPrimary)
+                        }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Copy again")
 
             Button {
-                plugin.store.pinCurrentOrText(item.text)
+                store.pinHistoryItem(item)
             } label: {
                 Image(systemName: "pin")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             .buttonStyle(.notchIcon(diameter: 24))
-            .help("Pin as snippet")
+            .help("Pin")
+
+            Button {
+                store.removeHistoryItem(id: item.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.notchIcon(diameter: 24))
+            .help("Remove")
+        }
+        .notchRowBackground()
+    }
+
+    @ViewBuilder
+    private func thumb(fileName: String?) -> some View {
+        if let image = store.loadImage(fileName: fileName) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(NotchTheme.chipFill)
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Image(systemName: "photo")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                )
         }
     }
 
@@ -191,7 +266,14 @@ private struct ExpandedClipboardView: View {
                 .foregroundStyle(NotchTheme.textTertiary)
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous).fill(NotchTheme.chipFill))
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                .fill(NotchTheme.cardFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .strokeBorder(NotchTheme.hairline, lineWidth: 1)
+                )
+        )
     }
 }

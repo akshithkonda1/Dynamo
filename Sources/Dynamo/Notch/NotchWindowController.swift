@@ -8,11 +8,19 @@ import UniformTypeIdentifiers
 /// 1. **Hidden ↔ Peek** (only when Hidden mode is on): top-edge sensor.
 /// 2. **Collapsed ↔ Expanded**: hover on the notch panel.
 ///
-/// Stability notes (why this file is careful about timers):
+/// # Open / close contract (predictable behaviour)
+/// - **Open** always goes through `revealAndExpand()` (hover, ⌃⌥D, menu, Settings,
+///   focus-plugin). That path cancels pending collapse/retreat, shows the panel,
+///   then `expand()` with the shared spring.
+/// - **Focus tab** uses `focusPlugin(id:)` → set `activePluginID` → `revealAndExpand()`.
+/// - **Close** only via `scheduleCollapse()` after hover leave (settings delay),
+///   or when overlays finish and the cursor is away. Never snap shut mid-spring
+///   (`suppressHoverExitUntil` covers expand overshoot).
+///
+/// Stability notes:
 /// - Expanding resizes the panel under the cursor; AppKit often fires a spurious
-///   `mouseExited` mid-animation. Collapsing immediately made the tray flicker.
-/// - The collapsed panel is only ~notch height; a few points of miss used to
-///   drop expand instantly. We debounce collapse and re-check mouse position.
+///   `mouseExited` mid-animation — we ignore exit until the spring settles.
+/// - Collapse re-checks mouse nearness + overlay count before collapsing.
 @MainActor
 final class NotchWindowController: ObservableObject {
     @Published private(set) var isExpanded: Bool = false
@@ -38,22 +46,55 @@ final class NotchWindowController: ObservableObject {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    private let overlaySize = NSSize(width: 320, height: 44)
-    private static let expandedWidth: CGFloat = 640
-    /// Height follows the active widget (`expandedContentHeight`) rather than
-    /// a single fixed value, so e.g. Battery doesn't balloon to the same
-    /// footprint as the media player. Width stays constant.
-    private var expandedSize: NSSize {
-        let height = registry?.activePlugin?.expandedContentHeight ?? 220
-        return NSSize(width: Self.expandedWidth, height: height)
+    /// Volume / brightness HUD — compact strip under the physical notch.
+    private let hudOverlaySize = NSSize(width: 320, height: 48)
+    /// Track / calendar / reminder peeks — tall enough for aurora EQ + cover art.
+    private let peekOverlaySize = NSSize(width: 420, height: 98)
+    /// How many overlay holders want the taller peek silhouette.
+    private var peekOverlayHolders = 0
+
+    private var overlaySize: NSSize {
+        peekOverlayHolders > 0 ? peekOverlaySize : hudOverlaySize
     }
-    /// Stay open while the cursor is over the notch; collapse 10s after leave.
-    private let collapseDelay: TimeInterval = 10.0
+    private static let expandedWidth: CGFloat = 660
+    /// Widget content height + shared chrome (tray / clock / divider).
+    /// Chrome is owned by `NotchTheme.expandedChromeHeight` so SwiftUI layout
+    /// and AppKit frame stay in lockstep — mismatched values caused clipping
+    /// and “jumpy” tab switches.
+    private var expandedSize: NSSize {
+        let content = registry?.activePlugin?.expandedContentHeight ?? 255
+        return NSSize(
+            width: Self.expandedWidth,
+            height: content + NotchTheme.expandedChromeHeight
+        )
+    }
+    /// Stay open while the cursor is over the notch; collapse after leave
+    /// (delay from Settings — 3 / 10 / 30s, or hover-only = 0).
     private let retreatDelay: TimeInterval = 1.0
     /// Extra padding around the panel when deciding if the mouse is "still near".
     private let nearPadding: CGFloat = 14
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
+    static let collapseDelayKey = "dynamo.collapseDelaySeconds"
+    /// Default: mid 5–10s window so the tray stays usable after you leave.
+    static let defaultCollapseDelay: TimeInterval = 7.0
+    /// Published for Settings binding. `0` = collapse immediately on leave (hover-only).
+    @Published private(set) var collapseDelaySeconds: TimeInterval = defaultCollapseDelay
+
+    /// Effective collapse delay. Values: 0 (hover-only), 5, 7, 10, 30.
+    var collapseDelay: TimeInterval {
+        collapseDelaySeconds
+    }
+
+    func setCollapseDelay(_ seconds: TimeInterval) {
+        // Snap to allowed steps; map legacy 3s → 5s.
+        var input = seconds
+        if abs(input - 3) < 0.5 { input = 5 }
+        let allowed: [TimeInterval] = [0, 5, 7, 10, 30]
+        let value = allowed.min(by: { abs($0 - input) < abs($1 - input) }) ?? Self.defaultCollapseDelay
+        collapseDelaySeconds = value
+        UserDefaults.standard.set(value, forKey: Self.collapseDelayKey)
+    }
 
     func attach(registry: WidgetRegistry, hud: SystemHUDController, sneakPeek: NotchSneakPeekController) {
         self.registry = registry
@@ -68,16 +109,52 @@ final class NotchWindowController: ObservableObject {
             registry.$activePluginID
                 .sink { [weak self] _ in self?.activeWidgetDidChange() }
                 .store(in: &cancellables)
+
+            NotificationCenter.default.publisher(for: .dynamoHoldCollapse)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] note in
+                    let hold = (note.object as? Bool) ?? false
+                    if hold {
+                        self?.cancelCollapse()
+                        self?.presentForOverlay()
+                    } else {
+                        self?.overlayDidHide()
+                    }
+                }
+                .store(in: &cancellables)
         } else if let hostingView {
             hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
         isHiddenModeEnabled = UserDefaults.standard.bool(forKey: Self.hiddenModeKey)
+        if UserDefaults.standard.object(forKey: Self.collapseDelayKey) != nil {
+            let stored = UserDefaults.standard.double(forKey: Self.collapseDelayKey)
+            setCollapseDelay(stored)
+        } else {
+            // First launch / unset: 7s (comfortably in the 5–10s range).
+            setCollapseDelay(Self.defaultCollapseDelay)
+        }
         reposition()
         applyInitialVisibility()
     }
 
+    /// Switch the tray to a widget by id and expand (menu quick action / Shelf focus).
+    func focusPlugin(id: String) {
+        if registry?.plugins.contains(where: { $0.id == id }) == true {
+            registry?.activePluginID = id
+        }
+        revealAndExpand()
+    }
+
     private func activeWidgetDidChange() {
-        guard isExpanded, !isAnimatingFrame else { return }
+        guard isExpanded else { return }
+        // If a frame animation is in flight, retry after it settles so tab
+        // switches don’t keep a stale height (Battery → Media looked “broken”).
+        if isAnimatingFrame {
+            DispatchQueue.main.asyncAfter(deadline: .now() + NotchTheme.panelExpandDuration) { [weak self] in
+                self?.activeWidgetDidChange()
+            }
+            return
+        }
         animateFrame(to: expandedSize)
     }
 
@@ -95,8 +172,12 @@ final class NotchWindowController: ObservableObject {
         cancelCollapse()
         // Frame animation under the cursor often synthesizes mouseExited — ignore
         // those for a beat so the tray doesn't slam shut.
-        suppressHoverExitUntil = Date().addingTimeInterval(0.65)
-        guard !isExpanded else { return }
+        // Cover the spring overshoot so mouseExited during bounce doesn’t collapse.
+        suppressHoverExitUntil = Date().addingTimeInterval(NotchTheme.panelExpandDuration + 0.2)
+        guard !isExpanded else {
+            animateFrame(to: expandedSize)
+            return
+        }
         isExpanded = true
         animateFrame(to: expandedSize)
         // Become key so the first click on transport / scrubber fires (nonactivating panel).
@@ -106,16 +187,15 @@ final class NotchWindowController: ObservableObject {
     func collapse() {
         guard isExpanded else { return }
         isExpanded = false
-        suppressHoverExitUntil = Date().addingTimeInterval(0.35)
+        suppressHoverExitUntil = Date().addingTimeInterval(0.4)
         animateFrame(to: collapsedSize)
     }
 
     // MARK: - Hover
 
     private func hoverEntered() {
-        cancelCollapse()
-        cancelRetreat()
-        expand()
+        // Same open path as hotkeys / menu — one spring, one height model.
+        revealAndExpand()
     }
 
     private func hoverExited() {
@@ -143,7 +223,10 @@ final class NotchWindowController: ObservableObject {
             }
         }
         collapseWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: work)
+        // Hover-only (0) still waits a tiny beat so expand/resize mouseExited
+        // noise doesn't slam the tray shut mid-animation.
+        let delay = collapseDelay <= 0 ? 0.12 : collapseDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func cancelCollapse() {
@@ -192,20 +275,49 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Transient overlays
 
-    func presentForOverlay() {
-        activeOverlayCount += 1
+    /// Style of transient overlay — peeks hang lower than volume/brightness.
+    enum OverlayStyle {
+        case compact
+        case peek
+    }
+
+    /// Begin a transient HUD/peek session. Call **once** when a holder starts
+    /// showing (not on every content refresh). Pair with `overlayDidHide(style:)`.
+    /// Multiple holders (HUD + sneak peek) use a refcount so one ending early
+    /// doesn't collapse the other.
+    func presentForOverlay(style: OverlayStyle = .compact) {
         cancelRetreat()
         cancelCollapse()
         if !isVisible { showPanel() }
+        let wasIdle = activeOverlayCount == 0
+        activeOverlayCount += 1
+        if style == .peek {
+            peekOverlayHolders += 1
+        }
         if !isExpanded {
             suppressHoverExitUntil = Date().addingTimeInterval(0.5)
+            // Always re-size so a peek after a compact HUD grows further down.
             animateFrame(to: overlaySize)
+        } else if wasIdle {
+            // Expanded tray already owns the frame; no-op.
         }
     }
 
-    func overlayDidHide() {
-        activeOverlayCount = max(0, activeOverlayCount - 1)
-        guard activeOverlayCount == 0 else { return }
+    /// End one overlay holder. Safe if already zero (e.g. teardown double-call).
+    func overlayDidHide(style: OverlayStyle = .compact) {
+        if style == .peek, peekOverlayHolders > 0 {
+            peekOverlayHolders -= 1
+        }
+        guard activeOverlayCount > 0 else { return }
+        activeOverlayCount -= 1
+        if activeOverlayCount > 0 {
+            // Another holder still up — shrink/grow to remaining style.
+            if !isExpanded {
+                animateFrame(to: overlaySize)
+            }
+            return
+        }
+        peekOverlayHolders = 0
         if mouseIsNearPanel() {
             // Cursor still on the notch — keep or expand rather than snap shut.
             if !isExpanded { expand() }
@@ -343,10 +455,18 @@ final class NotchWindowController: ObservableObject {
         guard let panel, let screen = panel.screen ?? preferredScreen() else { return }
         let origin = topCenterOrigin(size: size, on: screen)
         let target = NSRect(origin: origin, size: size)
+        // Skip no-op resizes (saves AppKit work when height is already right).
+        if panel.frame.size.equalTo(size),
+           abs(panel.frame.origin.x - origin.x) < 0.5,
+           abs(panel.frame.origin.y - origin.y) < 0.5 {
+            return
+        }
         isAnimatingFrame = true
+        // macOS island motion: longer springy ease with light overshoot —
+        // closer to Boring Notch / Dynamic Island than a linear 0.3s fade.
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.32
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
+            context.duration = NotchTheme.panelExpandDuration
+            context.timingFunction = NotchTheme.panelExpandTiming
             context.allowsImplicitAnimation = true
             panel.animator().setFrame(target, display: true)
         }, completionHandler: { [weak self] in
@@ -396,6 +516,20 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
     var onMouseExited: (() -> Void)?
 
     private var hoverTrackingArea: NSTrackingArea?
+
+    required init(rootView: NotchContentView) {
+        super.init(rootView: rootView)
+        // Prevent AppKit from painting an opaque rect behind the island
+        // (shows up as a hard bottom rim under SwiftUI glass).
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     /// Critical for accessory / nonactivating panels: the first click must
     /// reach SwiftUI buttons, not only focus the window.

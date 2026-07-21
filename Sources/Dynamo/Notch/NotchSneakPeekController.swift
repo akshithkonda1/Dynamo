@@ -1,14 +1,12 @@
 import Combine
 import Foundation
 
-/// Shows a brief "sneak peek" pill in the notch when a widget has something
-/// noteworthy to report (e.g. a track change), then auto-hides — reusing the
-/// same transient-overlay mechanic as the volume/brightness HUD
-/// (`NotchWindowController.presentForOverlay()` / `overlayDidHide()`).
+/// Shows a brief sneak peek in the notch when a widget has something noteworthy
+/// to report, then auto-hides — reusing the transient-overlay mechanic of the
+/// volume/brightness HUD.
 ///
-/// Content is generic (`NotchSneakPeek`) and arrives via
-/// `WidgetRegistry.sneakPeekPublisher` — this controller never knows which
-/// widget originated a peek.
+/// Content is generic (`NotchSneakPeek`) via `WidgetRegistry.sneakPeekPublisher`.
+/// Higher-urgency peeks preempt lower ones; Meeting Mode only quiets low/normal.
 @MainActor
 final class NotchSneakPeekController: ObservableObject {
     @Published private(set) var peek: NotchSneakPeek?
@@ -16,14 +14,14 @@ final class NotchSneakPeekController: ObservableObject {
     private var hideWorkItem: DispatchWorkItem?
     private weak var notch: NotchWindowController?
     private var cancellable: AnyCancellable?
+    private var holdingOverlay = false
 
-    /// How long the pill stays up before auto-hiding. Critical peeks (e.g. a
-    /// severe weather alert) linger longer than a routine one (a track change,
-    /// a meeting reminder) since they're worth actually reading.
-    private func displayDuration(for emphasis: NotchSneakPeekEmphasis) -> TimeInterval {
-        switch emphasis {
-        case .normal: return 2.6
-        case .critical: return 5.5
+    private func displayDuration(for urgency: NotchSneakPeekUrgency) -> TimeInterval {
+        switch urgency {
+        case .low: return 3.0
+        case .normal: return 3.4
+        case .high: return 5.5
+        case .critical: return 7.5
         }
     }
 
@@ -36,22 +34,60 @@ final class NotchSneakPeekController: ObservableObject {
             }
     }
 
+    /// Direct path for FocusController suggestions (Meeting offer, Dynamic pulse).
+    func showForFocus(_ content: NotchSneakPeek) {
+        show(content)
+    }
+
     func teardown() {
         cancellable?.cancel()
         cancellable = nil
         hideWorkItem?.cancel()
+        if holdingOverlay {
+            holdingOverlay = false
+            notch?.overlayDidHide(style: .peek)
+        }
         peek = nil
     }
 
     private func show(_ content: NotchSneakPeek) {
+        // Meeting Mode: drop low/normal peeks while a calendar event is Now
+        // (media track peeks are exempt — see MeetingMode.shouldSuppress).
+        if FocusController.shared.shouldSuppress(peek: content) {
+            return
+        }
+
+        // Media track changes always win over whatever peek is up so next/previous
+        // is never silent. Critical calendar/weather still beat non-media peeks.
+        if let current = peek {
+            let mediaTakesOver = content.style == .media
+            let blockedByHigherUrgency =
+                !mediaTakesOver && content.urgency < current.urgency
+            if blockedByHigherUrgency {
+                return
+            }
+        }
+
         peek = content
-        notch?.presentForOverlay()
+        if !holdingOverlay {
+            holdingOverlay = true
+            notch?.presentForOverlay(style: .peek)
+        }
         hideWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.peek = nil
-            self?.notch?.overlayDidHide()
+            guard let self else { return }
+            // Only clear if this hide belongs to the still-current peek session.
+            self.peek = nil
+            if self.holdingOverlay {
+                self.holdingOverlay = false
+                self.notch?.overlayDidHide(style: .peek)
+            }
         }
         hideWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + displayDuration(for: content.emphasis), execute: work)
+        // Media peeks stay up long enough to read title + art after a skip.
+        let duration = content.style == .media
+            ? max(displayDuration(for: content.urgency), 3.2)
+            : displayDuration(for: content.urgency)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 }

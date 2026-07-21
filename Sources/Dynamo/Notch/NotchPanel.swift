@@ -15,7 +15,9 @@ final class NotchPanel: NSPanel {
         )
         isOpaque = false
         backgroundColor = .clear
+        // SwiftUI draws island shadow; AppKit shadow would double-blur.
         hasShadow = false
+        // Real macOS floating utility chrome (menu-bar adjacent).
         collectionBehavior = [
             .canJoinAllSpaces,
             .stationary,
@@ -26,13 +28,18 @@ final class NotchPanel: NSPanel {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         hidesOnDeactivate = false
-        // Allow the panel to become key on click so buttons receive the event.
         becomesKeyOnlyIfNeeded = false
         isReleasedWhenClosed = false
         isFloatingPanel = true
         level = .statusBar
-        // Ensure mouse events hit our content even when another app is active.
         ignoresMouseEvents = false
+        // Match system dark HUD so vibrancy materials resolve correctly.
+        appearance = NSAppearance(named: .darkAqua)
+        // Sharper compositing with desktop behind the glass.
+        if let contentView {
+            contentView.wantsLayer = true
+            contentView.layerUsesCoreImageFilters = false
+        }
     }
 
     /// First click both focuses the panel *and* reaches the control underneath

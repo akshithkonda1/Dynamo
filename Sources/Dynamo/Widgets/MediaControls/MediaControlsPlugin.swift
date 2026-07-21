@@ -9,6 +9,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let displayName = "Media"
     let systemImage = "music.note"
 
+    var expandedContentHeight: CGFloat { 255 }
+
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
     @Published var showPlaylistPicker = false
@@ -16,7 +18,10 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
     private let provider: NowPlayingProvider
     private var lastTrackKey: String
+    /// Suppress only the first synthetic update after launch (not real skips).
     private var suppressNextPeek = true
+    /// After next/previous, poll briefly until the track key changes.
+    private var skipProbeWorkItems: [DispatchWorkItem] = []
 
     init(provider: NowPlayingProvider? = nil) {
         let resolved = provider ?? MockNowPlayingProvider()
@@ -32,34 +37,75 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         suppressNextPeek = true
         provider.start()
         info = provider.current
+        lastTrackKey = Self.trackKey(info)
+        MediaPeekPulse.shared.sync(from: info)
         refreshPlaylists()
     }
 
     func stop() {
+        cancelSkipProbe()
         provider.stop()
     }
 
     private func handleInfoChange(_ newValue: NowPlayingInfo) {
+        let previous = info
         info = newValue
+        MediaPeekPulse.shared.sync(from: newValue)
+
         let key = Self.trackKey(newValue)
-        let shouldSuppress = suppressNextPeek
-        suppressNextPeek = false
-        defer { lastTrackKey = key }
-        guard !shouldSuppress,
-              newValue.isPlaying,
-              key != lastTrackKey,
-              !newValue.title.isEmpty,
+        let previousKey = lastTrackKey
+        let isNewTrack = key != previousKey
+
+        // Always remember the latest identity so skip-probes compare correctly.
+        lastTrackKey = key
+
+        // First post-launch snapshot only — never suppress a real track change after that.
+        if suppressNextPeek {
+            suppressNextPeek = false
+            // If launch already has a playing track, don't peek until the user skips.
+            return
+        }
+
+        guard !newValue.title.isEmpty,
               newValue.title != NowPlayingInfo.empty.title
         else { return }
+
+        if isNewTrack {
+            // Forward *or* backward skip, auto-advance, playlist jump — always peek.
+            presentTrackPeek(newValue)
+            return
+        }
+
+        // Same track: only refresh peek when cover art arrives after the title did.
+        let artArrived = previous.artworkData == nil && newValue.artworkData != nil
+        if artArrived {
+            presentTrackPeek(newValue)
+        }
+    }
+
+    private func presentTrackPeek(_ info: NowPlayingInfo) {
+        let subtitle: String
+        if !info.artist.isEmpty, !info.album.isEmpty {
+            subtitle = "\(info.artist) · \(info.album)"
+        } else if !info.artist.isEmpty {
+            subtitle = info.artist
+        } else {
+            subtitle = info.album
+        }
         onSneakPeek?(NotchSneakPeek(
             systemImage: "music.note",
-            title: newValue.title,
-            subtitle: newValue.artist.isEmpty ? newValue.album : newValue.artist
+            title: info.title,
+            subtitle: subtitle,
+            urgency: .normal,
+            artworkData: info.artworkData,
+            detail: info.playlistName ?? "",
+            style: .media
         ))
     }
 
     private static func trackKey(_ info: NowPlayingInfo) -> String {
-        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)"
+        // Include playlist when known so “same song, different context” still peeks.
+        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)\u{1}\(info.playlistName ?? "")"
     }
 
     func expandedView() -> AnyView {
@@ -67,8 +113,51 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     }
 
     func togglePlayPause() { provider.togglePlayPause() }
-    func nextTrack() { provider.nextTrack() }
-    func previousTrack() { provider.previousTrack() }
+
+    func nextTrack() {
+        provider.nextTrack()
+        // MediaRemote/AppleScript often lag; actively probe for the new track.
+        probeForTrackChange(reason: "next")
+    }
+
+    func previousTrack() {
+        provider.previousTrack()
+        probeForTrackChange(reason: "previous")
+    }
+
+    /// After skip, re-check now-playing a few times so peek always fires
+    /// even if the provider’s first onChange is delayed or empty.
+    private func probeForTrackChange(reason: String) {
+        cancelSkipProbe()
+        let baseline = lastTrackKey
+        // Staggered probes: 0.15s … ~1.8s covers Music + Spotify.
+        let delays: [TimeInterval] = [0.12, 0.28, 0.5, 0.85, 1.3, 1.9]
+        for delay in delays {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                // Provider may have already pushed onChange; if not, force a path
+                // through handleInfoChange with whatever is current now.
+                let current = self.provider.current
+                let key = Self.trackKey(current)
+                if key != baseline, !current.title.isEmpty,
+                   current.title != NowPlayingInfo.empty.title {
+                    self.handleInfoChange(current)
+                    self.cancelSkipProbe()
+                } else if key == baseline {
+                    // Nudge: re-assign onChange path with same object if fields updated
+                    // (e.g. title filled in after empty).
+                    self.handleInfoChange(current)
+                }
+            }
+            skipProbeWorkItems.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func cancelSkipProbe() {
+        for item in skipProbeWorkItems { item.cancel() }
+        skipProbeWorkItems.removeAll()
+    }
 
     /// Open Music / Spotify and reveal the current track / playlist context.
     func openConnectedApp() {
@@ -96,6 +185,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
+    var ambientPriority: Int { 100 }
     func ambientView() -> AnyView { AnyView(AmbientMediaView(plugin: self)) }
 }
 
@@ -103,18 +193,53 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
 private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
+    @ObservedObject private var meeting = MeetingMode.shared
+
+    private var dimmed: Bool { meeting.shouldDimMediaAmbient() }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 7) {
             artThumb
                 .onTapGesture { plugin.openConnectedApp() }
                 .help("Open \(playerLabel)")
+            VStack(alignment: .leading, spacing: 0) {
+                if !plugin.info.title.isEmpty, plugin.info.title != NowPlayingInfo.empty.title {
+                    Text(plugin.info.title)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                }
+                if let remainingLabel {
+                    Text(remainingLabel)
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: 90, alignment: .leading)
             Spacer(minLength: 0)
-            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12)
-                .fixedSize()
+            if !dimmed {
+                MusicBarsView(
+                    isPlaying: plugin.info.isPlaying,
+                    barCount: 6,
+                    maxHeight: 16,
+                    color: NotchTheme.mediaGlow.opacity(0.95)
+                )
+                    .fixedSize()
+            }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .opacity(dimmed ? 0.42 : 1)
+    }
+
+    private var remainingLabel: String? {
+        let info = plugin.info
+        guard info.duration > 1, info.elapsed >= 0 else { return nil }
+        let left = max(0, Int((info.duration - info.elapsed).rounded()))
+        let m = left / 60
+        let s = left % 60
+        return String(format: "-%d:%02d", m, s)
     }
 
     private var playerLabel: String {
@@ -131,16 +256,17 @@ private struct AmbientMediaView: View {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(1, contentMode: .fill)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .clipShape(shape)
+                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
                 .contentShape(shape)
         } else {
             shape
                 .fill(NotchTheme.chipFill)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
                 )
                 .contentShape(shape)
@@ -170,36 +296,53 @@ private struct ExpandedMediaView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceLG) {
+        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
             artwork
-                .onTapGesture { plugin.openConnectedApp() }
-                .help("Open in \(playerAppName)")
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 header
-                MarqueeText(
-                    text: hasTrack ? plugin.info.title : "Nothing playing",
-                    font: .system(size: 17, weight: .semibold),
-                    foreground: NotchTheme.textPrimary,
-                    speed: 32
-                )
-                .frame(height: 22)
-                .onTapGesture { plugin.openConnectedApp() }
-                MarqueeText(
-                    text: subtitle,
-                    font: NotchTheme.body,
-                    foreground: NotchTheme.textSecondary,
-                    speed: 28
-                )
-                .frame(height: 18)
-
-                timelineBar
+                if hasTrack {
+                    MarqueeText(
+                        text: plugin.info.title,
+                        font: .system(size: 16, weight: .semibold),
+                        foreground: NotchTheme.textPrimary,
+                        speed: 32
+                    )
+                    .frame(height: 20)
+                    .onTapGesture { plugin.openConnectedApp() }
+                    MarqueeText(
+                        text: subtitle,
+                        font: NotchTheme.caption,
+                        foreground: NotchTheme.textSecondary,
+                        speed: 28
+                    )
+                    .frame(height: 16)
+                    timelineBar
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Nothing playing")
+                            .font(NotchTheme.body.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textPrimary)
+                        Text("Start Music or Spotify — transport still works.")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Button {
+                            plugin.openConnectedApp()
+                        } label: {
+                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 4)
+                }
 
                 systemVolumeSection
 
-                playlistRow
+                if hasTrack {
+                    playlistRow
+                }
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 2)
                 transportRow
             }
             Spacer(minLength: 0)
@@ -226,7 +369,8 @@ private struct ExpandedMediaView: View {
             scrubElapsed = nil
             lastTick = .now
         }
-        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { now in
+        // 2 Hz is enough for a smooth scrubber without 4 Hz main-thread ticks.
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { now in
             guard scrubElapsed == nil, plugin.info.isPlaying, plugin.info.duration > 0 else {
                 lastTick = now
                 return
@@ -259,7 +403,12 @@ private struct ExpandedMediaView: View {
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
             if plugin.info.isPlaying {
-                MusicBarsView(isPlaying: true, maxHeight: 11)
+                MusicBarsView(
+                    isPlaying: plugin.info.isPlaying,
+                    barCount: 6,
+                    maxHeight: 16,
+                    color: NotchTheme.mediaGlow.opacity(0.95)
+                )
                     .fixedSize()
             }
             Spacer(minLength: 0)
@@ -328,93 +477,89 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Collapsible subsection under Media — system output volume (Core Audio).
+    /// Collapsible subsection under Media — system output volume (AppleScript UI %).
     private var systemVolumeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    showSystemVolume.toggle()
-                    UserDefaults.standard.set(showSystemVolume, forKey: "dynamo.media.showSystemVolume")
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(showSystemVolume ? 90 : 0))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    Image(systemName: volumeIcon)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                    Text("System Volume")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
-                    Spacer(minLength: 0)
-                    Text(volume.isMuted ? "Mute" : "\(volume.percent)%")
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(showSystemVolume ? "Hide system volume" : "Show system volume controls")
-
-            if showSystemVolume {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let name = volume.deviceName, !name.isEmpty {
-                        Text(name)
-                            .font(NotchTheme.micro)
+        NotchCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        showSystemVolume.toggle()
+                        UserDefaults.standard.set(showSystemVolume, forKey: "dynamo.media.showSystemVolume")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .rotationEffect(.degrees(showSystemVolume ? 90 : 0))
                             .foregroundStyle(NotchTheme.textQuaternary)
-                            .lineLimit(1)
+                        Image(systemName: volumeIcon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                        Text("System Volume")
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Spacer(minLength: 0)
+                        Text(volume.isMuted ? "Mute" : "\(volume.percent)%")
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textPrimary)
                     }
-
-                    HStack(spacing: 8) {
-                        Button {
-                            volume.toggleMute()
-                        } label: {
-                            Image(systemName: volumeIcon)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                                .frame(width: 28, height: 28)
-                                .background(Circle().fill(NotchTheme.chipFillActive))
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(volume.isMuted ? "Unmute" : "Mute")
-
-                        Slider(
-                            value: Binding(
-                                get: { Double(volume.isMuted ? 0 : volume.level) },
-                                set: { volume.setLevel(Float($0)) }
-                            ),
-                            in: 0...1
-                        )
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.9))
-                        .help("Change Mac system volume")
-
-                        Button {
-                            volume.nudge(by: -0.0625)
-                        } label: {
-                            Image(systemName: "minus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
-                                .background(Circle().fill(NotchTheme.chipFill))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            volume.nudge(by: 0.0625)
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
-                                .background(Circle().fill(NotchTheme.chipFill))
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    .contentShape(Rectangle())
                 }
-                .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .buttonStyle(.plain)
+                .help(showSystemVolume ? "Hide system volume" : "Show system volume controls")
+
+                if showSystemVolume {
+                    VStack(alignment: .leading, spacing: 6) {
+                        OutputDeviceMenu()
+
+                        HStack(spacing: 8) {
+                            Button {
+                                volume.toggleMute()
+                            } label: {
+                                Image(systemName: volumeIcon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                    .frame(width: 28, height: 28)
+                                    .background(Circle().fill(NotchTheme.chipFillActive))
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(volume.isMuted ? "Unmute" : "Mute")
+
+                            Slider(
+                                value: Binding(
+                                    get: { Double(volume.isMuted ? 0 : volume.level) },
+                                    set: { volume.setLevel(Float($0)) }
+                                ),
+                                in: 0...1
+                            )
+                            .controlSize(.mini)
+                            .tint(Color.white.opacity(0.9))
+                            .help("Change Mac system volume")
+
+                            Button {
+                                volume.nudge(by: -0.0625)
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(NotchTheme.chipFill))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                volume.nudge(by: 0.0625)
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(NotchTheme.chipFill))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
         .padding(.top, 2)
@@ -468,34 +613,40 @@ private struct ExpandedMediaView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        Group {
-            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(1, contentMode: .fill)
-                    .frame(width: 104, height: 104)
-                    .clipShape(shape)
-                    .shadow(color: .black.opacity(0.28), radius: 9, y: 3)
-            } else {
-                shape
-                    .fill(NotchTheme.chipFill)
-                    .frame(width: 104, height: 104)
-                    .overlay(
+        let corner: CGFloat = 16
+        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: 104, cornerRadius: corner) {
+            Group {
+                if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(1, contentMode: .fill)
+                } else {
+                    ZStack {
+                        LinearGradient(
+                            colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                         Image(systemName: "music.note")
-                            .font(.system(size: 30))
+                            .font(.system(size: 28, weight: .medium))
                             .foregroundStyle(NotchTheme.textTertiary)
-                    )
+                    }
+                }
+            }
+            .frame(width: 104, height: 104)
+            .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(5)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+                    .padding(6)
             }
         }
-        .contentShape(shape)
-        .overlay(alignment: .bottomTrailing) {
-            Image(systemName: "arrow.up.right.square.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(radius: 2)
-                .padding(6)
-        }
+        .shadow(color: .black.opacity(0.32), radius: 10, y: 4)
+        .help("Open in \(playerAppName)")
+        .onTapGesture { plugin.openConnectedApp() }
     }
 
     private var transportRow: some View {
@@ -509,8 +660,8 @@ private struct ExpandedMediaView: View {
             transportButton(
                 plugin.info.isPlaying ? "pause.fill" : "play.fill",
                 accessibility: plugin.info.isPlaying ? "Pause" : "Play",
-                size: 18,
-                diameter: 44,
+                size: 17,
+                diameter: 46,
                 prominent: true
             ) { plugin.togglePlayPause() }
             transportButton(
@@ -540,5 +691,51 @@ private struct ExpandedMediaView: View {
         .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
         .help(accessibility)
         .accessibilityLabel(accessibility)
+    }
+}
+
+// MARK: - Output device menu
+
+private struct OutputDeviceMenu: View {
+    @ObservedObject private var outputs = AudioOutputController.shared
+
+    var body: some View {
+        Menu {
+            ForEach(outputs.devices) { device in
+                Button {
+                    outputs.select(id: device.id)
+                } label: {
+                    HStack {
+                        Text(device.name)
+                        if device.id == outputs.selectedID {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "hifispeaker.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(currentName)
+                    .font(NotchTheme.micro)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(NotchTheme.textQuaternary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: false, vertical: true)
+        .help("Choose audio output")
+        .onAppear { outputs.refresh() }
+    }
+
+    private var currentName: String {
+        if let id = outputs.selectedID,
+           let match = outputs.devices.first(where: { $0.id == id }) {
+            return match.name
+        }
+        return SystemVolumeController.shared.deviceName ?? "Output"
     }
 }

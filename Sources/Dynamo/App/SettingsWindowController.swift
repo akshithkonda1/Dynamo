@@ -18,16 +18,22 @@ final class SettingsWindowController: NSObject {
         if window == nil {
             let root = SettingsView(registry: registry, notch: notch)
             let hosting = NSHostingController(rootView: root)
+            // Standard macOS settings window — titled, translucent titlebar.
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 600, height: 760),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Dynamo Settings"
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .visible
+            window.toolbarStyle = .unified
+            window.backgroundColor = NSColor.windowBackgroundColor
             window.contentViewController = hosting
             window.center()
             window.isReleasedWhenClosed = false
+            window.setFrameAutosaveName("DynamoSettingsWindow")
             window.setContentSize(NSSize(width: 600, height: 760))
             window.minSize = NSSize(width: 520, height: 560)
             self.window = window
@@ -57,9 +63,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // IA: General · Appearance · Widgets · Permissions · About
                 generalSection
-                permissionsSection
+                appearanceSection
                 widgetsSection
+                permissionsSection
 
                 // Per-widget configuration, discovered generically via
                 // `WidgetSettingsProviding` — Settings never names a widget.
@@ -69,6 +77,8 @@ struct SettingsView: View {
                         section.view
                     }
                 }
+
+                aboutSection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,6 +108,26 @@ struct SettingsView: View {
 
             Divider()
 
+            Text("Collapse after leaving notch")
+                .font(.subheadline.weight(.semibold))
+            Picker("Collapse delay", selection: Binding(
+                get: { Int(notch.collapseDelaySeconds) },
+                set: { notch.setCollapseDelay(TimeInterval($0)) }
+            )) {
+                Text("Hover only (immediate)").tag(0)
+                Text("5 seconds").tag(5)
+                Text("7 seconds (default)").tag(7)
+                Text("10 seconds").tag(10)
+                Text("30 seconds").tag(30)
+            }
+            .labelsHidden()
+            Text("How long the expanded tray stays open after the cursor leaves. Default is 7 seconds (in the 5–10s sweet spot). Hover-only collapses as soon as you leave.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
             Toggle("Hidden mode (peek from the top edge)", isOn: Binding(
                 get: { notch.isHiddenModeEnabled },
                 set: { notch.setHiddenMode($0) }
@@ -109,6 +139,38 @@ struct SettingsView: View {
 
             Divider()
 
+            Toggle("Meeting Mode", isOn: Binding(
+                get: { MeetingMode.shared.isEnabled },
+                set: { MeetingMode.shared.isEnabled = $0 }
+            ))
+            Toggle("Dim music ambient during meetings", isOn: Binding(
+                get: { MeetingMode.shared.dimMediaAmbient },
+                set: { MeetingMode.shared.dimMediaAmbient = $0 }
+            ))
+            Toggle("Also quiet peeks when Low Power / Focus proxy is on", isOn: Binding(
+                get: { MeetingMode.shared.quietOnFocus },
+                set: { MeetingMode.shared.quietOnFocus = $0 }
+            ))
+            Text("While a calendar event is Now, suppress routine sneak peeks. Critical alerts still show. Dim ambient softens music in the collapsed strip during meetings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Critical Peek bridge (external)", isOn: Binding(
+                get: { PeekBridge.shared.isEnabled },
+                set: { PeekBridge.shared.isEnabled = $0 }
+            ))
+            Text("Allow Shortcuts/scripts to show a notch peek via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek. Off by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var appearanceSection: some View {
+        SettingsSection(title: "Appearance") {
             Text("Display for notch")
                 .font(.subheadline.weight(.semibold))
             Picker("Display", selection: Binding(
@@ -125,10 +187,46 @@ struct SettingsView: View {
                 }
             }
             .labelsHidden()
-            Text("Pick which monitor hosts the notch tray when you use multiple displays.")
+            Text("Pick which monitor hosts the notch tray when you use multiple displays. Automatic prefers a notched built-in display.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var aboutSection: some View {
+        SettingsSection(title: "About") {
+            Text("Dynamo")
+                .font(.body.weight(.semibold))
+            Text("Notch widget dock for macOS — media, calendar, clipboard, shelf, webcam, and more.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Daily driver build: ~/Documents/Dynamo/dist/Dynamo.app")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("URLs: dynamo://show · mute · play · shelf · calendar · peek?title=")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            HStack(spacing: 12) {
+                Button("Show Notch") {
+                    notch.revealAndExpand()
+                }
+                .controlSize(.small)
+                Button("Focus File Shelf") {
+                    notch.focusPlugin(id: "shelf")
+                }
+                .controlSize(.small)
+                Button("Focus Calendar") {
+                    notch.focusPlugin(id: "calendar")
+                }
+                .controlSize(.small)
+            }
         }
     }
 
@@ -221,8 +319,8 @@ struct SettingsView: View {
     }
 }
 
-/// A titled, card-styled settings group — makes each block of settings visible
-/// and obvious at a glance rather than crammed into one list.
+/// Grouped settings block using system control background (native) with
+/// continuous corner radius (Dynamo softness).
 private struct SettingsSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
@@ -231,17 +329,18 @@ private struct SettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.title2.weight(.semibold))
+                .foregroundStyle(.primary)
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
         )
     }
 }

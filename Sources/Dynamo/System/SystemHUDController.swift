@@ -24,6 +24,10 @@ final class SystemHUDController: ObservableObject {
     private var hideWorkItem: DispatchWorkItem?
     private weak var notch: NotchWindowController?
     private let volume = SystemVolumeController.shared
+    /// True while this controller has claimed the notch overlay session.
+    private var holdingOverlay = false
+    /// Coalesce rapid dual-fire (key monitor + poll) into one present/hide cycle.
+    private var lastPresentAt: Date = .distantPast
 
     func attach(notch: NotchWindowController) {
         self.notch = notch
@@ -44,6 +48,10 @@ final class SystemHUDController: ObservableObject {
             self.globalMonitor = nil
         }
         hideWorkItem?.cancel()
+        if holdingOverlay {
+            holdingOverlay = false
+            notch?.overlayDidHide()
+        }
         volume.onExternalChange = nil
         volume.stop()
         state = nil
@@ -79,6 +87,8 @@ final class SystemHUDController: ObservableObject {
 
         switch keyCode {
         case 0, 1, 7: // sound up, sound down, mute
+            // Suppress poll-driven onExternalChange so we don't double-present.
+            volume.suppressExternalAnnouncements(for: 0.55)
             // Sample after the system applies the key (a few ms lag).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
                 self?.volume.refreshFromSystem(announceExternal: false)
@@ -95,29 +105,44 @@ final class SystemHUDController: ObservableObject {
         volume.refreshFromSystem(announceExternal: false)
         let level = volume.level
         let muted = volume.isMuted
-        // Bar uses real system percent via volume.percent in the view.
         show(SystemHUDState(kind: .volume, level: muted ? 0 : level, isMuted: muted))
     }
 
     private func presentBrightness() {
-        // Sample after the OS applies the key so we show the real level.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+        // Single delayed sample — a second show() used to stack overlay refcount.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             let level = SystemLevelReader.displayBrightness() ?? 0.5
             self?.show(SystemHUDState(kind: .brightness, level: level, isMuted: false))
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // Optional level refresh only (no second present) once the OS settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+            guard let self, self.holdingOverlay, self.state?.kind == .brightness else { return }
             let level = SystemLevelReader.displayBrightness() ?? 0.5
-            self?.show(SystemHUDState(kind: .brightness, level: level, isMuted: false))
+            self.state = SystemHUDState(kind: .brightness, level: level, isMuted: false)
         }
     }
 
     private func show(_ newState: SystemHUDState) {
+        // Coalesce key+poll dual-fire: only claim the overlay once per session.
+        let now = Date()
+        lastPresentAt = now
         state = newState
-        notch?.presentForOverlay()
+
+        if !holdingOverlay {
+            holdingOverlay = true
+            notch?.presentForOverlay()
+        }
+        // Refresh: update state + reschedule hide only — do NOT re-present
+        // (that stacked refcount and left the tray stuck at overlay height).
+
         hideWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.state = nil
-            self?.notch?.overlayDidHide()
+            guard let self else { return }
+            self.state = nil
+            if self.holdingOverlay {
+                self.holdingOverlay = false
+                self.notch?.overlayDidHide()
+            }
         }
         hideWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: work)

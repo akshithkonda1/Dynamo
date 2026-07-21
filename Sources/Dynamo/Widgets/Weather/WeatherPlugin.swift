@@ -4,10 +4,12 @@ import SwiftUI
 /// Notch weather widget. Talks only to `WeatherProvider`, so the WeatherKit
 /// implementation can be swapped for a mock without touching any view.
 @MainActor
-final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding, NotchSneakPeekProviding {
+final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsProviding, NotchSneakPeekProviding, NotchAmbientProviding {
     let id = "weather"
     let displayName = "Weather"
     let systemImage = "cloud.sun"
+
+    var expandedContentHeight: CGFloat { 255 }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []
@@ -59,7 +61,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
                 systemImage: "exclamationmark.triangle.fill",
                 title: "Severe Weather Alert",
                 subtitle: alert.summary,
-                emphasis: .critical
+                urgency: .critical
             ))
         }
     }
@@ -118,6 +120,40 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
 
     func expandedView() -> AnyView { AnyView(ExpandedWeatherView(plugin: self)) }
     func settingsView() -> AnyView { AnyView(WeatherSettingsView(plugin: self)) }
+
+    // MARK: - Ambient
+
+    var isAmbientActive: Bool { snapshot != nil }
+    /// Below calendar/media/battery so weather is the calm idle fallback (above clock).
+    var ambientPriority: Int { 28 }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientWeatherView(snapshot: snapshot))
+    }
+}
+
+private struct AmbientWeatherView: View {
+    let snapshot: WeatherSnapshot?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let snapshot {
+                Image(systemName: snapshot.symbolName)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(TemperatureFormat.short(snapshot.temperature))
+                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(NotchTheme.textPrimary)
+                Text(snapshot.conditionDescription)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, NotchTheme.ambientInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 }
 
 // MARK: - Temperature formatting
@@ -185,10 +221,12 @@ private struct ExpandedWeatherView: View {
                 .font(NotchTheme.micro)
                 .foregroundStyle(NotchTheme.textTertiary)
         } else if plugin.snapshot == nil, plugin.locationAuth == .denied {
-            Text("Location access denied. Enable it in System Settings → Privacy & Security → Location Services, or set a location in Settings → Weather.")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            NotchEmptyState(
+                systemImage: "location.slash",
+                title: "Location access denied",
+                caption: "Enable Location Services, or set a city in Settings → Weather.",
+                prominent: true
+            )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)
             if !plugin.alerts.isEmpty {
@@ -208,24 +246,26 @@ private struct ExpandedWeatherView: View {
     }
 
     private func currentConditions(_ snapshot: WeatherSnapshot) -> some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-            Image(systemName: snapshot.symbolName)
-                .symbolRenderingMode(.multicolor)
-                .font(.system(size: 34))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(TemperatureFormat.short(snapshot.temperature))
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text(snapshot.conditionDescription)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                if let high = snapshot.high, let low = snapshot.low {
-                    Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textTertiary)
+        NotchCard {
+            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+                Image(systemName: snapshot.symbolName)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 36))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(TemperatureFormat.short(snapshot.temperature))
+                        .font(NotchTheme.heroDigit)
+                        .foregroundStyle(NotchTheme.textPrimary)
+                    Text(snapshot.conditionDescription)
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textSecondary)
+                    if let high = snapshot.high, let low = snapshot.low {
+                        Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
     }
 

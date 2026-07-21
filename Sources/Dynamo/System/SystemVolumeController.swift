@@ -34,8 +34,9 @@ final class SystemVolumeController: ObservableObject {
         refreshFromSystem()
         installHardwareListener()
         rebindDeviceListeners()
-        // Fast poll so keyboard / Control Center changes show immediately.
-        let t = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+        // Core Audio listeners catch most changes; light poll as a backup only.
+        // 0.5s is plenty for HUD accuracy and cuts main-thread AppleScript work ~2.5×.
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshFromSystem(announceExternal: true) }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -84,6 +85,12 @@ final class SystemVolumeController: ObservableObject {
 
     func toggleMute() {
         setMuted(!isMuted)
+    }
+
+    /// Quiet `onExternalChange` for a short window (volume-key HUD path so
+    /// poll + key monitor don't both fire the notch HUD).
+    func suppressExternalAnnouncements(for seconds: TimeInterval = 0.5) {
+        suppressExternalUntil = Date().addingTimeInterval(seconds)
     }
 
     /// One keyboard-like step (~6–7%).

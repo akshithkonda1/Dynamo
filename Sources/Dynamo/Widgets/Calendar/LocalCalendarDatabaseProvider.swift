@@ -1,40 +1,23 @@
 import AppKit
-import EventKit
 import Foundation
 import SQLite3
 
 /// Read-only mirror of Calendar.app’s local database
 /// (`~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb`).
+/// Events only — system Reminders live in the Checklist tab.
 ///
-/// No EventKit permission prompt for *events* — Dynamo only *reads* the same
-/// store Calendar already maintains. Nothing is written. Clicking an event
-/// opens Calendar.app.
-///
-/// Reminders are a separate data store EventKit doesn't expose any file-based
-/// read path for, so due reminders use a dedicated, reminders-only
-/// `EKEventStore` — a distinct permission grant from Calendar's file access,
-/// requested only in response to explicit user action (never at launch).
-///
-/// Access may require Full Disk Access on some macOS configurations. If the DB
-/// can’t be opened, `accessState`
-/// surfaces that so Settings can point the user at FDA.
+/// Access may require Full Disk Access on some macOS configurations.
 @MainActor
 final class LocalCalendarDatabaseProvider: CalendarProvider {
     private(set) var authorizationState: CalendarAuthState = .notDetermined
     private(set) var upcoming: [CalendarEventItem] = []
-    private(set) var dueReminders: [ReminderItem] = []
-    private(set) var remindersAuthState: CalendarAuthState = .notDetermined
     var onChange: (() -> Void)?
 
     private var timer: Timer?
     private var lastSnapshotPath: URL?
-    private let reminderStore = EKEventStore()
-    private var remindersFetchToken: Any?
     /// mtime+size fingerprint of the source db (+ its `-wal` sidecar) as of the
     /// last snapshot. Skips re-copying the whole database on every 30s tick
-    /// when Calendar hasn't actually written anything since — the query still
-    /// re-runs against the existing snapshot with a fresh `now`, so events
-    /// that ended in the meantime are still pruned correctly.
+    /// when Calendar hasn't actually written anything since.
     private var lastSourceFingerprint: String?
 
     /// Calendar.app’s shared group container DB (modern macOS).
@@ -50,7 +33,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        // Register once on `.common` so tracking/scroll doesn't stall refreshes.
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -58,10 +40,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     func stop() {
         timer?.invalidate()
         timer = nil
-        if let remindersFetchToken {
-            reminderStore.cancelFetchRequest(remindersFetchToken)
-            self.remindersFetchToken = nil
-        }
         if let lastSnapshotPath {
             let fm = FileManager.default
             try? fm.removeItem(at: lastSnapshotPath)
@@ -73,40 +51,14 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     }
 
     func requestAccess() async {
-        // No TCC prompt for file-based read; re-check readability / FDA.
+        // No TCC for file-based read; re-check readability / FDA.
         refresh()
-    }
-
-    /// Prompts for Reminders access — only call this from explicit user
-    /// action (e.g. an "Allow Reminders" button). Unlike `requestAccess()`,
-    /// this shows a real system dialog the first time it's called.
-    func requestRemindersAccess() async {
-        do {
-            let granted: Bool
-            if #available(macOS 14.0, *) {
-                granted = try await reminderStore.requestFullAccessToReminders()
-            } else {
-                granted = try await reminderStore.requestAccess(to: .reminder)
-            }
-            remindersAuthState = granted ? .authorized : .denied
-        } catch {
-            remindersAuthState = .denied
-        }
-        if remindersAuthState == .authorized {
-            fetchReminders()
-        } else {
-            onChange?()
-        }
     }
 
     func refresh() {
         refreshEvents()
-        refreshReminders()
     }
 
-    /// Calendar events — read-only file access, independent of Reminders'
-    /// separate EventKit grant below. Never touches `dueReminders`; a
-    /// Calendar-DB read failure shouldn't hide already-fetched reminders.
     private func refreshEvents() {
         // Optimistic seed from last successful FDA/calendar read.
         if PermissionsStore.shared.isGranted(.fullDiskAccess), authorizationState != .authorized {
@@ -168,88 +120,19 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         onChange?()
     }
 
-    // MARK: - Reminders (separate EventKit grant, requested explicitly only)
-
-    /// Passive status check only — never prompts. `requestRemindersAccess()`
-    /// is the only path that can trigger the system dialog, and only in
-    /// response to explicit user action.
-    private func refreshReminders() {
-        let status = EKEventStore.authorizationStatus(for: .reminder)
-        remindersAuthState = Self.mapReminderAuthStatus(status)
-        guard remindersAuthState == .authorized else {
-            if !dueReminders.isEmpty {
-                dueReminders = []
-                onChange?()
-            }
-            return
-        }
-        fetchReminders()
-    }
-
-    private func fetchReminders() {
-        if let remindersFetchToken {
-            reminderStore.cancelFetchRequest(remindersFetchToken)
-        }
-        let end = Date().addingTimeInterval(24 * 60 * 60)
-        let predicate = reminderStore.predicateForIncompleteReminders(
-            withDueDateStarting: nil,
-            ending: end,
-            calendars: nil
-        )
-        remindersFetchToken = reminderStore.fetchReminders(matching: predicate) { [weak self] reminders in
-            Task { @MainActor in
-                guard let self else { return }
-                self.remindersFetchToken = nil
-                let now = Date()
-                let items = (reminders ?? [])
-                    .compactMap { reminder -> ReminderItem? in
-                        guard let components = reminder.dueDateComponents,
-                              let due = Calendar.current.date(from: components)
-                        else { return nil }
-                        guard due.timeIntervalSince(now) <= 24 * 60 * 60,
-                              due.timeIntervalSince(now) > -60 * 60
-                        else { return nil }
-                        return ReminderItem(
-                            id: reminder.calendarItemIdentifier,
-                            title: reminder.title ?? "Reminder",
-                            due: due
-                        )
-                    }
-                    .sorted { $0.due < $1.due }
-                    .prefix(8)
-                self.dueReminders = Array(items)
-                self.onChange?()
-            }
-        }
-    }
-
-    private static func mapReminderAuthStatus(_ status: EKAuthorizationStatus) -> CalendarAuthState {
-        if #available(macOS 14.0, *) {
-            switch status {
-            case .fullAccess, .authorized: return .authorized
-            case .notDetermined: return .notDetermined
-            default: return .denied
-            }
-        } else {
-            switch status {
-            case .authorized: return .authorized
-            case .notDetermined: return .notDetermined
-            default: return .denied
-            }
-        }
-    }
-
     func openEvent(id: String) {
-        // Prefer Calendar deep link by UUID when we stored one.
-        if id.count >= 8 {
-            let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        // IDs are often "uuid|startAbs" (occurrence-stable). Prefer the UUID part.
+        let parts = id.split(separator: "|", maxSplits: 1).map(String.init)
+        let primary = parts.first ?? id
+        if primary.count >= 8 {
+            let encoded = primary.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? primary
             if let url = URL(string: "ical://ekevent/\(encoded)"), NSWorkspace.shared.open(url) {
                 return
             }
         }
-        // Fallback: open Calendar to a day if id encodes a timestamp.
-        if let interval = TimeInterval(id), interval > 0 {
-            let date = Date(timeIntervalSinceReferenceDate: interval)
+        // Fallback: open Calendar on the occurrence day when we stored startAbs.
+        if let startPart = parts.dropFirst().first, let abs = TimeInterval(startPart), abs > 0 {
+            let date = Date(timeIntervalSinceReferenceDate: abs)
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd"
             let day = formatter.string(from: date)
@@ -266,6 +149,20 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         } else {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
         }
+    }
+
+    func openNewEvent() {
+        CalendarNewEventOpener.open()
+    }
+
+    func openToday() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        let day = formatter.string(from: Date())
+        if let url = URL(string: "ical://\(day)"), NSWorkspace.shared.open(url) {
+            return
+        }
+        openCalendarApp()
     }
 
     // MARK: - Snapshot
@@ -345,31 +242,88 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         let now = Date().timeIntervalSinceReferenceDate
         let end = now + 14 * 24 * 60 * 60
 
-        // Include in-progress events (end still ahead) plus anything starting
-        // within the next two weeks — not only start ≥ now.
-        let sql = """
-        SELECT
-          ci.UUID,
-          ci.summary,
-          oc.occurrence_start_date,
-          oc.occurrence_end_date,
-          ci.all_day,
-          c.title,
-          c.color,
-          loc.title,
-          loc.address,
-          ci.ROWID
-        FROM OccurrenceCache oc
-        JOIN CalendarItem ci ON ci.ROWID = oc.event_id
-        JOIN Calendar c ON c.ROWID = oc.calendar_id
-        LEFT JOIN Location loc ON loc.ROWID = ci.location_id
-        WHERE oc.occurrence_end_date >= ?
-          AND oc.occurrence_start_date <= ?
-          AND IFNULL(ci.hidden, 0) = 0
-        ORDER BY oc.occurrence_start_date ASC
-        LIMIT 80;
-        """
+        var seen = Set<String>()
+        var results: [CalendarEventItem] = []
 
+        // 1) OccurrenceCache (expanded recurrences when CalendarAgent is fresh).
+        try appendRows(
+            db: db,
+            sql: """
+            SELECT
+              ci.UUID,
+              ci.summary,
+              oc.occurrence_start_date,
+              oc.occurrence_end_date,
+              ci.all_day,
+              c.title,
+              c.color,
+              loc.title,
+              loc.address,
+              ci.ROWID
+            FROM OccurrenceCache oc
+            JOIN CalendarItem ci ON ci.ROWID = oc.event_id
+            JOIN Calendar c ON c.ROWID = oc.calendar_id
+            LEFT JOIN Location loc ON loc.ROWID = ci.location_id
+            WHERE oc.occurrence_end_date >= ?
+              AND oc.occurrence_start_date <= ?
+              AND IFNULL(ci.hidden, 0) = 0
+            ORDER BY oc.occurrence_start_date ASC
+            LIMIT 80;
+            """,
+            now: now,
+            end: end,
+            seen: &seen,
+            results: &results
+        )
+
+        // 2) CalendarItem fallback — OccurrenceCache often lags behind live
+        //    writes (max end can trail “today”). Pull master rows still in range.
+        try appendRows(
+            db: db,
+            sql: """
+            SELECT
+              ci.UUID,
+              ci.summary,
+              ci.start_date,
+              ci.end_date,
+              ci.all_day,
+              c.title,
+              c.color,
+              loc.title,
+              loc.address,
+              ci.ROWID
+            FROM CalendarItem ci
+            JOIN Calendar c ON c.ROWID = ci.calendar_id
+            LEFT JOIN Location loc ON loc.ROWID = ci.location_id
+            WHERE ci.end_date >= ?
+              AND ci.start_date <= ?
+              AND IFNULL(ci.hidden, 0) = 0
+              AND ci.start_date IS NOT NULL
+              AND ci.end_date IS NOT NULL
+            ORDER BY ci.start_date ASC
+            LIMIT 80;
+            """,
+            now: now,
+            end: end,
+            seen: &seen,
+            results: &results
+        )
+
+        results.sort { $0.start < $1.start }
+        if results.count > 40 {
+            results = Array(results.prefix(40))
+        }
+        return results
+    }
+
+    private func appendRows(
+        db: OpaquePointer,
+        sql: String,
+        now: Double,
+        end: Double,
+        seen: inout Set<String>,
+        results: inout [CalendarEventItem]
+    ) throws {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
             throw CalendarDBError.prepareFailed
@@ -379,14 +333,13 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         sqlite3_bind_double(stmt, 1, now)
         sqlite3_bind_double(stmt, 2, end)
 
-        var seen = Set<String>()
-        var results: [CalendarEventItem] = []
-
         while sqlite3_step(stmt) == SQLITE_ROW {
             let uuid = stringColumn(stmt, 0) ?? ""
             let summary = stringColumn(stmt, 1)?.trimmingCharacters(in: .whitespacesAndNewlines)
             let startAbs = sqlite3_column_double(stmt, 2)
             let endAbs = sqlite3_column_double(stmt, 3)
+            // Skip malformed rows (null dates bind as 0).
+            guard startAbs > 0, endAbs > 0, endAbs >= startAbs else { continue }
             let allDay = sqlite3_column_int(stmt, 4) != 0
             let calName = stringColumn(stmt, 5) ?? "Calendar"
             let colorHex = stringColumn(stmt, 6)
@@ -395,7 +348,6 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
             let rowID = sqlite3_column_int64(stmt, 9)
 
             let title = (summary?.isEmpty == false) ? summary! : "Untitled"
-            // Deduplicate multi-day cache rows for the same occurrence.
             let dedupeKey = "\(uuid.isEmpty ? "\(rowID)" : uuid)|\(startAbs)"
             if seen.contains(dedupeKey) { continue }
             seen.insert(dedupeKey)
@@ -409,7 +361,7 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
                 location = nil
             }
 
-            let id = uuid.isEmpty ? "\(rowID)|\(startAbs)" : uuid
+            let id = uuid.isEmpty ? "\(rowID)|\(startAbs)" : "\(uuid)|\(startAbs)"
 
             results.append(CalendarEventItem(
                 id: id,
@@ -421,11 +373,7 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
                 calendarName: calName,
                 location: location
             ))
-
-            if results.count >= 40 { break }
         }
-
-        return results
     }
 
     private func stringColumn(_ stmt: OpaquePointer, _ index: Int32) -> String? {

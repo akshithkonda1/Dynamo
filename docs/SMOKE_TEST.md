@@ -1,146 +1,109 @@
 # Dynamo smoke test checklist
 
-Use this after a local build (Xcode target preferred) to confirm the app is usable day-to-day.  
+Use this after a local build to confirm the app is usable day-to-day.  
 **WeatherKit signing / paid-team provisioning is out of scope for this pass** — skip or soft-fail Weather live data if the build is ad-hoc.
 
-**Decisions for this pass**
-
-| Item | Decision |
-|------|----------|
-| WeatherKit / paid team signing | Leave alone for now |
-
-Check boxes as you go. Prefer a cold launch each major section.
+**Daily driver path:** `~/Documents/Dynamo/dist/Dynamo.app` only (kill older copies first).
 
 ---
 
 ## 0. Pre-flight
 
-- [ ] Working tree is `~/Documents/Dynamo` on `main` (not the older `~/Dynamo` Phase-2 tree)
-- [ ] Build succeeds
-  - Xcode: `xcodegen generate && open Dynamo.xcodeproj` → ⌘R, **or**
-  - Ad-hoc: `./scripts/package-app.sh debug && open dist/Dynamo.app`
+- [ ] Working tree is `~/Documents/Dynamo`
+- [ ] Build succeeds: `./scripts/package-app.sh debug && open dist/Dynamo.app`
+- [ ] Single process: `pgrep -x Dynamo` shows one PID
 - [ ] Menu-bar Dynamo icon appears (accessory app — no Dock icon)
-- [ ] Notch panel appears on the built-in display (or primary notched screen)
+- [ ] Notch panel appears on the built-in / preferred display
 
 ---
 
-## 1. Notch shell
+## 1. Notch shell (Phases A / D)
 
-- [ ] Collapsed panel sits in / under the physical notch (not a random floating bar)
-- [ ] Hover expands tray with spring motion
-- [ ] Leaving the panel collapses it
-- [ ] Expanded tray shows widget icons; selecting one swaps content without relaunch
-- [ ] **Settings → General → Hidden mode (peek-a-boo)** (if enabled): panel hides until cursor hits the top edge, then peeks and retreats
-
----
-
-## 2. Settings
-
-- [ ] Menu bar → **Settings…** opens a real `NSWindow` (not the notch)
-- [ ] Toggle a widget **off** → disappears from the tray immediately
-- [ ] Toggle it **on** → returns immediately
-- [ ] Drag-reorder widgets → tray icon order updates immediately
-- [ ] **Display for notch** picker lists screens; choosing one repositions the tray
-- [ ] Quit and relaunch → order + enabled set + display preference survive
+- [ ] Collapsed panel sits in / under the physical notch
+- [ ] Hover expands tray with spring motion; design tokens (cards, chips) look consistent
+- [ ] Leaving the panel collapses after the Settings delay (default 10s)
+- [ ] **Settings → General → Collapse after leaving notch**: try 3s / hover-only
+- [ ] Tray trailing cluster: **Shelf · Webcam · Settings**
+- [ ] Active tray tab is a brighter filled pill
+- [ ] **Hidden mode**: panel hides until cursor hits the top edge
 
 ---
 
-## 3. Media Controls
+## 2. Ambient (Phase B)
 
-- [ ] Packaged app contains `Contents/MacOS/DynamoMediaRemoteHelper` (`ls dist/Dynamo.app/Contents/MacOS/`)
-- [ ] Start playback in Music or Spotify
-- [ ] Collapsed / ambient notch shows now-playing presence (art and/or bars) when designed to
-- [ ] Expanded: play/pause and skip control the player
-- [ ] Track change produces a brief sneak-peek pill (title/artist)
-- [ ] Volume keys show the notch volume HUD; brightness keys show brightness HUD (where readable)
+- [ ] Music playing → collapsed ambient shows art + bars (+ remaining time if known)
+- [ ] Music paused + meeting within ~60m → calendar ambient (title + “in Xm” / Now)
+- [ ] Low battery (≤20%) when nothing else ambient → % + bolt/red tint
+- [ ] Priority: media playing wins over calendar over battery
 
 ---
 
-## 4. Calendar + Reminders
+## 3. Settings IA (Phase E)
 
-- [ ] Grant **Calendars** (and **Reminders** if prompted)
-- [ ] Expanded list shows upcoming events (or empty state)
-- [ ] Due reminders appear under a Reminders section when present
-- [ ] With a non-all-day event ~5 minutes out: notch peeks a meeting reminder once
-- [ ] With a reminder due within ~5 minutes: notch peeks with checklist icon
-
----
-
-## 5. Clipboard / Snippets
-
-- [ ] Copy text system-wide → appears in history within ~1s
-- [ ] Click history item → copied back to pasteboard
-- [ ] Pin a snippet → survives history capping and relaunch
-- [ ] Delete pin / clear history works
+- [ ] Menu bar → **Settings…** opens a real `NSWindow`
+- [ ] Sections present: **General · Appearance · Widgets · Permissions · About** (+ per-widget)
+- [ ] Collapse delay picker works
+- [ ] Display picker under Appearance repositions the tray
+- [ ] Toggle / reorder widgets; quit + relaunch → prefs survive
+- [ ] About shows dist path + Show Notch / Focus File Shelf quick actions
 
 ---
 
-## 6. Checklist
+## 4. Menu quick actions (Phase D)
 
-- [ ] Add item, toggle done, delete
-- [ ] Drag-reorder items
-- [ ] Relaunch → order and check state persist
-
----
-
-## 7. Weather *(soft — skip live data if ad-hoc / no WeatherKit team)*
-
-- [ ] Widget present in tray (not Stocks)
-- [ ] Settings → Weather: auto location **or** manual city
-- [ ] **If WeatherKit-signed:** expanded shows temp, H/L, Apple Weather attribution
-- [ ] **If ad-hoc only:** document failure mode (error / empty) without blocking the rest of the checklist
-- [ ] Severe alert peek: only if an active alert exists (optional)
+- [ ] **Show Notch** expands tray
+- [ ] **Focus File Shelf** opens Shelf tab
+- [ ] **Play/Pause** toggles current media
+- [ ] **Mute / Unmute** toggles system mute
 
 ---
 
-## 8. Battery
+## 5. Media + volume (Phase C)
 
-- [ ] MacBook: percent + charging state look plausible
-- [ ] Desktop (no battery): sensible “no battery” / unavailable state, not a crash
-
----
-
-## 9. File Shelf
-
-- [ ] Drag a file onto the notch → appears in Shelf
-- [ ] Open / Reveal in Finder work
-- [ ] AirDrop share button presents share UI (device nearby optional)
-- [ ] Clear / remove item works; paths pruned if file deleted (after refresh/relaunch)
+- [ ] Packaged app has `Contents/MacOS/DynamoMediaRemoteHelper`
+- [ ] Expanded: transport, timeline scrub, playlist switch
+- [ ] System Volume card always shows exact **percent** (matches menu-bar when set via UI scale)
+- [ ] Empty state when nothing playing + Open Music/Spotify chip
+- [ ] Track change sneak-peek pill
 
 ---
 
-## 10. Webcam
+## 6. Calendar (Phase C)
 
-- [ ] Open Webcam tab → camera starts (macOS Camera permission if first time)
-- [ ] Leave Webcam tab → camera stops (no green camera indicator left on)
-- [ ] Quit app → camera off
-
----
-
-## 11. Launch at Login *(optional)*
-
-- [ ] Settings → Launch at Login on
-- [ ] Log out/in or reboot → Dynamo starts (best with a real `.app` bundle)
-- [ ] If status is “Requires approval”, complete Login Items approval in System Settings
+- [ ] Events that have **ended** no longer appear
+- [ ] **Now** / **Soon** chips for in-progress / &lt;30m events
+- [ ] **+ New** / New event opens Calendar compose
+- [ ] Click event opens it in Calendar.app
 
 ---
 
-## 12. Stability pass
+## 7. Webcam (Phase C)
 
-- [ ] Enable all intended widgets; leave running 10+ minutes
-- [ ] No beachball on hover expand/collapse
-- [ ] No repeated permission dialogs every launch (after grants)
-- [ ] Quit from menu bar cleanly
+- [ ] Tap mirror starts/stops camera (circle by default)
+- [ ] Device menu when multiple cameras
+- [ ] Zoom 1× / 1.5× / 2×
+- [ ] Snap → clipboard; Freeze freezes frame
 
 ---
 
-## Sign-off
+## 8. Shelf / Clipboard / Checklist
 
-| Field | Value |
-|-------|--------|
-| Date | |
-| Build path | Xcode / package-app / other |
-| macOS version | |
-| Machine | MacBook / desktop |
-| WeatherKit live data | Pass / soft-fail (ad-hoc) / N/A |
-| Notes | |
+- [ ] Drop files onto notch or Shelf; **Add** picker works
+- [ ] File size shown; drag-out / AirDrop / Reveal
+- [ ] Clipboard: pin, delete history row, clear
+- [ ] Checklist: progress `done/total`, always-visible add field
+
+---
+
+## 9. Battery / Weather
+
+- [ ] Battery hero % + charging state; ambient when low/charging
+- [ ] Weather H/L + symbol when available; calm empty state otherwise
+
+---
+
+## 10. Stability
+
+- [ ] Second `open dist/Dynamo.app` → still one process
+- [ ] First click on transport / mute works (nonactivating panel)
+- [ ] No double volume HUD on media key
