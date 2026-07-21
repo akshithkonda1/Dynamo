@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// Shared icon-button styling: a circular hover highlight + a small press
-/// scale, so every widget's small utility buttons (delete, pin, reveal,
-/// clear, copy, transport controls) feel and behave the same way instead of
-/// each widget hand-rolling its own hover/press treatment — or, more often,
-/// having none at all.
+/// Shared icon-button styling: circular hover + press scale for first-click
+/// reliability on the nonactivating notch panel.
 struct NotchIconButtonStyle: ButtonStyle {
     var diameter: CGFloat = 24
-    /// A prominent button (e.g. the main play/pause) keeps a filled circle
-    /// even when not hovered, rather than only appearing on hover.
     var prominent: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -25,20 +20,36 @@ private struct NotchIconButtonBody: View {
     var body: some View {
         configuration.label
             .frame(width: diameter, height: diameter)
-            // Slightly larger than the visual circle so first-clicks land.
             .frame(minWidth: diameter + 4, minHeight: diameter + 4)
-            .background(Circle().fill(fillColor).frame(width: diameter, height: diameter))
+            .background(
+                Circle()
+                    .fill(fillColor)
+                    .frame(width: diameter, height: diameter)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(
+                                prominent
+                                    ? Color.white.opacity(0.16)
+                                    : (isHovering ? Color.white.opacity(0.10) : Color.clear),
+                                lineWidth: 0.6
+                            )
+                            .frame(width: diameter, height: diameter)
+                    )
+                    .shadow(
+                        color: prominent ? Color.black.opacity(0.25) : .clear,
+                        radius: prominent ? 4 : 0,
+                        y: 1
+                    )
+            )
             .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .animation(NotchTheme.quick, value: configuration.isPressed)
+            .animation(NotchTheme.quick, value: isHovering)
             .onHover { isHovering = $0 }
     }
 
     private var fillColor: Color {
         if prominent { return NotchTheme.chipFillActive }
-        // Use a nearly-invisible fill when idle so the hit target stays solid
-        // for first-click on nonactivating panels (clear backgrounds miss hits).
         return isHovering ? NotchTheme.chipFillHover : Color.white.opacity(0.001)
     }
 }

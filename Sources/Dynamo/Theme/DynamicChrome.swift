@@ -10,8 +10,8 @@ struct AmbientBreathingRim: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: NotchTheme.radiusCollapsed, style: .continuous)
-            .strokeBorder(accent.opacity(breathe ? 0.55 : 0.18), lineWidth: 1)
-            .shadow(color: accent.opacity(breathe ? 0.45 : 0.12), radius: breathe ? 8 : 3, y: 0)
+            .strokeBorder(accent.opacity(breathe ? 0.42 : 0.14), lineWidth: 0.9)
+            .shadow(color: accent.opacity(breathe ? 0.32 : 0.08), radius: breathe ? 6 : 2, y: 0)
             .onAppear {
                 withAnimation(NotchTheme.pulse) { breathe = true }
             }

@@ -22,7 +22,7 @@ struct NotchContentView: View {
                 expandedBody
                     .transition(
                         .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
+                            insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top)),
                             removal: .opacity
                         )
                     )
@@ -34,14 +34,13 @@ struct NotchContentView: View {
         .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
         .overlay {
             if !controller.isExpanded {
-                // Living rim when collapsed — Dynamic Island “awake” pulse.
                 AmbientBreathingRim(accent: ambientAccent)
                     .allowsHitTesting(false)
             }
         }
         .shadow(
-            color: controller.isExpanded ? NotchTheme.shadowExpanded : ambientAccent.opacity(0.25),
-            radius: controller.isExpanded ? NotchTheme.shadowRadius : 6,
+            color: controller.isExpanded ? NotchTheme.shadowExpanded : ambientAccent.opacity(0.22),
+            radius: controller.isExpanded ? NotchTheme.shadowRadius : 5,
             y: controller.isExpanded ? NotchTheme.shadowY : 0
         )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
@@ -52,24 +51,24 @@ struct NotchContentView: View {
     }
 
     private var ambientAccent: Color {
-        // Higher priority ambient → cooler brand glow; idle clock → calm blue.
         if let p = registry.activeAmbientProvider() {
             if p.ambientPriority >= 90 { return NotchTheme.mediaGlow }
-            if p.ambientPriority >= 70 { return NotchTheme.caution.opacity(0.7) }
+            if p.ambientPriority >= 70 { return NotchTheme.caution.opacity(0.65) }
             if p.ambientPriority >= 40 { return NotchTheme.calmGlow }
         }
-        return NotchTheme.calmGlow.opacity(0.55)
+        return NotchTheme.calmGlow.opacity(0.5)
     }
 
     private var glassBackground: some View {
         VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
             .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
             .overlay(
+                // Layered sheen — top highlight + faint bottom depth
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(controller.isExpanded ? 0.08 : 0.04),
+                        Color.white.opacity(controller.isExpanded ? 0.10 : 0.05),
                         Color.clear,
-                        NotchTheme.mediaGlow.opacity(controller.isExpanded ? 0.04 : 0)
+                        Color.black.opacity(controller.isExpanded ? 0.12 : 0.06)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -83,13 +82,13 @@ struct NotchContentView: View {
                 .strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(controller.isExpanded ? 0.22 : 0.10),
+                            Color.white.opacity(controller.isExpanded ? 0.26 : 0.12),
                             Color.white.opacity(controller.isExpanded ? 0.06 : 0.03)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: controller.isExpanded ? 1 : 0.5
+                    lineWidth: controller.isExpanded ? 1 : 0.6
                 )
             )
     }
@@ -100,68 +99,65 @@ struct NotchContentView: View {
             ambient.ambientView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            // Always-alive Dynamic Island: elegant live clock when idle.
             AmbientClockView()
         }
     }
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Top chrome: tray icons, then quick actions + clock (lower row)
-            VStack(spacing: 8) {
-                HStack(spacing: 5) {
-                    ForEach(leadingTrayPlugins, id: \.id) { plugin in
-                        trayButton(for: plugin)
-                    }
-                    Spacer(minLength: 0)
-                    if let shelf = shelfPlugin {
-                        trayButton(for: shelf)
-                    }
-                    if let webcam = webcamPlugin {
-                        trayButton(for: webcam)
-                    }
-                    TrayIconButton(
-                        systemImage: "gearshape.fill",
-                        displayName: "Settings",
-                        isActive: false
-                    ) {
-                        NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
-                    }
+            // Tray row
+            HStack(spacing: 4) {
+                ForEach(leadingTrayPlugins, id: \.id) { plugin in
+                    trayButton(for: plugin)
                 }
-
-                // Secondary row: clock only (media transport lives in the Media tab)
-                HStack {
-                    Spacer(minLength: 0)
-                    liveClockPill
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
+                if let shelf = shelfPlugin {
+                    trayButton(for: shelf)
+                }
+                if let webcam = webcamPlugin {
+                    trayButton(for: webcam)
+                }
+                TrayIconButton(
+                    systemImage: "gearshape.fill",
+                    displayName: "Settings",
+                    isActive: false
+                ) {
+                    NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
                 }
             }
             .padding(.horizontal, NotchTheme.spaceMD)
-            .padding(.top, 10)
+            .padding(.top, 11)
             .padding(.bottom, 6)
 
+            // Clock below tray (clear of notch camera)
+            liveClockPill
+                .padding(.bottom, 8)
+
+            // Refined hairline
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [NotchTheme.separator, NotchTheme.separator.opacity(0.2)],
+                        colors: [
+                            Color.clear,
+                            NotchTheme.separator,
+                            NotchTheme.separator,
+                            Color.clear
+                        ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
-                .frame(height: 1)
-                .padding(.horizontal, NotchTheme.spaceMD)
-                .padding(.bottom, 8)
+                .frame(height: 0.75)
+                .padding(.horizontal, NotchTheme.spaceLG)
+                .padding(.bottom, 10)
 
             if let active = registry.activePlugin {
                 active.expandedView()
                     .id(active.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, NotchTheme.spaceMD)
-                    .padding(.bottom, 14)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .bottom)),
-                        removal: .opacity
-                    ))
+                    .padding(.bottom, 16)
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -169,17 +165,34 @@ struct NotchContentView: View {
 
     private var liveClockPill: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
+                Text(DynamoClock.dayString(from: context.date))
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .textCase(.uppercase)
                 Text(DynamoClock.timeString(from: context.date))
-                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(NotchTheme.textSecondary)
+                    .font(NotchTheme.ambientTime.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textPrimary)
+                Text(DynamoClock.periodString(from: context.date))
+                    .font(NotchTheme.micro.weight(.medium))
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
                     .fill(NotchTheme.chipFill)
-                    .overlay(Capsule().strokeBorder(NotchTheme.hairline.opacity(0.5), lineWidth: 0.5))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.04)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.6
+                            )
+                    )
             )
         }
         .help("Local time")
@@ -227,18 +240,19 @@ private struct TrayIconButton: View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: isActive ? .bold : .semibold))
+                    .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
                     .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
                     .symbolRenderingMode(.hierarchical)
                 if isLive && !isActive {
                     Circle()
                         .fill(NotchTheme.positive)
                         .frame(width: 5, height: 5)
+                        .shadow(color: NotchTheme.positive.opacity(0.7), radius: 2)
                         .offset(x: 2, y: -2)
                 }
             }
         }
-        .buttonStyle(.notchIcon(diameter: 30, prominent: isActive))
+        .buttonStyle(.notchIcon(diameter: 32, prominent: isActive))
         .help(displayName)
         .accessibilityLabel(displayName)
         .accessibilityAddTraits(isActive ? .isSelected : [])

@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Card
 
-/// Standard content surface inside the expanded notch.
+/// Standard content surface inside the expanded notch — soft glass plate.
 struct NotchCard<Content: View>: View {
     var padding: CGFloat = NotchTheme.spaceMD
     var compact: Bool = false
@@ -13,13 +13,31 @@ struct NotchCard<Content: View>: View {
             .padding(compact ? NotchTheme.spaceSM : padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                    .fill(NotchTheme.cardFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                            .strokeBorder(NotchTheme.hairline, lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+                ZStack {
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .fill(NotchTheme.cardFill)
+                    // Inner top sheen
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.07), Color.clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.18), Color.white.opacity(0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.75
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.22), radius: 8, y: 3)
             )
     }
 }
@@ -41,7 +59,7 @@ struct NotchSectionHeader: View {
                 .font(NotchTheme.section)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
-                .tracking(0.6)
+                .tracking(0.8)
             Spacer(minLength: 0)
             if let trailing {
                 trailing
@@ -50,13 +68,12 @@ struct NotchSectionHeader: View {
     }
 }
 
-// MARK: - Empty state (compact by default so it doesn't blow layout)
+// MARK: - Empty state
 
 struct NotchEmptyState: View {
     var systemImage: String
     var title: String
     var caption: String? = nil
-    /// When false, uses a tighter vertical footprint (Clipboard/History etc.).
     var prominent: Bool = false
 
     var body: some View {
@@ -91,11 +108,11 @@ struct NotchStatusChip: View {
         var fill: Color {
             switch self {
             case .neutral: return NotchTheme.chipFill
-            case .now: return Color.green.opacity(0.22)
-            case .soon: return Color.orange.opacity(0.22)
+            case .now: return Color.green.opacity(0.20)
+            case .soon: return Color.orange.opacity(0.20)
             case .later: return NotchTheme.chipFill
-            case .danger: return Color.red.opacity(0.22)
-            case .success: return Color.green.opacity(0.18)
+            case .danger: return Color.red.opacity(0.20)
+            case .success: return Color.green.opacity(0.16)
             }
         }
 
@@ -122,7 +139,10 @@ struct NotchStatusChip: View {
             .background(
                 Capsule(style: .continuous)
                     .fill(kind.fill)
-                    .overlay(Capsule(style: .continuous).strokeBorder(kind.foreground.opacity(0.15), lineWidth: 0.5))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(kind.foreground.opacity(0.18), lineWidth: 0.5)
+                    )
             )
     }
 }
@@ -151,13 +171,13 @@ struct NotchChipLabel: View {
                 .fill(active ? NotchTheme.chipFillActive : NotchTheme.chipFill)
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(NotchTheme.hairline.opacity(active ? 0.9 : 0.5), lineWidth: 0.5)
+                        .strokeBorder(NotchTheme.hairline.opacity(active ? 0.9 : 0.45), lineWidth: 0.5)
                 )
         )
     }
 }
 
-// MARK: - Row surface (premium list rows)
+// MARK: - Row surface
 
 struct NotchRowBackground: ViewModifier {
     var selected: Bool = false
@@ -167,10 +187,10 @@ struct NotchRowBackground: ViewModifier {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .fill(selected ? NotchTheme.chipFillActive : Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }
 
