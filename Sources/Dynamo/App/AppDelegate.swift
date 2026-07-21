@@ -77,24 +77,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: .dynamoOpenSettings,
             object: nil
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(quickPlayPause),
-            name: .dynamoQuickPlayPause,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(quickPrevious),
-            name: .dynamoQuickPrevious,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(quickNext),
-            name: .dynamoQuickNext,
-            object: nil
-        )
 
         NotificationCenter.default.addObserver(
             self,
@@ -190,24 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuMute() {
         MainActor.assumeIsolated {
             SystemVolumeController.shared.toggleMute()
-        }
-    }
-
-    @objc private func quickPlayPause() {
-        MainActor.assumeIsolated {
-            mediaPlugin?.togglePlayPause()
-        }
-    }
-
-    @objc private func quickPrevious() {
-        MainActor.assumeIsolated {
-            mediaPlugin?.previousTrack()
-        }
-    }
-
-    @objc private func quickNext() {
-        MainActor.assumeIsolated {
-            mediaPlugin?.nextTrack()
         }
     }
 

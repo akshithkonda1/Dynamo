@@ -7,7 +7,6 @@ struct NotchContentView: View {
     @ObservedObject var controller: NotchWindowController
     @ObservedObject var hud: SystemHUDController
     @ObservedObject var sneakPeek: NotchSneakPeekController
-    @ObservedObject private var volume = SystemVolumeController.shared
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -130,63 +129,12 @@ struct NotchContentView: View {
                     }
                 }
 
-                // Dynamic quick-action dock — clock sits here (farther down, clear of notch)
-                HStack(spacing: 8) {
-                    DynamoQuickAction(
-                        systemImage: volume.isMuted || volume.level < 0.01
-                            ? "speaker.slash.fill" : volumeIcon,
-                        help: volume.isMuted ? "Unmute" : "Mute",
-                        active: volume.isMuted,
-                        tint: NotchTheme.caution
-                    ) {
-                        SystemVolumeController.shared.toggleMute()
-                    }
-
-                    DynamoQuickAction(
-                        systemImage: "playpause.fill",
-                        help: "Play / Pause"
-                    ) {
-                        NotificationCenter.default.post(name: .dynamoQuickPlayPause, object: nil)
-                    }
-
-                    DynamoQuickAction(
-                        systemImage: "backward.fill",
-                        help: "Previous track"
-                    ) {
-                        NotificationCenter.default.post(name: .dynamoQuickPrevious, object: nil)
-                    }
-
-                    DynamoQuickAction(
-                        systemImage: "forward.fill",
-                        help: "Next track"
-                    ) {
-                        NotificationCenter.default.post(name: .dynamoQuickNext, object: nil)
-                    }
-
-                    Spacer(minLength: 4)
+                // Secondary row: clock only (media transport lives in the Media tab)
+                HStack {
+                    Spacer(minLength: 0)
                     liveClockPill
-                    Spacer(minLength: 4)
-
-                    DynamoQuickAction(
-                        systemImage: "tray.and.arrow.down.fill",
-                        help: "Focus File Shelf"
-                    ) {
-                        controller.focusPlugin(id: "shelf")
-                    }
-
-                    DynamoQuickAction(
-                        systemImage: "web.camera",
-                        help: "Focus Webcam"
-                    ) {
-                        controller.focusPlugin(id: "webcam")
-                    }
-
-                    Text("\(volume.isMuted ? "Mute" : "\(volume.percent)%")")
-                        .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(NotchTheme.textTertiary)
-                        .frame(minWidth: 36, alignment: .trailing)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 2)
             }
             .padding(.horizontal, NotchTheme.spaceMD)
             .padding(.top, 10)
@@ -217,10 +165,6 @@ struct NotchContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear {
-            SystemVolumeController.shared.start()
-            SystemVolumeController.shared.refreshFromSystem()
-        }
     }
 
     private var liveClockPill: some View {
@@ -239,12 +183,6 @@ struct NotchContentView: View {
             )
         }
         .help("Local time")
-    }
-
-    private var volumeIcon: String {
-        if volume.level < 0.33 { return "speaker.wave.1.fill" }
-        if volume.level < 0.66 { return "speaker.wave.2.fill" }
-        return "speaker.wave.3.fill"
     }
 
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
@@ -309,7 +247,4 @@ private struct TrayIconButton: View {
 
 extension Notification.Name {
     static let dynamoOpenSettings = Notification.Name("dynamoOpenSettings")
-    static let dynamoQuickPlayPause = Notification.Name("dynamoQuickPlayPause")
-    static let dynamoQuickPrevious = Notification.Name("dynamoQuickPrevious")
-    static let dynamoQuickNext = Notification.Name("dynamoQuickNext")
 }

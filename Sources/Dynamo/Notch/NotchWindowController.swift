@@ -44,8 +44,8 @@ final class NotchWindowController: ObservableObject {
     /// for the dynamic quick-action dock under the tray.
     private var expandedSize: NSSize {
         let content = registry?.activePlugin?.expandedContentHeight ?? 240
-        // Tray + clock row + quick actions + dividers ≈ 78pt.
-        let chrome: CGFloat = 78
+        // Tray + clock row + dividers ≈ 58pt (no transport quick-action dock).
+        let chrome: CGFloat = 58
         return NSSize(width: Self.expandedWidth, height: content + chrome)
     }
     /// Stay open while the cursor is over the notch; collapse after leave
