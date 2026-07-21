@@ -309,8 +309,8 @@ final class WebcamCaptureController: ObservableObject {
     private func startSystemPreferredPolling() {
         stopSystemPreferredPolling()
         lastSystemPreferredID = AVCaptureDevice.systemPreferredCamera?.uniqueID
-        // 0.75s is enough for Continuity handoff without thrashing reconfigure.
-        let t = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
+        // Hotplug notifications cover most Continuity handoffs; poll is a safety net.
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollSystemPreferredCamera()
             }

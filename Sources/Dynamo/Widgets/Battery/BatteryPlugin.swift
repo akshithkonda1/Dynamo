@@ -63,7 +63,6 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
         history.record(snapshot: value, isLowPowerMode: power.isLowPowerModeEnabled)
         power.considerAutoEnable(snapshot: value)
         recomputeInsight()
-        objectWillChange.send()
     }
 
     private func recomputeInsight() {
@@ -74,12 +73,10 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
         power.toggleLowPowerMode()
         // Immediate UI; ProcessInfo may lag.
         recomputeInsight()
-        objectWillChange.send()
     }
 
     func setAutoLowPower(_ enabled: Bool) {
         power.autoEnableEnabled = enabled
-        objectWillChange.send()
     }
 
     var isLowPowerModeEnabled: Bool { power.isLowPowerModeEnabled }

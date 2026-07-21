@@ -274,7 +274,8 @@ private struct ExpandedMediaView: View {
             scrubElapsed = nil
             lastTick = .now
         }
-        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { now in
+        // 2 Hz is enough for a smooth scrubber without 4 Hz main-thread ticks.
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { now in
             guard scrubElapsed == nil, plugin.info.isPlaying, plugin.info.duration > 0 else {
                 lastTick = now
                 return

@@ -47,6 +47,7 @@ struct NotchContentView: View {
                 .allowsHitTesting(false)
         )
         .overlay {
+            // Breathing rim only while collapsed (no continuous work when expanded).
             if !controller.isExpanded {
                 AmbientBreathingRim(accent: ambientAccent)
                     .allowsHitTesting(false)
@@ -57,11 +58,11 @@ struct NotchContentView: View {
             radius: controller.isExpanded ? NotchTheme.shadowRadius : 5,
             y: controller.isExpanded ? NotchTheme.shadowY : 0
         )
-        // Only animate structural state — not ambient ticks (that caused jank).
+        // Structural springs only — matches AppKit panel spring duration.
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
-        .animation(NotchTheme.quick, value: hud.state != nil)
-        .animation(NotchTheme.quick, value: sneakPeek.peek?.title)
+        .animation(NotchTheme.snappy, value: hud.state != nil)
+        .animation(NotchTheme.snappy, value: sneakPeek.peek?.title)
     }
 
     private var ambientAccent: Color {
@@ -166,7 +167,8 @@ struct NotchContentView: View {
         Button {
             DynamoClockApp.open()
         } label: {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            // Minute-level refresh only (display is h:mm).
+            TimelineView(.periodic(from: .now, by: 15)) { context in
                 HStack(spacing: 5) {
                     Text(DynamoClock.dayString(from: context.date))
                         .font(NotchTheme.micro.weight(.semibold))

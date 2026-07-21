@@ -30,14 +30,20 @@ enum DynamoClockApp {
 /// reads as a Dynamic Island “alive” state without stealing attention.
 struct AmbientBreathingRim: View {
     var accent: Color = NotchTheme.calmGlow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breathe = false
 
     var body: some View {
         // Same silhouette as the panel clip — not a rounded rect that fights NotchShape.
         NotchShape(cornerRadius: NotchTheme.radiusCollapsed)
-            .strokeBorder(accent.opacity(breathe ? 0.40 : 0.12), lineWidth: 0.9)
-            .shadow(color: accent.opacity(breathe ? 0.28 : 0.08), radius: breathe ? 5 : 2, y: 0)
+            .strokeBorder(accent.opacity(reduceMotion ? 0.22 : (breathe ? 0.38 : 0.12)), lineWidth: 0.9)
+            .shadow(
+                color: accent.opacity(reduceMotion ? 0.1 : (breathe ? 0.26 : 0.08)),
+                radius: reduceMotion ? 2 : (breathe ? 5 : 2),
+                y: 0
+            )
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(NotchTheme.pulse) { breathe = true }
             }
     }
@@ -85,7 +91,8 @@ struct AmbientClockView: View {
         Button {
             DynamoClockApp.open()
         } label: {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            // Minute-level updates only (clock shows h:mm) — far cheaper than 1 Hz.
+            TimelineView(.periodic(from: .now, by: 15)) { context in
                 HStack(spacing: 6) {
                     Text(DynamoClock.dayString(from: context.date))
                         .font(NotchTheme.micro.weight(.semibold))
@@ -153,6 +160,7 @@ struct DynamoQuickAction: View {
 struct PlayingArtRing<Content: View>: View {
     var isPlaying: Bool
     @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin = false
 
     var body: some View {
@@ -173,9 +181,10 @@ struct PlayingArtRing<Content: View>: View {
                         lineWidth: 2
                     )
                     .frame(width: 114, height: 114)
-                    .rotationEffect(.degrees(spin ? 360 : 0))
+                    .rotationEffect(.degrees((isPlaying && !reduceMotion && spin) ? 360 : 0))
                     .onAppear {
-                        withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                        guard !reduceMotion else { return }
+                        withAnimation(.linear(duration: 10).repeatForever(autoreverses: false)) {
                             spin = true
                         }
                     }

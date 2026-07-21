@@ -1,3 +1,4 @@
+import QuartzCore
 import SwiftUI
 
 /// Shared visual tokens for the notch tray and every widget expanded view.
@@ -72,24 +73,34 @@ enum NotchTheme {
     static let shadowRadius: CGFloat = 28
     static let shadowY: CGFloat = 14
 
-    // MARK: Animation
+    // MARK: Animation (macOS / Boring Notch–style springs)
+    /// Island expand/collapse — slightly under-damped for a soft “pop”.
     static var expandSpring: Animation {
-        .spring(response: 0.42, dampingFraction: 0.86, blendDuration: 0.12)
+        .spring(response: 0.48, dampingFraction: 0.78, blendDuration: 0.12)
     }
 
+    /// Content cross-fade / tab switch.
     static var contentSpring: Animation {
-        .spring(response: 0.30, dampingFraction: 0.92)
+        .spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.08)
     }
 
     static var snappy: Animation {
-        .spring(response: 0.20, dampingFraction: 0.88)
+        .spring(response: 0.22, dampingFraction: 0.82)
     }
 
     static var quick: Animation {
-        .easeOut(duration: 0.11)
+        .easeOut(duration: 0.12)
     }
 
+    /// Ambient rim pulse — slow so it costs almost no CPU.
     static var pulse: Animation {
-        .easeInOut(duration: 2.0).repeatForever(autoreverses: true)
+        .easeInOut(duration: 2.4).repeatForever(autoreverses: true)
+    }
+
+    /// Match AppKit panel frame animation to SwiftUI expand spring feel.
+    static let panelExpandDuration: TimeInterval = 0.48
+    /// Ease-out with a hint of overshoot (Dynamic Island–like).
+    static var panelExpandTiming: CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.22, 1.15, 0.36, 1.0)
     }
 }

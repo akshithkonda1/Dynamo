@@ -55,10 +55,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         registerForNotifications()
         startHelperProcess()
         refreshAll()
-        // AppleScript path needs a slightly snappier poll so transport feels live.
-        // Register once on `.common` only — double-adding a scheduledTimer also
-        // fires on `.default` and can double-toggle / thrash metadata.
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // MediaRemote notifications drive most updates; poll is a safety net.
+        // 1.5s balances live transport with lower AppleScript / helper cost.
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
             }

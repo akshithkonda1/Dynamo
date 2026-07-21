@@ -20,8 +20,8 @@ final class ClipboardStore: ObservableObject {
         isStarted = true
         load()
         lastChangeCount = NSPasteboard.general.changeCount
-        // ~2 Hz is enough for the "within ~1s" requirement without thrashing.
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        // ~1 Hz keeps clipboard responsive without burning CPU on changeCount polls.
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollPasteboard()
             }

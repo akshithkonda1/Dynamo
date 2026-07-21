@@ -133,7 +133,7 @@ final class NotchWindowController: ObservableObject {
         // If a frame animation is in flight, retry after it settles so tab
         // switches don’t keep a stale height (Battery → Media looked “broken”).
         if isAnimatingFrame {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + NotchTheme.panelExpandDuration) { [weak self] in
                 self?.activeWidgetDidChange()
             }
             return
@@ -155,8 +155,12 @@ final class NotchWindowController: ObservableObject {
         cancelCollapse()
         // Frame animation under the cursor often synthesizes mouseExited — ignore
         // those for a beat so the tray doesn't slam shut.
-        suppressHoverExitUntil = Date().addingTimeInterval(0.65)
-        guard !isExpanded else { return }
+        // Cover the spring overshoot so mouseExited during bounce doesn’t collapse.
+        suppressHoverExitUntil = Date().addingTimeInterval(NotchTheme.panelExpandDuration + 0.2)
+        guard !isExpanded else {
+            animateFrame(to: expandedSize)
+            return
+        }
         isExpanded = true
         animateFrame(to: expandedSize)
         // Become key so the first click on transport / scrubber fires (nonactivating panel).
@@ -166,7 +170,7 @@ final class NotchWindowController: ObservableObject {
     func collapse() {
         guard isExpanded else { return }
         isExpanded = false
-        suppressHoverExitUntil = Date().addingTimeInterval(0.35)
+        suppressHoverExitUntil = Date().addingTimeInterval(0.4)
         animateFrame(to: collapsedSize)
     }
 
@@ -413,10 +417,18 @@ final class NotchWindowController: ObservableObject {
         guard let panel, let screen = panel.screen ?? preferredScreen() else { return }
         let origin = topCenterOrigin(size: size, on: screen)
         let target = NSRect(origin: origin, size: size)
+        // Skip no-op resizes (saves AppKit work when height is already right).
+        if panel.frame.size.equalTo(size),
+           abs(panel.frame.origin.x - origin.x) < 0.5,
+           abs(panel.frame.origin.y - origin.y) < 0.5 {
+            return
+        }
         isAnimatingFrame = true
+        // macOS island motion: longer springy ease with light overshoot —
+        // closer to Boring Notch / Dynamic Island than a linear 0.3s fade.
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.32
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
+            context.duration = NotchTheme.panelExpandDuration
+            context.timingFunction = NotchTheme.panelExpandTiming
             context.allowsImplicitAnimation = true
             panel.animator().setFrame(target, display: true)
         }, completionHandler: { [weak self] in

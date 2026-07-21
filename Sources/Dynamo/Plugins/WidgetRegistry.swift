@@ -77,8 +77,9 @@ final class WidgetRegistry: ObservableObject {
     }
 
     private func observeAmbientChanges<O: ObservableObject>(_ object: O) {
+        // Debounce ambient fan-out so rapid media ticks don’t thrash the whole tray.
         object.objectWillChange
-            .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(200), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in
                 self?.ambientRevision &+= 1
             }
