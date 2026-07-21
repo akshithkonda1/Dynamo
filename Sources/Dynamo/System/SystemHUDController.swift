@@ -92,13 +92,20 @@ final class SystemHUDController: ObservableObject {
     }
 
     private func presentVolumeFromLiveState() {
+        volume.refreshFromSystem(announceExternal: false)
         let level = volume.level
         let muted = volume.isMuted
+        // Bar uses real system percent via volume.percent in the view.
         show(SystemHUDState(kind: .volume, level: muted ? 0 : level, isMuted: muted))
     }
 
     private func presentBrightness() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        // Sample after the OS applies the key so we show the real level.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+            let level = SystemLevelReader.displayBrightness() ?? 0.5
+            self?.show(SystemHUDState(kind: .brightness, level: level, isMuted: false))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             let level = SystemLevelReader.displayBrightness() ?? 0.5
             self?.show(SystemHUDState(kind: .brightness, level: level, isMuted: false))
         }

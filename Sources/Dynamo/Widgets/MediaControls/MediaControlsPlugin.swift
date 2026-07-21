@@ -349,7 +349,7 @@ private struct ExpandedMediaView: View {
                         .font(NotchTheme.micro.weight(.semibold))
                         .foregroundStyle(NotchTheme.textTertiary)
                     Spacer(minLength: 0)
-                    Text(volume.isMuted ? "Mute" : "\(Int((volume.level * 100).rounded()))%")
+                    Text(volume.isMuted ? "Mute" : "\(volume.percent)%")
                         .font(NotchTheme.micro.monospacedDigit())
                         .foregroundStyle(NotchTheme.textQuaternary)
                 }

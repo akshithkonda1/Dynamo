@@ -59,7 +59,14 @@ struct SystemHUDView: View {
     }
 
     private var percentLabel: String {
-        if state.kind == .volume, displayMuted { return "Mute" }
+        if state.kind == .volume {
+            if displayMuted { return "Mute" }
+            // Use integer percent from the controller (exact system UI value).
+            return "\(volume.percent)%"
+        }
+        if let bright = SystemLevelReader.displayBrightnessPercent() {
+            return "\(bright)%"
+        }
         return "\(Int((displayLevel * 100).rounded()))%"
     }
 }

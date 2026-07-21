@@ -74,8 +74,21 @@ final class IOKitBatteryProvider: BatteryProvider {
             let type = desc[kIOPSTypeKey] as? String
             // Prefer internal battery; skip UPS if battery also present.
             if type == kIOPSInternalBatteryType || type == nil {
-                let percent = desc[kIOPSCurrentCapacityKey] as? Int
+                // Prefer Current/Max capacity ratio (matches menu-bar %).
+                let current = desc[kIOPSCurrentCapacityKey] as? Int
                     ?? Int(desc[kIOPSCurrentCapacityKey] as? Double ?? -1)
+                let maxCap = desc[kIOPSMaxCapacityKey] as? Int
+                    ?? Int(desc[kIOPSMaxCapacityKey] as? Double ?? 100)
+                let percent: Int
+                if current >= 0, maxCap > 0 {
+                    if maxCap == 100 {
+                        percent = min(100, max(0, current))
+                    } else {
+                        percent = min(100, max(0, Int((Double(current) / Double(maxCap) * 100).rounded())))
+                    }
+                } else {
+                    percent = -1
+                }
                 let isCharging = desc[kIOPSIsChargingKey] as? Bool ?? false
                 let powerState = desc[kIOPSPowerSourceStateKey] as? String
                 let isPluggedIn = powerState == kIOPSACPowerValue || isCharging
@@ -91,7 +104,7 @@ final class IOKitBatteryProvider: BatteryProvider {
                 }
                 if percent >= 0 {
                     return BatterySnapshot(
-                        percent: min(100, max(0, percent)),
+                        percent: percent,
                         isCharging: isCharging,
                         isPluggedIn: isPluggedIn,
                         timeRemainingMinutes: remaining,
