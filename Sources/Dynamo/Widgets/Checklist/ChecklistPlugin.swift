@@ -181,6 +181,7 @@ private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
     @ObservedObject private var store: ChecklistStore
     @ObservedObject private var reminders: RemindersProvider
+    @State private var hoveringID: String?
 
     init(plugin: ChecklistPlugin) {
         self.plugin = plugin
@@ -190,6 +191,8 @@ private struct ExpandedChecklistView: View {
 
     private var doneCount: Int { store.items.filter(\.isDone).count }
     private var totalCount: Int { store.items.count }
+    private var openLocal: Int { totalCount - doneCount }
+    private var reminderCount: Int { reminders.items.count }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -200,118 +203,530 @@ private struct ExpandedChecklistView: View {
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
+        f.dateFormat = "MMM d"
         return f
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             header
+                .padding(.bottom, 8)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                    remindersSection
-                    localSection
+            segmentBar
+                .padding(.bottom, 8)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    contentForSelectedTab
                 }
+                .padding(.bottom, 4)
             }
 
             composer
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack {
-            NotchSectionHeader(
-                "Checklist",
-                trailing: totalCount > 0
-                    ? AnyView(
-                        Text("\(doneCount)/\(totalCount) local")
-                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    )
-                    : nil
-            )
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Checklist")
+                    .font(NotchTheme.section)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .textCase(.uppercase)
+                    .tracking(0.7)
+                Text(headerSubtitle)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 0)
+
             if reminders.authState == .authorized {
                 Button {
                     plugin.refreshReminders()
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NotchTheme.textTertiary)
                 }
                 .buttonStyle(.notchIcon(diameter: 22))
-                .help("Refresh Reminders")
+                .help("Refresh")
 
                 Button {
                     plugin.openRemindersApp()
                 } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NotchTheme.textTertiary)
                 }
                 .buttonStyle(.notchIcon(diameter: 22))
-                .help("Open Reminders app")
+                .help("Open Reminders")
             }
         }
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Target picker: system Reminders vs local-only list.
-            HStack(spacing: 6) {
-                ForEach(ChecklistPlugin.DraftTarget.allCases) { target in
-                    let selected = plugin.draftTarget == target
-                    Button {
+    private var headerSubtitle: String {
+        switch plugin.draftTarget {
+        case .reminders:
+            if reminders.authState != .authorized { return "Connect Apple Reminders" }
+            if reminderCount == 0 { return "No open reminders" }
+            return reminderCount == 1 ? "1 open reminder" : "\(reminderCount) open reminders"
+        case .local:
+            if totalCount == 0 { return "Private to this Mac" }
+            return "\(openLocal) open · \(doneCount) done"
+        }
+    }
+
+    // MARK: Segment control
+
+    private var segmentBar: some View {
+        HStack(spacing: 0) {
+            ForEach(ChecklistPlugin.DraftTarget.allCases) { target in
+                let selected = plugin.draftTarget == target
+                let count: Int = {
+                    switch target {
+                    case .reminders: return reminders.authState == .authorized ? reminderCount : 0
+                    case .local: return openLocal
+                    }
+                }()
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
                         plugin.draftTarget = target
-                    } label: {
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: target == .reminders ? "checklist" : "tray")
+                            .font(.system(size: 9, weight: .semibold))
                         Text(target.label)
-                            .font(NotchTheme.micro.weight(selected ? .semibold : .medium))
-                            .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(selected ? NotchTheme.chipFillActive : NotchTheme.chipFill)
-                            )
+                            .font(NotchTheme.micro.weight(.semibold))
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textQuaternary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(selected ? Color.white.opacity(0.14) : Color.white.opacity(0.06))
+                                )
+                        }
+                    }
+                    .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selected ? NotchTheme.chipFillActive : Color.clear)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
+    }
+
+    // MARK: Content
+
+    @ViewBuilder
+    private var contentForSelectedTab: some View {
+        switch plugin.draftTarget {
+        case .reminders:
+            remindersContent
+        case .local:
+            localContent
+        }
+    }
+
+    @ViewBuilder
+    private var remindersContent: some View {
+        switch reminders.authState {
+        case .notDetermined:
+            accessCard(
+                icon: "checklist",
+                title: "Connect Reminders",
+                body: "List, create, complete, and delete reminders from the notch.",
+                primary: "Allow Access",
+                primaryAction: { plugin.requestRemindersAccess() }
+            )
+        case .denied:
+            accessCard(
+                icon: "lock.fill",
+                title: "Access turned off",
+                body: "Enable Full Access for Dynamo in System Settings.",
+                primary: "Open Settings",
+                primaryAction: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                secondary: "Retry",
+                secondaryAction: { plugin.requestRemindersAccess() }
+            )
+        case .authorized:
+            if reminders.items.isEmpty {
+                emptyStrip(
+                    icon: "sparkles",
+                    title: "All clear",
+                    caption: "Add one below — it syncs to Reminders."
+                )
+            } else {
+                ForEach(reminders.items) { item in
+                    reminderRow(item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var localContent: some View {
+        if store.items.isEmpty {
+            emptyStrip(
+                icon: "tray",
+                title: "Local list is empty",
+                caption: "Private scratch items stay on this Mac."
+            )
+        } else {
+            ForEach(store.items) { item in
+                localRow(item)
+            }
+        }
+    }
+
+    private func accessCard(
+        icon: String,
+        title: String,
+        body: String,
+        primary: String,
+        primaryAction: @escaping () -> Void,
+        secondary: String? = nil,
+        secondaryAction: (() -> Void)? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(NotchTheme.caption.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                    Text(body)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 8) {
+                Button(action: primaryAction) {
+                    Text(primary)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(NotchTheme.chipFillActive)
+                        )
+                }
+                .buttonStyle(.plain)
+                if let secondary, let secondaryAction {
+                    Button(action: secondaryAction) {
+                        Text(secondary)
+                            .font(NotchTheme.micro.weight(.medium))
+                            .foregroundStyle(NotchTheme.textTertiary)
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer(minLength: 0)
-                if plugin.draftTarget == .reminders, reminders.authState != .authorized {
-                    Text(reminders.authState == .denied ? "No access" : "Needs access")
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.caution)
-                }
             }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
+    }
 
+    private func emptyStrip(icon: String, title: String, caption: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.white.opacity(0.05)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(NotchTheme.caption.weight(.medium))
+                    .foregroundStyle(NotchTheme.textSecondary)
+                Text(caption)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: Rows
+
+    private func reminderRow(_ item: ReminderItem) -> some View {
+        let phase = item.phase()
+        let accent = listAccent(for: item)
+        let rowID = "r:\(item.id)"
+        let hovering = hoveringID == rowID
+
+        return HStack(alignment: .center, spacing: 10) {
+            // Complete
+            Button {
+                plugin.completeReminder(item)
+            } label: {
+                ZStack {
+                    Circle()
+                        .strokeBorder(accent.opacity(0.85), lineWidth: 1.4)
+                        .frame(width: 16, height: 16)
+                    if item.isHighPriority {
+                        Circle()
+                            .fill(NotchTheme.caution)
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Mark complete")
+
+            // Title + meta
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(item.title)
+                        .font(NotchTheme.body.weight(.medium))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                    if phase == .overdue || phase == .dueNow || phase == .soon {
+                        phaseDot(phase)
+                    }
+                }
+                Text(reminderSubtitle(item))
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(
+                        item.isOverdue ? NotchTheme.caution.opacity(0.95) : NotchTheme.textQuaternary
+                    )
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Delete — soft reveal on hover
+            Button {
+                plugin.deleteReminder(item)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.white.opacity(hovering ? 0.1 : 0)))
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering ? 1 : 0.35)
+            .help("Delete")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(hovering ? 0.07 : 0.035))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(accent)
+                        .frame(width: 2.5)
+                        .padding(.vertical, 8)
+                        .padding(.leading, 2)
+                }
+        )
+        .contentShape(Rectangle())
+        .onHover { hoveringID = $0 ? rowID : (hoveringID == rowID ? nil : hoveringID) }
+        .onTapGesture { plugin.openReminder(item) }
+        .contextMenu {
+            Button("Mark Complete") { plugin.completeReminder(item) }
+            Button("Open in Reminders") { plugin.openReminder(item) }
+            Divider()
+            Button("Delete", role: .destructive) { plugin.deleteReminder(item) }
+        }
+    }
+
+    private func localRow(_ item: ChecklistItem) -> some View {
+        let rowID = "l:\(item.id.uuidString)"
+        let hovering = hoveringID == rowID
+
+        return HStack(alignment: .center, spacing: 10) {
+            Button {
+                store.toggle(id: item.id)
+            } label: {
+                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(item.isDone ? NotchTheme.positive : NotchTheme.textTertiary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Text(item.text)
+                .font(NotchTheme.body.weight(.medium))
+                .foregroundStyle(item.isDone ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
+                .strikethrough(item.isDone, color: NotchTheme.textQuaternary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                store.remove(id: item.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.white.opacity(hovering ? 0.1 : 0)))
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering ? 1 : 0.35)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(hovering ? 0.07 : 0.035))
+        )
+        .onHover { hoveringID = $0 ? rowID : (hoveringID == rowID ? nil : hoveringID) }
+    }
+
+    @ViewBuilder
+    private func phaseDot(_ phase: ReminderItem.Phase) -> some View {
+        let color: Color = {
+            switch phase {
+            case .overdue: return NotchTheme.negative
+            case .dueNow: return NotchTheme.positive
+            case .soon: return NotchTheme.caution
+            default: return NotchTheme.textQuaternary
+            }
+        }()
+        let label: String = {
+            switch phase {
+            case .overdue: return "Overdue"
+            case .dueNow: return "Due"
+            case .soon: return "Soon"
+            default: return ""
+            }
+        }()
+        if !label.isEmpty {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(color)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule(style: .continuous).fill(color.opacity(0.15)))
+        }
+    }
+
+    private func listAccent(for item: ReminderItem) -> Color {
+        if item.isOverdue { return NotchTheme.caution }
+        if let c = item.listColor {
+            return Color(red: c.red, green: c.green, blue: c.blue, opacity: max(0.55, c.alpha))
+        }
+        return NotchTheme.mediaGlow.opacity(0.9)
+    }
+
+    private func reminderSubtitle(_ item: ReminderItem) -> String {
+        let time: String
+        if let due = item.due {
+            let cal = Calendar.current
+            if item.isAllDay {
+                if cal.isDateInToday(due) { time = "All day" }
+                else if cal.isDateInTomorrow(due) { time = "Tomorrow" }
+                else { time = Self.dayFormatter.string(from: due) }
+            } else if cal.isDateInToday(due) {
+                time = Self.timeFormatter.string(from: due)
+            } else if cal.isDateInTomorrow(due) {
+                time = "Tomorrow \(Self.timeFormatter.string(from: due))"
+            } else {
+                time = "\(Self.dayFormatter.string(from: due)) · \(Self.timeFormatter.string(from: due))"
+            }
+        } else {
+            time = "No date"
+        }
+        let list = item.listName.isEmpty ? "Reminders" : item.listName
+        return "\(time)  ·  \(list)"
+    }
+
+    // MARK: Composer
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
+                Image(systemName: plugin.draftTarget == .reminders ? "plus" : "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .frame(width: 16)
+
                 TextField(
-                    plugin.draftTarget == .reminders ? "New reminder…" : "New local item…",
+                    plugin.draftTarget == .reminders ? "Add to Reminders…" : "Add local item…",
                     text: Binding(
                         get: { plugin.draft },
                         set: { plugin.draft = $0 }
                     )
                 )
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(NotchTheme.body)
+                .foregroundStyle(NotchTheme.textPrimary)
                 .onSubmit { plugin.submitDraft() }
 
+                let canSubmit = !plugin.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 Button {
                     plugin.submitDraft()
                 } label: {
-                    Image(systemName: plugin.draftTarget == .reminders
-                          ? "plus.circle.fill"
-                          : "plus.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(NotchTheme.textPrimary)
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(canSubmit ? NotchTheme.textPrimary : NotchTheme.textQuaternary)
                 }
                 .buttonStyle(.plain)
-                .disabled(plugin.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help(plugin.draftTarget == .reminders
-                      ? "Add to Apple Reminders"
-                      : "Add to local list")
+                .disabled(!canSubmit)
+                .help(plugin.draftTarget == .reminders ? "Add to Reminders" : "Add local item")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                    )
+            )
+
+            if plugin.draftTarget == .reminders, reminders.authState != .authorized {
+                Text(reminders.authState == .denied
+                     ? "Reminders access is off — open Settings from the tab above."
+                     : "Allow Reminders access to save here.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
             }
 
             if let err = reminders.lastError, plugin.draftTarget == .reminders {
@@ -321,222 +736,5 @@ private struct ExpandedChecklistView: View {
                     .lineLimit(2)
             }
         }
-    }
-
-    // MARK: Reminders
-
-    @ViewBuilder
-    private var remindersSection: some View {
-        HStack(spacing: 6) {
-            Text("Reminders")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
-            if reminders.authState == .authorized, !reminders.items.isEmpty {
-                Text("\(reminders.items.count)")
-                    .font(NotchTheme.micro.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textQuaternary)
-            }
-            Spacer(minLength: 0)
-        }
-
-        switch reminders.authState {
-        case .notDetermined:
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Allow full access so Dynamo can list, create, complete, and delete reminders.")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Allow Reminders Access") {
-                    plugin.requestRemindersAccess()
-                }
-                .font(NotchTheme.micro.weight(.semibold))
-                .buttonStyle(.plain)
-                .foregroundStyle(NotchTheme.textPrimary)
-            }
-        case .denied:
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Reminders access is off. Grant Full Access in System Settings.")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                HStack(spacing: 8) {
-                    Button("Open Privacy Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    .font(NotchTheme.micro)
-                    .buttonStyle(.plain)
-                    Button("Retry") { plugin.requestRemindersAccess() }
-                        .font(NotchTheme.micro)
-                        .buttonStyle(.plain)
-                }
-                .foregroundStyle(NotchTheme.textTertiary)
-            }
-        case .authorized:
-            if reminders.items.isEmpty {
-                Text("No open reminders — type above to add one.")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textQuaternary)
-            } else {
-                ForEach(reminders.items) { item in
-                    reminderRow(item)
-                }
-            }
-        }
-    }
-
-    private func reminderRow(_ item: ReminderItem) -> some View {
-        let phase = item.phase()
-        return HStack(alignment: .top, spacing: 8) {
-            Button {
-                plugin.completeReminder(item)
-            } label: {
-                Image(systemName: "circle")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(
-                        item.isOverdue
-                            ? NotchTheme.caution
-                            : (item.listColor.map {
-                                Color(red: $0.red, green: $0.green, blue: $0.blue, opacity: max(0.55, $0.alpha))
-                            } ?? NotchTheme.textSecondary)
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("Mark complete")
-            .frame(width: 16)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.title)
-                        .font(NotchTheme.body.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                    reminderPhaseChip(phase)
-                    if item.isHighPriority {
-                        Image(systemName: "exclamationmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(NotchTheme.caution)
-                    }
-                }
-                Text(reminderSubtitle(item))
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(
-                        item.isOverdue ? NotchTheme.caution.opacity(0.9) : NotchTheme.textTertiary
-                    )
-                    .lineLimit(1)
-                if let notes = item.notes {
-                    Text(notes)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-
-            Button {
-                plugin.deleteReminder(item)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-            }
-            .buttonStyle(.notchIcon(diameter: 22))
-            .help("Delete from Reminders")
-        }
-        .notchRowBackground()
-        .contentShape(Rectangle())
-        .onTapGesture { plugin.openReminder(item) }
-        .contextMenu {
-            Button("Mark Complete") { plugin.completeReminder(item) }
-            Button("Open in Reminders") { plugin.openReminder(item) }
-            Divider()
-            Button("Delete", role: .destructive) { plugin.deleteReminder(item) }
-        }
-        .help("Open in Reminders")
-    }
-
-    @ViewBuilder
-    private func reminderPhaseChip(_ phase: ReminderItem.Phase) -> some View {
-        switch phase {
-        case .overdue:
-            NotchStatusChip(text: "Overdue", kind: .danger)
-        case .dueNow:
-            NotchStatusChip(text: "Due", kind: .now)
-        case .soon:
-            NotchStatusChip(text: "Soon", kind: .soon)
-        case .later, .undated:
-            EmptyView()
-        }
-    }
-
-    private func reminderSubtitle(_ item: ReminderItem) -> String {
-        let time: String
-        if let due = item.due {
-            if item.isAllDay {
-                if Calendar.current.isDateInToday(due) {
-                    time = item.isOverdue ? "Overdue · all day" : "All day"
-                } else {
-                    time = Self.dayFormatter.string(from: due)
-                }
-            } else if Calendar.current.isDateInToday(due) {
-                time = Self.timeFormatter.string(from: due)
-            } else {
-                time = "\(Self.dayFormatter.string(from: due)) \(Self.timeFormatter.string(from: due))"
-            }
-        } else {
-            time = "No date"
-        }
-        let list = item.listName.isEmpty ? "Reminders" : item.listName
-        return "\(time) · \(list)"
-    }
-
-    // MARK: Local
-
-    @ViewBuilder
-    private var localSection: some View {
-        Text("Local")
-            .font(NotchTheme.micro.weight(.semibold))
-            .foregroundStyle(NotchTheme.textQuaternary)
-            .padding(.top, 4)
-
-        if store.items.isEmpty {
-            Text("Scratch list on this Mac only — switch target to Local to add.")
-                .font(NotchTheme.micro)
-                .foregroundStyle(NotchTheme.textQuaternary)
-        } else {
-            ForEach(store.items) { item in
-                localRow(item)
-            }
-        }
-    }
-
-    private func localRow(_ item: ChecklistItem) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                store.toggle(id: item.id)
-            } label: {
-                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(item.isDone ? NotchTheme.positive : NotchTheme.textSecondary)
-            }
-            .buttonStyle(.notchIcon(diameter: 22))
-
-            Text(item.text)
-                .font(NotchTheme.body)
-                .foregroundStyle(item.isDone ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
-                .strikethrough(item.isDone)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button {
-                store.remove(id: item.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-            }
-            .buttonStyle(.notchIcon(diameter: 22))
-        }
-        .notchRowBackground()
     }
 }
