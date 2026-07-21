@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
+final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding {
     let id = "calendar"
     let displayName = "Calendar"
     let systemImage = "calendar"
@@ -27,13 +27,41 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         self.provider = resolved
         resolved.onChange = { [weak self] in
             guard let self else { return }
-            self.events = self.provider.upcoming
+            // Drop fully ended events from the live list.
+            let now = Date()
+            self.events = self.provider.upcoming.filter { $0.end > now }
             self.dueReminders = self.provider.dueReminders
             self.authState = self.provider.authorizationState
             self.remindersAuthState = self.provider.remindersAuthState
             self.checkUpcomingEvents()
             self.checkDueReminders()
         }
+    }
+
+    /// Next event useful for collapsed ambient (in progress or starting within 60m).
+    var ambientEvent: CalendarEventItem? {
+        let now = Date()
+        return events
+            .filter { !$0.isAllDay && $0.end > now }
+            .sorted { $0.start < $1.start }
+            .first { event in
+                if event.start <= now { return true }
+                return event.start.timeIntervalSince(now) <= 60 * 60
+            }
+    }
+
+    var isAmbientActive: Bool { ambientEvent != nil }
+    var ambientPriority: Int {
+        guard let event = ambientEvent else { return 0 }
+        switch event.phase() {
+        case .now: return 85
+        case .soon: return 80
+        default: return 40
+        }
+    }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientCalendarView(event: ambientEvent))
     }
 
     func start() {
@@ -72,9 +100,15 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         provider.openCalendarApp()
     }
 
+    func openNewEvent() {
+        provider.openNewEvent()
+    }
+
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
     }
+
+    var expandedContentHeight: CGFloat { 240 }
 
     private func checkUpcomingEvents() {
         notifiedEventIDs.formIntersection(Set(events.map(\.id)))
@@ -120,6 +154,43 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     }
 }
 
+// MARK: - Ambient
+
+private struct AmbientCalendarView: View {
+    let event: CalendarEventItem?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "calendar")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(NotchTheme.textSecondary)
+            if let event {
+                Text(event.title)
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .lineLimit(1)
+                Text(ambientSubtitle(for: event))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func ambientSubtitle(for event: CalendarEventItem) -> String {
+        let now = Date()
+        if event.start <= now {
+            let left = max(0, Int(event.end.timeIntervalSince(now) / 60))
+            return left <= 1 ? "ending" : "\(left)m left"
+        }
+        let mins = max(1, Int((event.start.timeIntervalSince(now) / 60).rounded()))
+        return "in \(mins)m"
+    }
+}
+
 // MARK: - Views
 
 private struct ExpandedCalendarView: View {
@@ -141,12 +212,17 @@ private struct ExpandedCalendarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Your Calendar")
-                    .font(NotchTheme.section)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .textCase(.uppercase)
-                Spacer()
+                NotchSectionHeader("Calendar")
+                Spacer(minLength: 0)
                 if plugin.authState == .authorized {
+                    Button {
+                        plugin.openNewEvent()
+                    } label: {
+                        NotchChipLabel(title: "New", systemImage: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Create event in Calendar")
+
                     Button {
                         plugin.openCalendarApp()
                     } label: {
@@ -191,9 +267,11 @@ private struct ExpandedCalendarView: View {
                     remindersPrompt
                 }
                 if plugin.events.isEmpty && plugin.dueReminders.isEmpty {
-                    Text("No upcoming events in the next two weeks.")
-                        .font(NotchTheme.body)
-                        .foregroundStyle(NotchTheme.textTertiary)
+                    NotchEmptyState(
+                        systemImage: "calendar",
+                        title: "No upcoming events",
+                        caption: "Next two weeks are clear — tap New to schedule."
+                    )
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
@@ -270,16 +348,20 @@ private struct ExpandedCalendarView: View {
     }
 
     private func eventRow(_ event: CalendarEventItem) -> some View {
-        HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
+        let phase = event.phase()
+        return HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(color(for: event))
-                .frame(width: 3, height: 32)
+                .frame(width: 3, height: 34)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title)
-                    .font(NotchTheme.body)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(NotchTheme.body)
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                    phaseChip(phase)
+                }
                 Text(subtitle(for: event))
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textTertiary)
@@ -293,9 +375,22 @@ private struct ExpandedCalendarView: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture { plugin.openEvent(event) }
         .help("Open in Calendar")
+    }
+
+    @ViewBuilder
+    private func phaseChip(_ phase: CalendarEventItem.Phase) -> some View {
+        switch phase {
+        case .now:
+            NotchStatusChip(text: "Now", kind: .now)
+        case .soon:
+            NotchStatusChip(text: "Soon", kind: .soon)
+        case .later, .ended:
+            EmptyView()
+        }
     }
 
     private func reminderRow(_ reminder: ReminderItem) -> some View {

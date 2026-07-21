@@ -14,8 +14,16 @@ protocol NotchAmbientProviding: AnyObject {
     /// Whether this widget currently has ambient content worth showing.
     var isAmbientActive: Bool { get }
 
+    /// Higher wins when multiple ambient providers are active.
+    /// Media playing ≈ 100, calendar soon ≈ 80, battery low ≈ 70, default ≈ 10.
+    var ambientPriority: Int { get }
+
     /// A self-contained view laid out across the collapsed notch. It should push
     /// its own content toward the leading and trailing edges, leaving the middle
     /// clear for the physical camera.
     func ambientView() -> AnyView
+}
+
+extension NotchAmbientProviding {
+    var ambientPriority: Int { 10 }
 }

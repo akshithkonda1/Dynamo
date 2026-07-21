@@ -96,6 +96,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
+    var ambientPriority: Int { 100 }
     func ambientView() -> AnyView { AnyView(AmbientMediaView(plugin: self)) }
 }
 
@@ -105,16 +106,31 @@ private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             artThumb
                 .onTapGesture { plugin.openConnectedApp() }
                 .help("Open \(playerLabel)")
+            if remainingLabel != nil {
+                Text(remainingLabel!)
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 0)
             MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12)
                 .fixedSize()
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var remainingLabel: String? {
+        let info = plugin.info
+        guard info.duration > 1, info.elapsed >= 0 else { return nil }
+        let left = max(0, Int((info.duration - info.elapsed).rounded()))
+        let m = left / 60
+        let s = left % 60
+        return String(format: "-%d:%02d", m, s)
     }
 
     private var playerLabel: String {
@@ -177,27 +193,43 @@ private struct ExpandedMediaView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 header
-                MarqueeText(
-                    text: hasTrack ? plugin.info.title : "Nothing playing",
-                    font: .system(size: 17, weight: .semibold),
-                    foreground: NotchTheme.textPrimary,
-                    speed: 32
-                )
-                .frame(height: 22)
-                .onTapGesture { plugin.openConnectedApp() }
-                MarqueeText(
-                    text: subtitle,
-                    font: NotchTheme.body,
-                    foreground: NotchTheme.textSecondary,
-                    speed: 28
-                )
-                .frame(height: 18)
+                if hasTrack {
+                    MarqueeText(
+                        text: plugin.info.title,
+                        font: .system(size: 17, weight: .semibold),
+                        foreground: NotchTheme.textPrimary,
+                        speed: 32
+                    )
+                    .frame(height: 22)
+                    .onTapGesture { plugin.openConnectedApp() }
+                    MarqueeText(
+                        text: subtitle,
+                        font: NotchTheme.body,
+                        foreground: NotchTheme.textSecondary,
+                        speed: 28
+                    )
+                    .frame(height: 18)
+                    timelineBar
+                } else {
+                    NotchEmptyState(
+                        systemImage: "music.note",
+                        title: "Nothing playing",
+                        caption: "Start Music or Spotify — or open \(playerAppName)."
+                    )
+                    Button {
+                        plugin.openConnectedApp()
+                    } label: {
+                        NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+                }
 
-                timelineBar
-
+                // Always show exact system volume percent (compact by default).
                 systemVolumeSection
 
-                playlistRow
+                if hasTrack {
+                    playlistRow
+                }
 
                 Spacer(minLength: 4)
                 transportRow
@@ -328,93 +360,94 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Collapsible subsection under Media — system output volume (Core Audio).
+    /// Collapsible subsection under Media — system output volume (AppleScript UI %).
     private var systemVolumeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    showSystemVolume.toggle()
-                    UserDefaults.standard.set(showSystemVolume, forKey: "dynamo.media.showSystemVolume")
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(showSystemVolume ? 90 : 0))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    Image(systemName: volumeIcon)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                    Text("System Volume")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
-                    Spacer(minLength: 0)
-                    Text(volume.isMuted ? "Mute" : "\(volume.percent)%")
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(showSystemVolume ? "Hide system volume" : "Show system volume controls")
-
-            if showSystemVolume {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let name = volume.deviceName, !name.isEmpty {
-                        Text(name)
-                            .font(NotchTheme.micro)
+        NotchCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        showSystemVolume.toggle()
+                        UserDefaults.standard.set(showSystemVolume, forKey: "dynamo.media.showSystemVolume")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .rotationEffect(.degrees(showSystemVolume ? 90 : 0))
                             .foregroundStyle(NotchTheme.textQuaternary)
-                            .lineLimit(1)
+                        Image(systemName: volumeIcon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                        Text("System Volume")
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Spacer(minLength: 0)
+                        Text(volume.isMuted ? "Mute" : "\(volume.percent)%")
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textPrimary)
                     }
-
-                    HStack(spacing: 8) {
-                        Button {
-                            volume.toggleMute()
-                        } label: {
-                            Image(systemName: volumeIcon)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                                .frame(width: 28, height: 28)
-                                .background(Circle().fill(NotchTheme.chipFillActive))
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(volume.isMuted ? "Unmute" : "Mute")
-
-                        Slider(
-                            value: Binding(
-                                get: { Double(volume.isMuted ? 0 : volume.level) },
-                                set: { volume.setLevel(Float($0)) }
-                            ),
-                            in: 0...1
-                        )
-                        .controlSize(.mini)
-                        .tint(Color.white.opacity(0.9))
-                        .help("Change Mac system volume")
-
-                        Button {
-                            volume.nudge(by: -0.0625)
-                        } label: {
-                            Image(systemName: "minus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
-                                .background(Circle().fill(NotchTheme.chipFill))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            volume.nudge(by: 0.0625)
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 22, height: 22)
-                                .background(Circle().fill(NotchTheme.chipFill))
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    .contentShape(Rectangle())
                 }
-                .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .buttonStyle(.plain)
+                .help(showSystemVolume ? "Hide system volume" : "Show system volume controls")
+
+                if showSystemVolume {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let name = volume.deviceName, !name.isEmpty {
+                            Text(name)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                                .lineLimit(1)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                volume.toggleMute()
+                            } label: {
+                                Image(systemName: volumeIcon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                    .frame(width: 28, height: 28)
+                                    .background(Circle().fill(NotchTheme.chipFillActive))
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(volume.isMuted ? "Unmute" : "Mute")
+
+                            Slider(
+                                value: Binding(
+                                    get: { Double(volume.isMuted ? 0 : volume.level) },
+                                    set: { volume.setLevel(Float($0)) }
+                                ),
+                                in: 0...1
+                            )
+                            .controlSize(.mini)
+                            .tint(Color.white.opacity(0.9))
+                            .help("Change Mac system volume")
+
+                            Button {
+                                volume.nudge(by: -0.0625)
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(NotchTheme.chipFill))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                volume.nudge(by: 0.0625)
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(NotchTheme.chipFill))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
         .padding(.top, 2)

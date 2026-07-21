@@ -1,7 +1,7 @@
 import SwiftUI
 
 @MainActor
-final class BatteryPlugin: ObservableObject, NotchWidgetPlugin {
+final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding {
     let id = "battery"
     let displayName = "Battery"
     let systemImage = "battery.100"
@@ -31,56 +31,106 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin {
         AnyView(ExpandedBatteryView(snapshot: snapshot))
     }
 
-    // A percent readout and a single progress bar never need the full
-    // media-player-sized panel — see the doc comment on the protocol default.
-    var expandedContentHeight: CGFloat { 132 }
+    var expandedContentHeight: CGFloat { 140 }
+
+    // MARK: Ambient
+
+    var isAmbientActive: Bool {
+        snapshot.isPresent && (snapshot.percent <= 20 || snapshot.isCharging)
+    }
+
+    var ambientPriority: Int {
+        if snapshot.isPresent, snapshot.percent <= 15 { return 90 }
+        if snapshot.isPresent, snapshot.percent <= 20 { return 70 }
+        if snapshot.isCharging { return 25 }
+        return 10
+    }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientBatteryView(snapshot: snapshot))
+    }
 }
 
-// MARK: - Views
+// MARK: - Ambient
+
+private struct AmbientBatteryView: View {
+    let snapshot: BatterySnapshot
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: iconName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+            Text("\(snapshot.percent)%")
+                .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var iconName: String {
+        if snapshot.isCharging { return "bolt.fill" }
+        if snapshot.percent <= 15 { return "battery.0" }
+        if snapshot.percent <= 40 { return "battery.25" }
+        return "battery.50"
+    }
+
+    private var tint: Color {
+        if snapshot.isCharging { return NotchTheme.positive }
+        if snapshot.percent <= 15 { return NotchTheme.negative }
+        if snapshot.percent <= 20 { return NotchTheme.caution }
+        return NotchTheme.textSecondary
+    }
+}
+
+// MARK: - Expanded
 
 private struct ExpandedBatteryView: View {
     let snapshot: BatterySnapshot
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceMD) {
-            Text("Battery")
-                .font(NotchTheme.section)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .textCase(.uppercase)
+            NotchSectionHeader("Battery")
 
             if !snapshot.isPresent {
-                Text("No internal battery detected (desktop Mac or power-source unavailable).")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                NotchEmptyState(
+                    systemImage: "laptopcomputer",
+                    title: "No internal battery",
+                    caption: "Desktop Mac or power source unavailable."
+                )
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: NotchTheme.spaceSM) {
-                    Text("\(snapshot.percent)%")
-                        .font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(NotchTheme.textPrimary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(statusLabel)
-                            .font(NotchTheme.body)
-                            .foregroundStyle(NotchTheme.textSecondary)
-                        if let minutes = snapshot.timeRemainingMinutes {
-                            Text(timeLabel(minutes))
-                                .font(NotchTheme.caption)
-                                .foregroundStyle(NotchTheme.textTertiary)
+                NotchCard {
+                    VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+                        HStack(alignment: .firstTextBaseline, spacing: NotchTheme.spaceSM) {
+                            Text("\(snapshot.percent)%")
+                                .font(NotchTheme.heroDigit.monospacedDigit())
+                                .foregroundStyle(barColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(statusLabel)
+                                    .font(NotchTheme.body)
+                                    .foregroundStyle(NotchTheme.textSecondary)
+                                if let minutes = snapshot.timeRemainingMinutes {
+                                    Text(timeLabel(minutes))
+                                        .font(NotchTheme.caption)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                }
+                            }
+                            Spacer(minLength: 0)
                         }
-                    }
-                    Spacer(minLength: 0)
-                }
 
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(NotchTheme.chipFill)
-                        Capsule()
-                            .fill(barColor)
-                            .frame(width: max(8, geo.size.width * CGFloat(snapshot.percent) / 100))
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(NotchTheme.chipFill)
+                                Capsule()
+                                    .fill(barColor)
+                                    .frame(width: max(8, geo.size.width * CGFloat(snapshot.percent) / 100))
+                            }
+                        }
+                        .frame(height: 8)
                     }
                 }
-                .frame(height: 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

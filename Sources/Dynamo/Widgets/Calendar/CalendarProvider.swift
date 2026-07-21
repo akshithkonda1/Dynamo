@@ -56,6 +56,8 @@ protocol CalendarProvider: AnyObject {
     func openEvent(id: String)
     /// Open Calendar focused on today.
     func openCalendarApp()
+    /// Open Calendar’s new-event UI when possible.
+    func openNewEvent()
 }
 
 extension CalendarProvider {
@@ -64,4 +66,22 @@ extension CalendarProvider {
     func requestRemindersAccess() async {}
     func openEvent(id: String) {}
     func openCalendarApp() {}
+    func openNewEvent() { openCalendarApp() }
+}
+
+extension CalendarEventItem {
+    enum Phase: Equatable {
+        case ended
+        case now
+        case soon
+        case later
+    }
+
+    func phase(reference now: Date = Date()) -> Phase {
+        if end <= now { return .ended }
+        if start <= now { return .now }
+        let until = start.timeIntervalSince(now)
+        if until <= 30 * 60 { return .soon }
+        return .later
+    }
 }

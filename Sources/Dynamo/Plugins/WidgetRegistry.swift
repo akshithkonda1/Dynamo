@@ -50,15 +50,22 @@ final class WidgetRegistry: ObservableObject {
         }
     }
 
-    /// The first enabled widget that currently has ambient content to show in
-    /// the collapsed notch. Generic protocol cast — no name switch.
+    /// Highest-priority enabled ambient provider (Media playing > Calendar soon >
+    /// Battery low > others). Protocol cast — no hard-coded widget names.
     func activeAmbientProvider() -> (any NotchAmbientProviding)? {
+        var best: (any NotchAmbientProviding)?
+        var bestScore = Int.min
         for plugin in plugins {
-            if let ambient = plugin as? any NotchAmbientProviding, ambient.isAmbientActive {
-                return ambient
+            guard let ambient = plugin as? any NotchAmbientProviding, ambient.isAmbientActive else {
+                continue
+            }
+            let score = ambient.ambientPriority
+            if score > bestScore {
+                bestScore = score
+                best = ambient
             }
         }
-        return nil
+        return best
     }
 
     /// If a widget can present ambient content and is observable, mirror its
