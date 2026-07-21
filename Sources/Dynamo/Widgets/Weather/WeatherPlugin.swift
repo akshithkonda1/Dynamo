@@ -188,7 +188,8 @@ private struct ExpandedWeatherView: View {
             NotchEmptyState(
                 systemImage: "location.slash",
                 title: "Location access denied",
-                caption: "Enable Location Services, or set a city in Settings → Weather."
+                caption: "Enable Location Services, or set a city in Settings → Weather.",
+                prominent: true
             )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)

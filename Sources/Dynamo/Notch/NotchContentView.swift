@@ -10,29 +10,49 @@ struct NotchContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            // Premium glass: vibrancy + strong scrim so desktop never bleeds through as UI.
             VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
-                .overlay(NotchTheme.panelScrim)
+                .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
+                .overlay(
+                    // Soft top highlight for depth.
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(controller.isExpanded ? 0.07 : 0.03),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
                 .overlay(
                     RoundedRectangle(
                         cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed,
                         style: .continuous
                     )
-                    .strokeBorder(NotchTheme.hairline, lineWidth: controller.isExpanded ? 1 : 0)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(controller.isExpanded ? 0.18 : 0.06),
+                                Color.white.opacity(controller.isExpanded ? 0.06 : 0.02)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: controller.isExpanded ? 1 : 0
+                    )
                 )
 
             if let hudState = hud.state {
                 SystemHUDView(state: hudState)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             } else if let peek = sneakPeek.peek, !controller.isExpanded {
-                // Only peek while collapsed — if the panel's already expanded
-                // the user is already looking at it, no need for a pill.
                 NotchSneakPeekView(peek: peek)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             } else if controller.isExpanded {
                 expandedBody
                     .transition(
                         .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
                             removal: .opacity
                         )
                     )
@@ -43,9 +63,9 @@ struct NotchContentView: View {
         }
         .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
         .shadow(
-            color: controller.isExpanded ? Color.black.opacity(0.45) : .clear,
-            radius: controller.isExpanded ? 18 : 0,
-            y: controller.isExpanded ? 8 : 0
+            color: controller.isExpanded ? NotchTheme.shadowExpanded : .clear,
+            radius: controller.isExpanded ? NotchTheme.shadowRadius : 0,
+            y: controller.isExpanded ? NotchTheme.shadowY : 0
         )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
@@ -53,11 +73,6 @@ struct NotchContentView: View {
         .animation(NotchTheme.contentSpring, value: sneakPeek.peek)
     }
 
-    // The collapsed panel is sized to the physical notch (see `NotchGeometry`).
-    // When a widget has ambient content to show (e.g. media playing → album art
-    // + visualizer either side of the camera), render it; otherwise stay empty
-    // so the shape disappears into the real black cutout. The widget tray lives
-    // in the expanded state, revealed on hover.
     @ViewBuilder
     private var collapsedBody: some View {
         if let ambient = registry.activeAmbientProvider() {
@@ -71,13 +86,12 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                // Main tray icons (Shelf + Webcam are pinned next to Settings).
+            // Tray chrome
+            HStack(spacing: 6) {
                 ForEach(leadingTrayPlugins, id: \.id) { plugin in
                     trayButton(for: plugin)
                 }
                 Spacer(minLength: 0)
-                // Fixed trailing cluster: Shelf · Webcam · Settings.
                 if let shelf = shelfPlugin {
                     trayButton(for: shelf)
                 }
@@ -93,20 +107,30 @@ struct NotchContentView: View {
                 }
             }
             .padding(.horizontal, NotchTheme.spaceMD)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            // Hairline under tray — separates chrome from content.
+            Rectangle()
+                .fill(NotchTheme.separator)
+                .frame(height: 1)
+                .padding(.horizontal, NotchTheme.spaceMD)
+                .padding(.bottom, 8)
 
             if let active = registry.activePlugin {
                 active.expandedView()
+                    // Identity by plugin so SwiftUI doesn't morph unrelated layouts
+                    // (Clipboard pins used to reflow under media geometry).
+                    .id(active.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, NotchTheme.spaceMD)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 14)
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Plugins drawn in normal order — excludes trailing-pinned Shelf + Webcam.
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
         registry.plugins.filter { $0.id != "webcam" && $0.id != "shelf" }
     }
@@ -121,15 +145,12 @@ struct NotchContentView: View {
 
     @ViewBuilder
     private func trayButton(for plugin: any NotchWidgetPlugin) -> some View {
-        // Match against resolved active plugin (falls back to first when id is nil)
-        // so the tray highlight never desyncs from visible content.
         let isActive = registry.activePlugin?.id == plugin.id
         TrayIconButton(
             systemImage: plugin.systemImage,
             displayName: plugin.displayName,
             isActive: isActive
         ) {
-            // Re-tap an already-active player widget → open Music/Spotify.
             if isActive, let opener = plugin as? any PlayerAppOpening {
                 opener.openPlayerApp()
             } else {
@@ -139,10 +160,6 @@ struct NotchContentView: View {
     }
 }
 
-/// Tray-row control that works inside a nonactivating notch panel.
-/// Uses a real `Button` (not Image + onTapGesture, which — same as the
-/// transport row in MediaControlsPlugin — often eats the first click on a
-/// nonactivating panel) and the shared `.notchIcon` hover/press style.
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
@@ -150,12 +167,11 @@ private struct TrayIconButton: View {
     let action: () -> Void
 
     var body: some View {
-        // Real Button + notchIcon style so the first click on a nonactivating
-        // panel lands (plain Image + tiny clear hit target often ate the first press).
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: isActive ? .bold : .semibold))
                 .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                .symbolRenderingMode(.hierarchical)
         }
         .buttonStyle(.notchIcon(diameter: 30, prominent: isActive))
         .help(displayName)

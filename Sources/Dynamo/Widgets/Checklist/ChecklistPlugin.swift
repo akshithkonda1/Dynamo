@@ -9,6 +9,8 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
     let store = ChecklistStore()
     @Published var draft: String = ""
 
+    var expandedContentHeight: CGFloat { 250 }
+
     func start() {
         store.start()
     }
@@ -55,11 +57,10 @@ private struct ExpandedChecklistView: View {
             )
 
             if store.items.isEmpty {
-                NotchEmptyState(
-                    systemImage: "checklist",
-                    title: "No tasks yet",
-                    caption: "Add one below — drag the handle to reorder."
-                )
+                Text("No tasks yet — add one below. Drag the handle to reorder.")
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .padding(.vertical, 4)
             } else {
                 // List + onMove enables drag reorder on macOS without an edit mode.
                 List {
@@ -130,6 +131,6 @@ private struct ExpandedChecklistView: View {
             }
             .buttonStyle(.notchIcon(diameter: 22))
         }
-        .padding(.vertical, 2)
+        .notchRowBackground()
     }
 }

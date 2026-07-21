@@ -6,6 +6,9 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
 
+    /// Tall enough for Pinned + History without compressing content upward.
+    var expandedContentHeight: CGFloat { 280 }
+
     let store = ClipboardStore()
 
     @Published var draftTitle: String = ""
@@ -50,66 +53,85 @@ private struct ExpandedClipboardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Fixed section chrome + scrollable body so Pinned items never
+        // compress History / empty states upward into the tray.
+        VStack(alignment: .leading, spacing: 0) {
             NotchSectionHeader("Pinned")
-            if store.snippets.isEmpty && !plugin.isAddingSnippet {
-                NotchEmptyState(
-                    systemImage: "pin",
-                    title: "No pinned snippets",
-                    caption: "Pin from history or add one below."
-                )
-            } else {
-                ForEach(store.snippets) { snippet in
-                    snippetRow(snippet)
-                }
-            }
+                .padding(.bottom, 8)
 
-            if plugin.isAddingSnippet {
-                addSnippetForm
-            } else {
-                Button {
-                    plugin.isAddingSnippet = true
-                } label: {
-                    NotchChipLabel(title: "Add snippet", systemImage: "plus")
-                }
-                .buttonStyle(.plain)
-            }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    pinnedSection
 
-            Divider().overlay(NotchTheme.separator)
-
-            NotchSectionHeader(
-                "History",
-                trailing: store.history.isEmpty
-                    ? nil
-                    : AnyView(
-                        Button("Clear") { store.clearHistory() }
-                            .buttonStyle(.plain)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    )
-            )
-
-            if store.history.isEmpty {
-                NotchEmptyState(
-                    systemImage: "doc.on.clipboard",
-                    title: "Clipboard history is empty",
-                    caption: "Copy anything system-wide — it shows up here."
-                )
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.history) { item in
-                            historyRow(item)
+                    if plugin.isAddingSnippet {
+                        addSnippetForm
+                    } else {
+                        Button {
+                            plugin.isAddingSnippet = true
+                        } label: {
+                            NotchChipLabel(title: "Add snippet", systemImage: "plus")
                         }
+                        .buttonStyle(.plain)
                     }
+
+                    Divider()
+                        .overlay(NotchTheme.separator)
+                        .padding(.vertical, 4)
+
+                    NotchSectionHeader(
+                        "History",
+                        trailing: store.history.isEmpty
+                            ? nil
+                            : AnyView(
+                                Button("Clear") { store.clearHistory() }
+                                    .buttonStyle(.plain)
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textTertiary)
+                            )
+                    )
+
+                    historySection
                 }
+                .padding(.bottom, 4)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    @ViewBuilder
+    private var pinnedSection: some View {
+        if store.snippets.isEmpty && !plugin.isAddingSnippet {
+            Text("No pins yet — star items from History or add one.")
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(store.snippets) { snippet in
+                    snippetRow(snippet)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if store.history.isEmpty {
+            Text("Copy anything system-wide — it shows up here.")
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(store.history) { item in
+                    historyRow(item)
+                }
+            }
+        }
+    }
+
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Button {
                 plugin.copy(snippet.text)
             } label: {
@@ -127,6 +149,7 @@ private struct ExpandedClipboardView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Copy snippet")
 
             Button {
                 store.deleteSnippet(id: snippet.id)
@@ -138,11 +161,11 @@ private struct ExpandedClipboardView: View {
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Delete snippet")
         }
-        .padding(.vertical, 2)
+        .notchRowBackground()
     }
 
     private func historyRow(_ item: ClipboardHistoryItem) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Button {
                 plugin.copy(item.text)
             } label: {
@@ -176,6 +199,7 @@ private struct ExpandedClipboardView: View {
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Remove from history")
         }
+        .notchRowBackground()
     }
 
     private var addSnippetForm: some View {
@@ -204,7 +228,14 @@ private struct ExpandedClipboardView: View {
                 .foregroundStyle(NotchTheme.textTertiary)
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous).fill(NotchTheme.chipFill))
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                .fill(NotchTheme.cardFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .strokeBorder(NotchTheme.hairline, lineWidth: 1)
+                )
+        )
     }
 }

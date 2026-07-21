@@ -103,7 +103,8 @@ private struct ExpandedBatteryView: View {
                 NotchEmptyState(
                     systemImage: "laptopcomputer",
                     title: "No internal battery",
-                    caption: "Desktop Mac or power source unavailable."
+                    caption: "Desktop Mac or power source unavailable.",
+                    prominent: true
                 )
             } else {
                 NotchCard {

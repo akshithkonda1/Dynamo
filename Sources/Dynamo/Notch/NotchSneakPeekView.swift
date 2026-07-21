@@ -46,13 +46,14 @@ struct NotchSneakPeekView: View {
             )
     }
 
-    // A soft warning-colored wash + border behind critical peeks — the
-    // "glow" — layered on top of the routine peek's plain vibrancy background.
     @ViewBuilder
     private var glowBackground: some View {
         if isCritical {
             RoundedRectangle(cornerRadius: NotchTheme.radiusExpanded, style: .continuous)
                 .fill(NotchTheme.caution.opacity(0.16))
+        } else {
+            RoundedRectangle(cornerRadius: NotchTheme.radiusExpanded, style: .continuous)
+                .fill(NotchTheme.glow)
         }
     }
 

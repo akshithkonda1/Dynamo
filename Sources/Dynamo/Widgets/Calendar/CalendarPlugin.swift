@@ -109,7 +109,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         AnyView(ExpandedCalendarView(plugin: self))
     }
 
-    var expandedContentHeight: CGFloat { 240 }
+    var expandedContentHeight: CGFloat { 260 }
 
     private func checkUpcomingEvents() {
         notifiedEventIDs.formIntersection(Set(events.map(\.id)))
@@ -271,7 +271,8 @@ private struct ExpandedCalendarView: View {
                     NotchEmptyState(
                         systemImage: "calendar",
                         title: "No upcoming events",
-                        caption: "Next two weeks are clear — tap New to schedule."
+                        caption: "Next two weeks are clear — tap New to schedule.",
+                        prominent: true
                     )
                 } else {
                     ScrollView {
@@ -351,14 +352,14 @@ private struct ExpandedCalendarView: View {
     private func eventRow(_ event: CalendarEventItem) -> some View {
         let phase = event.phase()
         return HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
-            RoundedRectangle(cornerRadius: 1.5)
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(color(for: event))
-                .frame(width: 3, height: 34)
+                .frame(width: 3, height: 36)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(event.title)
-                        .font(NotchTheme.body)
+                        .font(NotchTheme.body.weight(.semibold))
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                     phaseChip(phase)
@@ -375,8 +376,12 @@ private struct ExpandedCalendarView: View {
                 }
             }
             Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .padding(.top, 4)
         }
-        .padding(.vertical, 2)
+        .notchRowBackground()
         .contentShape(Rectangle())
         .onTapGesture { plugin.openEvent(event) }
         .help("Open in Calendar")

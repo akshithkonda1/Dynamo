@@ -37,7 +37,8 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 }
 
 extension NotchWidgetPlugin {
-    var expandedContentHeight: CGFloat { 220 }
+    /// Default fits a full media-style layout; override only when content is reliably shorter.
+    var expandedContentHeight: CGFloat { 240 }
     func start() {}
     func stop() {}
 }

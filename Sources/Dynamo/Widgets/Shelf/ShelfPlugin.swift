@@ -8,7 +8,7 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
     let displayName = "Shelf"
     let systemImage = "tray.and.arrow.down.fill"
 
-    var expandedContentHeight: CGFloat { 240 }
+    var expandedContentHeight: CGFloat { 260 }
 
     let store = ShelfStore()
 
@@ -189,7 +189,7 @@ private struct ExpandedShelfView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
         }
-        .padding(.vertical, 2)
+        .notchRowBackground()
     }
 
     private func fileSizeString(for item: ShelfItem) -> String? {

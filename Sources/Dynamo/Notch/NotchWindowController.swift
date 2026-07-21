@@ -44,7 +44,7 @@ final class NotchWindowController: ObservableObject {
     /// a single fixed value, so e.g. Battery doesn't balloon to the same
     /// footprint as the media player. Width stays constant.
     private var expandedSize: NSSize {
-        let height = registry?.activePlugin?.expandedContentHeight ?? 220
+        let height = registry?.activePlugin?.expandedContentHeight ?? 240
         return NSSize(width: Self.expandedWidth, height: height)
     }
     /// Stay open while the cursor is over the notch; collapse after leave

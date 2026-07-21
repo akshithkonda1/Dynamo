@@ -30,16 +30,22 @@ struct SystemHUDView: View {
                     Capsule()
                         .fill(NotchTheme.chipFill)
                     Capsule()
-                        .fill(Color.white.opacity(0.9))
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.95), Color.white.opacity(0.75)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         .frame(width: max(displayMuted ? 0 : 6, geo.size.width * CGFloat(displayLevel)))
                 }
             }
-            .frame(height: 6)
+            .frame(height: 7)
 
             Text(percentLabel)
-                .font(NotchTheme.caption.monospacedDigit())
-                .foregroundStyle(NotchTheme.textSecondary)
-                .frame(width: 36, alignment: .trailing)
+                .font(NotchTheme.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(NotchTheme.textPrimary)
+                .frame(width: 40, alignment: .trailing)
         }
         .padding(.horizontal, NotchTheme.spaceLG)
         .padding(.vertical, 10)

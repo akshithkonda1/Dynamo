@@ -15,6 +15,7 @@ final class NotchPanel: NSPanel {
         )
         isOpaque = false
         backgroundColor = .clear
+        // SwiftUI draws its own premium shadow; keep AppKit shadow off to avoid double blur.
         hasShadow = false
         collectionBehavior = [
             .canJoinAllSpaces,

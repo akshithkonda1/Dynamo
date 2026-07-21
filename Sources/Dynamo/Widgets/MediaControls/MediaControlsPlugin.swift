@@ -9,6 +9,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let displayName = "Media"
     let systemImage = "music.note"
 
+    var expandedContentHeight: CGFloat { 250 }
+
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
     @Published var showPlaylistPicker = false
@@ -106,21 +108,21 @@ private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             artThumb
                 .onTapGesture { plugin.openConnectedApp() }
                 .help("Open \(playerLabel)")
-            if remainingLabel != nil {
-                Text(remainingLabel!)
-                    .font(NotchTheme.micro.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textTertiary)
+            if let remainingLabel {
+                Text(remainingLabel)
+                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(NotchTheme.textSecondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12)
+            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 11)
                 .fixedSize()
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -147,16 +149,17 @@ private struct AmbientMediaView: View {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(1, contentMode: .fill)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .clipShape(shape)
+                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
                 .contentShape(shape)
         } else {
             shape
                 .fill(NotchTheme.chipFill)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
                 )
                 .contentShape(shape)
@@ -505,33 +508,41 @@ private struct ExpandedMediaView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         Group {
             if let data = plugin.info.artworkData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(1, contentMode: .fill)
-                    .frame(width: 104, height: 104)
+                    .frame(width: 108, height: 108)
                     .clipShape(shape)
-                    .shadow(color: .black.opacity(0.28), radius: 9, y: 3)
+                    .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.40), radius: 14, y: 5)
             } else {
                 shape
-                    .fill(NotchTheme.chipFill)
-                    .frame(width: 104, height: 104)
+                    .fill(
+                        LinearGradient(
+                            colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 108, height: 108)
                     .overlay(
                         Image(systemName: "music.note")
-                            .font(.system(size: 30))
+                            .font(.system(size: 30, weight: .medium))
                             .foregroundStyle(NotchTheme.textTertiary)
                     )
+                    .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
             }
         }
         .contentShape(shape)
         .overlay(alignment: .bottomTrailing) {
             Image(systemName: "arrow.up.right.square.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(radius: 2)
-                .padding(6)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+                .padding(7)
         }
     }
 
@@ -546,8 +557,8 @@ private struct ExpandedMediaView: View {
             transportButton(
                 plugin.info.isPlaying ? "pause.fill" : "play.fill",
                 accessibility: plugin.info.isPlaying ? "Pause" : "Play",
-                size: 18,
-                diameter: 44,
+                size: 17,
+                diameter: 46,
                 prominent: true
             ) { plugin.togglePlayPause() }
             transportButton(

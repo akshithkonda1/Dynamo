@@ -5,11 +5,12 @@ import SwiftUI
 /// Standard content surface inside the expanded notch.
 struct NotchCard<Content: View>: View {
     var padding: CGFloat = NotchTheme.spaceMD
+    var compact: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
-            .padding(padding)
+            .padding(compact ? NotchTheme.spaceSM : padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
@@ -18,6 +19,7 @@ struct NotchCard<Content: View>: View {
                         RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                             .strokeBorder(NotchTheme.hairline, lineWidth: 1)
                     )
+                    .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
             )
     }
 }
@@ -39,7 +41,7 @@ struct NotchSectionHeader: View {
                 .font(NotchTheme.section)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
-                .tracking(0.4)
+                .tracking(0.6)
             Spacer(minLength: 0)
             if let trailing {
                 trailing
@@ -48,18 +50,21 @@ struct NotchSectionHeader: View {
     }
 }
 
-// MARK: - Empty state
+// MARK: - Empty state (compact by default so it doesn't blow layout)
 
 struct NotchEmptyState: View {
     var systemImage: String
     var title: String
     var caption: String? = nil
+    /// When false, uses a tighter vertical footprint (Clipboard/History etc.).
+    var prominent: Bool = false
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: prominent ? 8 : 5) {
             Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .medium))
+                .font(.system(size: prominent ? 22 : 16, weight: .medium))
                 .foregroundStyle(NotchTheme.textQuaternary)
+                .symbolRenderingMode(.hierarchical)
             Text(title)
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textSecondary)
@@ -69,10 +74,11 @@ struct NotchEmptyState: View {
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, NotchTheme.spaceMD)
+        .padding(.vertical, prominent ? NotchTheme.spaceMD : NotchTheme.spaceSM)
     }
 }
 
@@ -111,9 +117,13 @@ struct NotchStatusChip: View {
         Text(text)
             .font(NotchTheme.micro.weight(.semibold))
             .foregroundStyle(kind.foreground)
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(kind.fill))
+            .background(
+                Capsule(style: .continuous)
+                    .fill(kind.fill)
+                    .overlay(Capsule(style: .continuous).strokeBorder(kind.foreground.opacity(0.15), lineWidth: 0.5))
+            )
     }
 }
 
@@ -134,8 +144,38 @@ struct NotchChipLabel: View {
                 .font(NotchTheme.micro.weight(.semibold))
         }
         .foregroundStyle(active ? NotchTheme.textPrimary : NotchTheme.textSecondary)
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Capsule().fill(active ? NotchTheme.chipFillActive : NotchTheme.chipFill))
+        .background(
+            Capsule(style: .continuous)
+                .fill(active ? NotchTheme.chipFillActive : NotchTheme.chipFill)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(NotchTheme.hairline.opacity(active ? 0.9 : 0.5), lineWidth: 0.5)
+                )
+        )
+    }
+}
+
+// MARK: - Row surface (premium list rows)
+
+struct NotchRowBackground: ViewModifier {
+    var selected: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? NotchTheme.chipFillActive : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+extension View {
+    func notchRowBackground(selected: Bool = false) -> some View {
+        modifier(NotchRowBackground(selected: selected))
     }
 }
