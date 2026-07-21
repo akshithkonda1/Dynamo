@@ -1,4 +1,28 @@
+import AppKit
 import SwiftUI
+
+// MARK: - Open Clock.app
+
+enum DynamoClockApp {
+    /// Opens the native macOS Clock app (Ventura+). Falls back to World Clock
+    /// URL scheme or Date & Time settings on older systems.
+    @MainActor
+    static func open() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.clock") {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let path = "/System/Applications/Clock.app"
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return
+        }
+        // Last resort: Date & Time settings (pre–Clock.app macOS).
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.datetime") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
 
 // MARK: - Ambient breathing rim
 
@@ -55,33 +79,41 @@ enum DynamoClock {
 
 /// Collapsed ambient when nothing else is active — elegant live clock.
 /// Content is biased downward so it clears the physical camera housing.
+/// Tap opens the native Clock app.
 struct AmbientClockView: View {
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Text(DynamoClock.dayString(from: context.date))
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .textCase(.uppercase)
-                Text(DynamoClock.timeString(from: context.date))
-                    .font(NotchTheme.ambientTime.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text(DynamoClock.periodString(from: context.date))
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textTertiary)
-                Spacer(minLength: 0)
-                // Quiet “Dynamo is awake” mark
-                Circle()
-                    .fill(NotchTheme.positive.opacity(0.85))
-                    .frame(width: 5, height: 5)
-                    .shadow(color: NotchTheme.positive.opacity(0.6), radius: 3)
+        Button {
+            DynamoClockApp.open()
+        } label: {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                HStack(spacing: 6) {
+                    Text(DynamoClock.dayString(from: context.date))
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .textCase(.uppercase)
+                    Text(DynamoClock.timeString(from: context.date))
+                        .font(NotchTheme.ambientTime.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textPrimary)
+                    Text(DynamoClock.periodString(from: context.date))
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    Spacer(minLength: 0)
+                    // Quiet “Dynamo is awake” mark
+                    Circle()
+                        .fill(NotchTheme.positive.opacity(0.85))
+                        .frame(width: 5, height: 5)
+                        .shadow(color: NotchTheme.positive.opacity(0.6), radius: 3)
+                }
+                .padding(.horizontal, NotchTheme.ambientInset)
+                // Push below the camera cutout / top edge of the physical notch.
+                .padding(.top, 10)
+                .padding(.bottom, 2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, NotchTheme.ambientInset)
-            // Push below the camera cutout / top edge of the physical notch.
-            .padding(.top, 10)
-            .padding(.bottom, 2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        .buttonStyle(.plain)
+        .help("Open Clock")
     }
 }
 

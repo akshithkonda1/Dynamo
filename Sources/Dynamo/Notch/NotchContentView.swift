@@ -163,32 +163,38 @@ struct NotchContentView: View {
     }
 
     private var liveClockPill: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 5) {
-                Text(DynamoClock.dayString(from: context.date))
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .textCase(.uppercase)
-                Text(DynamoClock.timeString(from: context.date))
-                    .font(NotchTheme.ambientTime.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text(DynamoClock.periodString(from: context.date))
-                    .font(NotchTheme.micro.weight(.medium))
-                    .foregroundStyle(NotchTheme.textTertiary)
+        Button {
+            DynamoClockApp.open()
+        } label: {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                HStack(spacing: 5) {
+                    Text(DynamoClock.dayString(from: context.date))
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .textCase(.uppercase)
+                    Text(DynamoClock.timeString(from: context.date))
+                        .font(NotchTheme.ambientTime.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textPrimary)
+                    Text(DynamoClock.periodString(from: context.date))
+                        .font(NotchTheme.micro.weight(.medium))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(NotchTheme.chipFill)
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(NotchTheme.hairline.opacity(0.55), lineWidth: 0.5)
+                        )
+                )
+                .contentShape(Capsule())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(NotchTheme.chipFill)
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(NotchTheme.hairline.opacity(0.55), lineWidth: 0.5)
-                    )
-            )
         }
+        .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .help("Local time")
+        .help("Open Clock")
     }
 
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
