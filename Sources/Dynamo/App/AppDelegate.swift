@@ -84,6 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
         PeekBridge.shared.attach(registry: registry)
+        FocusController.shared.emitPeek = { [weak sneakPeekController] peek in
+            // Route through registry publisher if available; else direct.
+            NotificationCenter.default.post(
+                name: Notification.Name("dynamo.internalFocusPeek"),
+                object: nil,
+                userInfo: ["title": peek.title, "subtitle": peek.subtitle, "detail": peek.detail]
+            )
+            sneakPeekController?.showForFocus(peek)
+        }
         FocusController.shared.start()
         FocusQuietMonitor.shared.start()
 

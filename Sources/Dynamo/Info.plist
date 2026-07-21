@@ -41,7 +41,9 @@
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer to the beat and tone of what’s playing. Audio is analyzed on-device only and never recorded or sent anywhere.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Dynamo may use macOS audio capture permission to analyze music playback for the notch equalizer. Sound is processed on-device only and is never stored or uploaded.</string>
+	<string>Dynamo uses the microphone only when you enable Listen in Meeting Mode for optional speech-to-text notes, or for on-device music equalizer analysis. Audio is processed on this Mac and is never uploaded by Dynamo.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Dynamo can turn your speech into Meeting Mode notes when you enable Listen. Recognition prefers on-device processing when available. Notes stay on this Mac unless you export them.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundleURLTypes</key>

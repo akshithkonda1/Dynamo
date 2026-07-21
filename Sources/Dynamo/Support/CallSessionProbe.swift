@@ -1,15 +1,9 @@
 import AppKit
 import Foundation
 
-/// Detects likely meeting/call apps for auto Meeting Mode.
+/// Detects call apps for Meeting **suggestions** and context (never force-joins).
 @MainActor
 final class CallSessionProbe {
-    enum Reason: Equatable {
-        case calendar
-        case call(appName: String)
-    }
-
-    /// Bundle IDs treated as “in a call” when running (not terminated).
     static let defaultAllowlist: [String: String] = [
         "com.apple.FaceTime": "FaceTime",
         "us.zoom.xos": "Zoom",
@@ -21,6 +15,8 @@ final class CallSessionProbe {
     ]
 
     private(set) var activeCallAppName: String?
+    /// Frontmost allowlisted app only — used for “Enter Meeting?” offers.
+    private(set) var suggestedFrontmostCallApp: String?
     private var timer: Timer?
     private var onChange: (() -> Void)?
 
@@ -33,18 +29,14 @@ final class CallSessionProbe {
         RunLoop.main.add(t, forMode: .common)
         timer = t
 
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didTerminateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
+        nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }
@@ -57,19 +49,35 @@ final class CallSessionProbe {
 
     func refresh() {
         let apps = NSWorkspace.shared.runningApplications
-        var found: String?
+        var anyRunning: String?
+        var frontmost: String?
+
+        if let front = NSWorkspace.shared.frontmostApplication,
+           let bid = front.bundleIdentifier,
+           let name = Self.defaultAllowlist[bid],
+           !front.isTerminated {
+            // Require a visible window when possible.
+            if front.activationPolicy == .regular {
+                frontmost = name
+            }
+        }
+
         for app in apps where !app.isTerminated {
             guard let bid = app.bundleIdentifier,
                   let name = Self.defaultAllowlist[bid]
             else { continue }
-            found = name
+            anyRunning = name
             break
         }
-        if found != activeCallAppName {
-            activeCallAppName = found
+
+        let prevFront = suggestedFrontmostCallApp
+        let prevAny = activeCallAppName
+        suggestedFrontmostCallApp = frontmost
+        activeCallAppName = anyRunning
+        if prevFront != frontmost || prevAny != anyRunning {
             onChange?()
         }
     }
 
-    var isInCall: Bool { activeCallAppName != nil }
+    var isInCall: Bool { suggestedFrontmostCallApp != nil }
 }

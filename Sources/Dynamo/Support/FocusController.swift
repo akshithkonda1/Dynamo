@@ -1,11 +1,12 @@
 import AppKit
 import Foundation
 
-/// User-selectable base focus mode (Meeting is auto-only overlay).
+/// User-selectable Focus modes. Meeting is chosen explicitly (Granola-style companion).
 enum FocusBaseMode: String, CaseIterable, Identifiable {
     case normal
     case dynamic
     case trueFocus
+    case meeting
 
     var id: String { rawValue }
 
@@ -14,14 +15,16 @@ enum FocusBaseMode: String, CaseIterable, Identifiable {
         case .normal: return "Normal"
         case .dynamic: return "Dynamic"
         case .trueFocus: return "True Focus"
+        case .meeting: return "Meeting"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .normal: return "Default Dynamo — no special policy"
-        case .dynamic: return "Peeks + workflow companion (no AI)"
-        case .trueFocus: return "Calendar-driven productivity partner"
+        case .normal: return "Default Dynamo"
+        case .dynamic: return "Peeks + workflow companion"
+        case .trueFocus: return "Calendar productivity partner"
+        case .meeting: return "Notes, talk tips, quiet island"
         }
     }
 
@@ -30,48 +33,38 @@ enum FocusBaseMode: String, CaseIterable, Identifiable {
         case .normal: return "circle"
         case .dynamic: return "bolt.horizontal.circle"
         case .trueFocus: return "target"
+        case .meeting: return "video.fill"
         }
     }
 }
 
 enum FocusEffectiveMode: Equatable {
     case normal
-    case meeting
     case dynamic
     case trueFocus
+    case meeting
 }
 
-enum MeetingReason: Equatable {
-    case calendar
-    case call(appName: String)
-
-    var label: String {
-        switch self {
-        case .calendar: return "Calendar event"
-        case .call(let name): return name
-        }
-    }
-}
-
-/// Central Focus state: base mode + auto Meeting overlay.
+/// Central Focus state — Meeting is a base mode, not a silent auto-overlay.
 @MainActor
 final class FocusController: ObservableObject {
     static let shared = FocusController()
 
     private static let baseModeKey = "dynamo.focus.baseMode"
-    private static let autoMeetingKey = "dynamo.focus.autoMeeting"
+    private static let suggestMeetingKey = "dynamo.focus.suggestMeeting"
     private static let duckPercentKey = "dynamo.focus.duckPercent"
 
     @Published var baseMode: FocusBaseMode {
         didSet {
             UserDefaults.standard.set(baseMode.rawValue, forKey: Self.baseModeKey)
+            handleModeTransition(from: oldValue, to: baseMode)
             objectWillChange.send()
         }
     }
 
-    /// When false, calendar/call never enter Meeting overlay.
-    @Published var autoMeetingEnabled: Bool {
-        didSet { UserDefaults.standard.set(autoMeetingEnabled, forKey: Self.autoMeetingKey) }
+    /// When true, frontmost call apps can offer “Enter Meeting Mode?” once per session.
+    @Published var suggestMeetingOnCall: Bool {
+        didSet { UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey) }
     }
 
     @Published var duckPercent: Int {
@@ -83,36 +76,40 @@ final class FocusController: ObservableObject {
         }
     }
 
-    @Published private(set) var isMeetingActive = false
-    @Published private(set) var meetingReason: MeetingReason?
-    /// Recent Dynamic peeks for Focus UI transparency.
+    /// Call app currently frontmost / visible (for UI + suggestions only).
+    @Published private(set) var suggestedCallApp: String?
+    @Published private(set) var meetingEnteredAt: Date?
     @Published private(set) var recentDynamicPeeks: [String] = []
 
-    /// Injected by CalendarPlugin.
+    /// Injected by CalendarPlugin for Meeting context strip.
     var isCalendarMeetingNow: () -> Bool = { false }
+    var calendarMeetingTitle: () -> String? = { nil }
+
+    /// Wired by sneak-peek host so Dynamic/Meeting can emit peeks.
+    var emitPeek: ((NotchSneakPeek) -> Void)?
 
     private let callProbe = CallSessionProbe()
     private let ducker = MeetingVolumeDucker()
-    private var clearMeetingWorkItem: DispatchWorkItem?
     private var started = false
+    private var didSuggestMeetingThisSession = false
 
-    /// Effective mode including Meeting overlay.
+    /// Meeting is active only when user selected Meeting mode.
+    var isMeetingActive: Bool { baseMode == .meeting }
+
     var effective: FocusEffectiveMode {
-        if isMeetingActive { return .meeting }
         switch baseMode {
         case .normal: return .normal
         case .dynamic: return .dynamic
         case .trueFocus: return .trueFocus
+        case .meeting: return .meeting
         }
     }
 
-    var effectiveTitle: String {
-        switch effective {
-        case .normal: return "Normal"
-        case .meeting: return "Meeting"
-        case .dynamic: return "Dynamic"
-        case .trueFocus: return "True Focus"
-        }
+    var effectiveTitle: String { baseMode.title }
+
+    var meetingElapsed: TimeInterval {
+        guard let start = meetingEnteredAt else { return 0 }
+        return Date().timeIntervalSince(start)
     }
 
     private init() {
@@ -122,10 +119,10 @@ final class FocusController: ObservableObject {
         } else {
             baseMode = .normal
         }
-        if UserDefaults.standard.object(forKey: Self.autoMeetingKey) == nil {
-            autoMeetingEnabled = true
+        if UserDefaults.standard.object(forKey: Self.suggestMeetingKey) == nil {
+            suggestMeetingOnCall = true
         } else {
-            autoMeetingEnabled = UserDefaults.standard.bool(forKey: Self.autoMeetingKey)
+            suggestMeetingOnCall = UserDefaults.standard.bool(forKey: Self.suggestMeetingKey)
         }
         let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int
         duckPercent = storedDuck ?? 25
@@ -135,83 +132,106 @@ final class FocusController: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        // Keep legacy MeetingMode flags aligned for any remaining readers.
-        MeetingMode.shared.isEnabled = autoMeetingEnabled
+        // Legacy dim flag: enabled when user might use Meeting.
+        MeetingMode.shared.isEnabled = true
         callProbe.start { [weak self] in
-            self?.reevaluateMeeting()
+            self?.refreshCallContext()
         }
-        // Calendar changes often; poll lightly.
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.reevaluateMeeting() }
+        Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshCallContext() }
         }
-        reevaluateMeeting()
+        refreshCallContext()
+        // If relaunched already in Meeting, re-apply duck.
+        if baseMode == .meeting {
+            meetingEnteredAt = meetingEnteredAt ?? Date()
+            ducker.enter()
+            MeetingNotesStore.shared.ensureSession()
+        }
     }
 
     func stop() {
         callProbe.stop()
-        ducker.exit()
+        if baseMode == .meeting {
+            ducker.exit()
+            MeetingSpeechCapture.shared.stop()
+        }
         started = false
     }
 
+    func enterMeetingMode() {
+        baseMode = .meeting
+    }
+
+    func leaveMeetingMode() {
+        if baseMode == .meeting {
+            baseMode = .normal
+        }
+    }
+
+    /// Kept for CalendarPlugin hooks — no longer forces mode.
     func reevaluateMeeting() {
-        guard autoMeetingEnabled else {
-            setMeeting(active: false, reason: nil)
-            return
-        }
-        if callProbe.isInCall, let name = callProbe.activeCallAppName {
-            setMeeting(active: true, reason: .call(appName: name))
-            return
-        }
-        if isCalendarMeetingNow() {
-            setMeeting(active: true, reason: .calendar)
-            return
-        }
-        // Hysteresis: delay exit.
-        scheduleMeetingClear()
+        refreshCallContext()
     }
 
-    private func scheduleMeetingClear() {
-        clearMeetingWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                // Re-check before clear.
-                if self.callProbe.isInCall || self.isCalendarMeetingNow() { return }
-                self.setMeeting(active: false, reason: nil)
-            }
+    private func refreshCallContext() {
+        // Prefer frontmost confidence for suggestions.
+        callProbe.refresh()
+        let name = callProbe.suggestedFrontmostCallApp
+        if name != suggestedCallApp {
+            suggestedCallApp = name
         }
-        clearMeetingWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
-    }
-
-    private func setMeeting(active: Bool, reason: MeetingReason?) {
-        if active {
-            clearMeetingWorkItem?.cancel()
-            clearMeetingWorkItem = nil
-        }
-        let was = isMeetingActive
-        isMeetingActive = active
-        meetingReason = active ? reason : nil
-        if active, !was {
-            ducker.enter()
-        } else if !active, was {
-            ducker.exit()
-        }
-        // Legacy bridge
-        MeetingMode.shared.syncFromFocus(
-            enabled: autoMeetingEnabled,
-            meetingNow: active
-        )
+        maybeOfferMeeting()
+        // Keep legacy bridge for ambient dim only when in Meeting mode.
+        MeetingMode.shared.syncFromFocus(enabled: true, meetingNow: isMeetingActive)
         objectWillChange.send()
     }
 
-    // MARK: - Policy helpers (replaces MeetingMode usage)
+    private func maybeOfferMeeting() {
+        guard suggestMeetingOnCall else { return }
+        guard baseMode != .meeting else { return }
+        guard let app = suggestedCallApp else { return }
+        guard !didSuggestMeetingThisSession else { return }
+        didSuggestMeetingThisSession = true
+        emitPeek?(NotchSneakPeek(
+            systemImage: "video.fill",
+            title: "Enter Meeting Mode?",
+            subtitle: "\(app) is open · notes & quiet island",
+            urgency: .high,
+            detail: "Focus · Meeting companion"
+        ))
+    }
+
+    private func handleModeTransition(from old: FocusBaseMode, to new: FocusBaseMode) {
+        let wasMeeting = old == .meeting
+        let isMeeting = new == .meeting
+        if isMeeting, !wasMeeting {
+            meetingEnteredAt = Date()
+            ducker.enter()
+            MeetingNotesStore.shared.ensureSession(
+                calendarTitle: calendarMeetingTitle(),
+                callApp: suggestedCallApp
+            )
+        } else if wasMeeting, !isMeeting {
+            MeetingSpeechCapture.shared.stop()
+            ducker.exit()
+            meetingEnteredAt = nil
+            MeetingNotesStore.shared.endSession()
+        }
+        if new == .trueFocus {
+            FocusAgendaEngine.shared.rebuild()
+        }
+        MeetingMode.shared.syncFromFocus(enabled: true, meetingNow: isMeeting)
+    }
+
+    // MARK: - Policy
 
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
         if peek.style == .media { return false }
-        // During Meeting: suppress low/normal.
-        if isMeetingActive, peek.urgency < .high { return true }
-        // True Focus: suppress low non-agenda noise (media still allowed).
+        if isMeetingActive, peek.urgency < .high {
+            // Allow our own Meeting offer and high urgency.
+            if peek.detail.contains("Meeting companion") { return false }
+            return true
+        }
         if effective == .trueFocus, peek.urgency == .low { return true }
         return false
     }

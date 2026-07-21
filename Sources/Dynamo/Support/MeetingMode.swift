@@ -1,7 +1,6 @@
 import Foundation
 
-/// Legacy facade kept so existing call sites compile while FocusController owns policy.
-/// Prefer `FocusController.shared` for new code.
+/// Legacy facade for media ambient dimming. Prefer `FocusController`.
 @MainActor
 final class MeetingMode: ObservableObject {
     static let shared = MeetingMode()
@@ -13,9 +12,8 @@ final class MeetingMode: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
-            // Keep FocusController in sync when toggled from Settings/menu.
-            if FocusController.shared.autoMeetingEnabled != isEnabled {
-                FocusController.shared.autoMeetingEnabled = isEnabled
+            if FocusController.shared.suggestMeetingOnCall != isEnabled {
+                FocusController.shared.suggestMeetingOnCall = isEnabled
             }
         }
     }
@@ -28,7 +26,6 @@ final class MeetingMode: ObservableObject {
         didSet { UserDefaults.standard.set(quietOnFocus, forKey: Self.quietOnFocusKey) }
     }
 
-    /// Injected by calendar (also mirrored into FocusController).
     var isInActiveMeeting: () -> Bool = { false } {
         didSet {
             FocusController.shared.isCalendarMeetingNow = { [weak self] in
@@ -39,7 +36,6 @@ final class MeetingMode: ObservableObject {
 
     var isFocusActive: () -> Bool = { false }
 
-    /// Live meeting signal from FocusController when available.
     private var focusMeetingNow = false
 
     private init() {
@@ -62,11 +58,6 @@ final class MeetingMode: ObservableObject {
 
     func syncFromFocus(enabled: Bool, meetingNow: Bool) {
         focusMeetingNow = meetingNow
-        if isEnabled != enabled {
-            // Avoid write-loop: set storage without re-entering Focus.
-            UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
-            isEnabled = enabled
-        }
         objectWillChange.send()
     }
 
@@ -76,7 +67,6 @@ final class MeetingMode: ObservableObject {
 
     func shouldDimMediaAmbient() -> Bool {
         guard dimMediaAmbient else { return false }
-        return FocusController.shared.shouldDimMediaAmbient()
-            || (isEnabled && (focusMeetingNow || isInActiveMeeting()))
+        return FocusController.shared.shouldDimMediaAmbient() || focusMeetingNow
     }
 }

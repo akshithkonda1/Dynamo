@@ -34,6 +34,11 @@ final class NotchSneakPeekController: ObservableObject {
             }
     }
 
+    /// Direct path for FocusController suggestions (Meeting offer, Dynamic pulse).
+    func showForFocus(_ content: NotchSneakPeek) {
+        show(content)
+    }
+
     func teardown() {
         cancellable?.cancel()
         cancellable = nil
@@ -48,8 +53,7 @@ final class NotchSneakPeekController: ObservableObject {
     private func show(_ content: NotchSneakPeek) {
         // Meeting Mode: drop low/normal peeks while a calendar event is Now
         // (media track peeks are exempt — see MeetingMode.shouldSuppress).
-        if FocusController.shared.shouldSuppress(peek: content)
-            || MeetingMode.shared.shouldSuppress(peek: content) {
+        if FocusController.shared.shouldSuppress(peek: content) {
             return
         }
 

@@ -63,6 +63,9 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         FocusController.shared.isCalendarMeetingNow = { [weak self] in
             self?.isMeetingNow == true
         }
+        FocusController.shared.calendarMeetingTitle = { [weak self] in
+            self?.ambientEvent?.title
+        }
         provider.start()
         applyProviderSnapshot()
         switch authState {
