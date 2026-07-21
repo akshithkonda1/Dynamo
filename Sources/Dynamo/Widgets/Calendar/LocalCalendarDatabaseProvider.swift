@@ -269,29 +269,7 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
     }
 
     func openNewEvent() {
-        // Calendar’s “new event” deep link varies by macOS; try known schemes then fall back.
-        let candidates = [
-            "ical://ekevent/",
-            "webcal://",
-            "ical://"
-        ]
-        for raw in candidates {
-            if let url = URL(string: raw), NSWorkspace.shared.open(url) {
-                return
-            }
-        }
-        // Last resort: open Calendar and hope user hits ⌘N.
-        openCalendarApp()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            // Synthetic ⌘N into Calendar if it's frontmost.
-            let src = CGEventSource(stateID: .hidSystemState)
-            let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0x2D, keyDown: true) // n
-            let keyUp = CGEvent(keyboardEventSource: src, virtualKey: 0x2D, keyDown: false)
-            keyDown?.flags = .maskCommand
-            keyUp?.flags = .maskCommand
-            keyDown?.post(tap: .cghidEventTap)
-            keyUp?.post(tap: .cghidEventTap)
-        }
+        CalendarNewEventOpener.open()
     }
 
     // MARK: - Snapshot

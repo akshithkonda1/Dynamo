@@ -159,6 +159,10 @@ final class EventKitCalendarProvider: CalendarProvider {
         }
     }
 
+    func openNewEvent() {
+        CalendarNewEventOpener.open()
+    }
+
     private func refreshReminders() {
         guard remindersAuthorized else {
             dueReminders = []

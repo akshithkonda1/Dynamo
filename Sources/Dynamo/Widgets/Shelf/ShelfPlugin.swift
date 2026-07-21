@@ -25,7 +25,7 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
     }
 
     func expandedView() -> AnyView {
-        AnyView(ExpandedShelfView(store: store))
+        AnyView(ExpandedShelfView(plugin: self))
     }
 
     /// Open a system file picker and stash the chosen files.
@@ -36,16 +36,32 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
         panel.allowsMultipleSelection = true
         panel.prompt = "Add to Shelf"
         panel.message = "Choose files or folders to stash on the File Shelf."
+        // Activate so the panel isn't buried under the nonactivating notch.
+        NSApp.activate(ignoringOtherApps: true)
+        // Hold collapse while the modal is up (hover-only would otherwise slam shut).
+        NotificationCenter.default.post(name: .dynamoHoldCollapse, object: true)
+        defer { NotificationCenter.default.post(name: .dynamoHoldCollapse, object: false) }
         guard panel.runModal() == .OK else { return }
         store.add(urls: panel.urls)
     }
 }
 
+extension Notification.Name {
+    /// object: Bool — true begins a collapse hold, false ends it.
+    static let dynamoHoldCollapse = Notification.Name("dynamoHoldCollapse")
+}
+
 // MARK: - Views
 
 private struct ExpandedShelfView: View {
-    @ObservedObject var store: ShelfStore
+    @ObservedObject var plugin: ShelfPlugin
+    @ObservedObject private var store: ShelfStore
     @State private var isDropTargeted = false
+
+    init(plugin: ShelfPlugin) {
+        self.plugin = plugin
+        self._store = ObservedObject(wrappedValue: plugin.store)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceMD) {
@@ -54,8 +70,7 @@ private struct ExpandedShelfView: View {
                 trailing: AnyView(
                     HStack(spacing: 6) {
                         Button {
-                            // Walk up to plugin via notification / direct call from store host
-                            NotificationCenter.default.post(name: .dynamoShelfPickFiles, object: nil)
+                            plugin.pickFiles()
                         } label: {
                             NotchChipLabel(title: "Add", systemImage: "plus")
                         }
@@ -74,6 +89,8 @@ private struct ExpandedShelfView: View {
 
             if store.items.isEmpty {
                 dropHint
+                    .contentShape(Rectangle())
+                    .onTapGesture { plugin.pickFiles() }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -87,18 +104,6 @@ private struct ExpandedShelfView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleProviders(providers)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .dynamoShelfPickFiles)) { _ in
-            // Handled by plugin when attached — Expanded view posts; AppDelegate
-            // isn't involved. Direct open panel here for reliability.
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = true
-            panel.canChooseDirectories = true
-            panel.allowsMultipleSelection = true
-            panel.prompt = "Add to Shelf"
-            if panel.runModal() == .OK {
-                store.add(urls: panel.urls)
-            }
         }
     }
 
@@ -219,8 +224,4 @@ private struct ExpandedShelfView: View {
         }
         return handled
     }
-}
-
-extension Notification.Name {
-    static let dynamoShelfPickFiles = Notification.Name("dynamoShelfPickFiles")
 }

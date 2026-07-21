@@ -211,17 +211,21 @@ private struct ExpandedMediaView: View {
                     .frame(height: 18)
                     timelineBar
                 } else {
-                    NotchEmptyState(
-                        systemImage: "music.note",
-                        title: "Nothing playing",
-                        caption: "Start Music or Spotify — or open \(playerAppName)."
-                    )
-                    Button {
-                        plugin.openConnectedApp()
-                    } label: {
-                        NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Nothing playing")
+                            .font(NotchTheme.body.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textPrimary)
+                        Text("Start Music or Spotify — transport still works.")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Button {
+                            plugin.openConnectedApp()
+                        } label: {
+                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
                 }
 
                 // Always show exact system volume percent (compact by default).

@@ -83,6 +83,19 @@ final class NotchWindowController: ObservableObject {
             registry.$activePluginID
                 .sink { [weak self] _ in self?.activeWidgetDidChange() }
                 .store(in: &cancellables)
+
+            NotificationCenter.default.publisher(for: .dynamoHoldCollapse)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] note in
+                    let hold = (note.object as? Bool) ?? false
+                    if hold {
+                        self?.cancelCollapse()
+                        self?.presentForOverlay()
+                    } else {
+                        self?.overlayDidHide()
+                    }
+                }
+                .store(in: &cancellables)
         } else if let hostingView {
             hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
@@ -172,7 +185,10 @@ final class NotchWindowController: ObservableObject {
             }
         }
         collapseWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: work)
+        // Hover-only (0) still waits a tiny beat so expand/resize mouseExited
+        // noise doesn't slam the tray shut mid-animation.
+        let delay = collapseDelay <= 0 ? 0.12 : collapseDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func cancelCollapse() {
@@ -221,19 +237,26 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Transient overlays
 
+    /// Begin a transient HUD/peek session. Call **once** when a holder starts
+    /// showing (not on every content refresh). Pair with `overlayDidHide()`.
+    /// Multiple holders (HUD + sneak peek) use a refcount so one ending early
+    /// doesn't collapse the other.
     func presentForOverlay() {
-        activeOverlayCount += 1
         cancelRetreat()
         cancelCollapse()
         if !isVisible { showPanel() }
-        if !isExpanded {
+        let wasIdle = activeOverlayCount == 0
+        activeOverlayCount += 1
+        if wasIdle, !isExpanded {
             suppressHoverExitUntil = Date().addingTimeInterval(0.5)
             animateFrame(to: overlaySize)
         }
     }
 
+    /// End one overlay holder. Safe if already zero (e.g. teardown double-call).
     func overlayDidHide() {
-        activeOverlayCount = max(0, activeOverlayCount - 1)
+        guard activeOverlayCount > 0 else { return }
+        activeOverlayCount -= 1
         guard activeOverlayCount == 0 else { return }
         if mouseIsNearPanel() {
             // Cursor still on the notch — keep or expand rather than snap shut.

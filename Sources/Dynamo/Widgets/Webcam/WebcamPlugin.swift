@@ -54,8 +54,14 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
 
 private struct ExpandedWebcamView: View {
     @ObservedObject var plugin: WebcamPlugin
+    /// Must observe the controller separately — it's its own ObservableObject;
+    /// watching only `plugin` left isRunning/freeze/snap UI stuck.
+    @ObservedObject private var controller: WebcamCaptureController
 
-    private var controller: WebcamCaptureController { plugin.controller }
+    init(plugin: WebcamPlugin) {
+        self.plugin = plugin
+        self._controller = ObservedObject(wrappedValue: plugin.controller)
+    }
 
     private var cornerRadius: CGFloat {
         plugin.isCircular ? 1000 : 13
@@ -295,24 +301,30 @@ private struct ExpandedWebcamView: View {
 
 private struct WebcamSettingsView: View {
     @ObservedObject var plugin: WebcamPlugin
+    @ObservedObject private var controller: WebcamCaptureController
+
+    init(plugin: WebcamPlugin) {
+        self.plugin = plugin
+        self._controller = ObservedObject(wrappedValue: plugin.controller)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Mirror video (selfie flip)", isOn: Binding(
-                get: { plugin.controller.isMirrored },
-                set: { plugin.controller.isMirrored = $0 }
+                get: { controller.isMirrored },
+                set: { controller.isMirrored = $0 }
             ))
             Toggle("Circular mirror", isOn: Binding(
                 get: { plugin.isCircular },
                 set: { plugin.isCircular = $0 }
             ))
 
-            if plugin.controller.availableDevices.count > 1 {
+            if controller.availableDevices.count > 1 {
                 Picker("Camera", selection: Binding(
-                    get: { plugin.controller.selectedDeviceID ?? "" },
-                    set: { plugin.controller.selectDevice(id: $0) }
+                    get: { controller.selectedDeviceID ?? "" },
+                    set: { controller.selectDevice(id: $0) }
                 )) {
-                    ForEach(plugin.controller.availableDevices) { device in
+                    ForEach(controller.availableDevices) { device in
                         Text(device.name).tag(device.id)
                     }
                 }
@@ -335,18 +347,18 @@ private struct WebcamSettingsView: View {
     }
 
     private var statusColor: Color {
-        switch plugin.controller.authState {
-        case .authorized: return plugin.controller.isRunning ? .green : .yellow
+        switch controller.authState {
+        case .authorized: return controller.isRunning ? .green : .yellow
         case .denied, .unavailable: return .red
         case .notDetermined: return .orange
         }
     }
 
     private var statusText: String {
-        switch plugin.controller.authState {
+        switch controller.authState {
         case .authorized:
-            if plugin.controller.isFrozen { return "Frame frozen" }
-            return plugin.controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
+            if controller.isFrozen { return "Frame frozen" }
+            return controller.isRunning ? "Camera running — tap mirror to stop" : "Tap mirror to start"
         case .denied: return "Camera access denied"
         case .unavailable: return "No camera available"
         case .notDetermined: return "Camera permission not requested yet"

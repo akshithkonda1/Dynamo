@@ -42,6 +42,11 @@ struct NotchContentView: View {
             }
         }
         .clipShape(NotchShape(cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed))
+        .shadow(
+            color: controller.isExpanded ? Color.black.opacity(0.45) : .clear,
+            radius: controller.isExpanded ? 18 : 0,
+            y: controller.isExpanded ? 8 : 0
+        )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
         .animation(NotchTheme.contentSpring, value: hud.state)
@@ -116,14 +121,16 @@ struct NotchContentView: View {
 
     @ViewBuilder
     private func trayButton(for plugin: any NotchWidgetPlugin) -> some View {
+        // Match against resolved active plugin (falls back to first when id is nil)
+        // so the tray highlight never desyncs from visible content.
+        let isActive = registry.activePlugin?.id == plugin.id
         TrayIconButton(
             systemImage: plugin.systemImage,
             displayName: plugin.displayName,
-            isActive: registry.activePluginID == plugin.id
+            isActive: isActive
         ) {
             // Re-tap an already-active player widget → open Music/Spotify.
-            if registry.activePluginID == plugin.id,
-               let opener = plugin as? any PlayerAppOpening {
+            if isActive, let opener = plugin as? any PlayerAppOpening {
                 opener.openPlayerApp()
             } else {
                 registry.activePluginID = plugin.id
@@ -143,18 +150,14 @@ private struct TrayIconButton: View {
     let action: () -> Void
 
     var body: some View {
+        // Real Button + notchIcon style so the first click on a nonactivating
+        // panel lands (plain Image + tiny clear hit target often ate the first press).
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: isActive ? .bold : .semibold))
                 .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                .frame(width: 28, height: 28)
-                .background(
-                    Circle()
-                        .fill(isActive ? NotchTheme.chipFillActive : Color.clear)
-                )
         }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
+        .buttonStyle(.notchIcon(diameter: 30, prominent: isActive))
         .help(displayName)
         .accessibilityLabel(displayName)
         .accessibilityAddTraits(isActive ? .isSelected : [])

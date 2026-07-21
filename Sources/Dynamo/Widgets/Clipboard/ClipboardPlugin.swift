@@ -42,18 +42,24 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 
 private struct ExpandedClipboardView: View {
     @ObservedObject var plugin: ClipboardPlugin
+    @ObservedObject private var store: ClipboardStore
+
+    init(plugin: ClipboardPlugin) {
+        self.plugin = plugin
+        self._store = ObservedObject(wrappedValue: plugin.store)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             NotchSectionHeader("Pinned")
-            if plugin.store.snippets.isEmpty && !plugin.isAddingSnippet {
+            if store.snippets.isEmpty && !plugin.isAddingSnippet {
                 NotchEmptyState(
                     systemImage: "pin",
                     title: "No pinned snippets",
                     caption: "Pin from history or add one below."
                 )
             } else {
-                ForEach(plugin.store.snippets) { snippet in
+                ForEach(store.snippets) { snippet in
                     snippetRow(snippet)
                 }
             }
@@ -73,17 +79,17 @@ private struct ExpandedClipboardView: View {
 
             NotchSectionHeader(
                 "History",
-                trailing: plugin.store.history.isEmpty
+                trailing: store.history.isEmpty
                     ? nil
                     : AnyView(
-                        Button("Clear") { plugin.store.clearHistory() }
+                        Button("Clear") { store.clearHistory() }
                             .buttonStyle(.plain)
                             .font(NotchTheme.micro)
                             .foregroundStyle(NotchTheme.textTertiary)
                     )
             )
 
-            if plugin.store.history.isEmpty {
+            if store.history.isEmpty {
                 NotchEmptyState(
                     systemImage: "doc.on.clipboard",
                     title: "Clipboard history is empty",
@@ -92,7 +98,7 @@ private struct ExpandedClipboardView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(plugin.store.history) { item in
+                        ForEach(store.history) { item in
                             historyRow(item)
                         }
                     }
@@ -123,7 +129,7 @@ private struct ExpandedClipboardView: View {
             .buttonStyle(.plain)
 
             Button {
-                plugin.store.deleteSnippet(id: snippet.id)
+                store.deleteSnippet(id: snippet.id)
             } label: {
                 Image(systemName: "trash")
                     .font(NotchTheme.caption)
@@ -151,7 +157,7 @@ private struct ExpandedClipboardView: View {
             .help("Copy again")
 
             Button {
-                plugin.store.pinCurrentOrText(item.text)
+                store.pinCurrentOrText(item.text)
             } label: {
                 Image(systemName: "pin")
                     .font(NotchTheme.caption)
@@ -161,7 +167,7 @@ private struct ExpandedClipboardView: View {
             .help("Pin as snippet")
 
             Button {
-                plugin.store.removeHistoryItem(id: item.id)
+                store.removeHistoryItem(id: item.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))

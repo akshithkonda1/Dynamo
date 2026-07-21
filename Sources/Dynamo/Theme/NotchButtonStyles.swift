@@ -37,7 +37,9 @@ private struct NotchIconButtonBody: View {
 
     private var fillColor: Color {
         if prominent { return NotchTheme.chipFillActive }
-        return isHovering ? NotchTheme.chipFillHover : .clear
+        // Use a nearly-invisible fill when idle so the hit target stays solid
+        // for first-click on nonactivating panels (clear backgrounds miss hits).
+        return isHovering ? NotchTheme.chipFillHover : Color.white.opacity(0.001)
     }
 }
 

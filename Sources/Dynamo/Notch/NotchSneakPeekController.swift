@@ -16,6 +16,8 @@ final class NotchSneakPeekController: ObservableObject {
     private var hideWorkItem: DispatchWorkItem?
     private weak var notch: NotchWindowController?
     private var cancellable: AnyCancellable?
+    /// True while this controller owns the overlay session (avoids refcount skew).
+    private var holdingOverlay = false
 
     /// How long the pill stays up before auto-hiding. Critical peeks (e.g. a
     /// severe weather alert) linger longer than a routine one (a track change,
@@ -40,16 +42,28 @@ final class NotchSneakPeekController: ObservableObject {
         cancellable?.cancel()
         cancellable = nil
         hideWorkItem?.cancel()
+        if holdingOverlay {
+            holdingOverlay = false
+            notch?.overlayDidHide()
+        }
         peek = nil
     }
 
     private func show(_ content: NotchSneakPeek) {
         peek = content
-        notch?.presentForOverlay()
+        // Claim overlay once per session; later peeks only refresh content + timer.
+        if !holdingOverlay {
+            holdingOverlay = true
+            notch?.presentForOverlay()
+        }
         hideWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.peek = nil
-            self?.notch?.overlayDidHide()
+            guard let self else { return }
+            self.peek = nil
+            if self.holdingOverlay {
+                self.holdingOverlay = false
+                self.notch?.overlayDidHide()
+            }
         }
         hideWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + displayDuration(for: content.emphasis), execute: work)

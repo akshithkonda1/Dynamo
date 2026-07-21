@@ -45,17 +45,25 @@ struct WebcamPreviewView: NSViewRepresentable {
             fatalError("init(coder:) has not been implemented")
         }
 
+        private var desiredMirror = true
+
         override func layout() {
             super.layout()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             previewLayer.frame = bounds
             CATransaction.commit()
+            // Connection often appears only after startRunning — re-apply here.
+            applyMirroring(desiredMirror)
         }
 
         func applyMirroring(_ mirrored: Bool) {
+            desiredMirror = mirrored
             guard let connection = previewLayer.connection else {
-                // Connection may appear after session starts — retry on layout.
+                // Fall back to layer transform until the connection exists.
+                previewLayer.setAffineTransform(
+                    mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity
+                )
                 return
             }
             if connection.isVideoMirroringSupported {

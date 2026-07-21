@@ -31,9 +31,15 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
 
 private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
+    @ObservedObject private var store: ChecklistStore
 
-    private var doneCount: Int { plugin.store.items.filter(\.isDone).count }
-    private var totalCount: Int { plugin.store.items.count }
+    init(plugin: ChecklistPlugin) {
+        self.plugin = plugin
+        self._store = ObservedObject(wrappedValue: plugin.store)
+    }
+
+    private var doneCount: Int { store.items.filter(\.isDone).count }
+    private var totalCount: Int { store.items.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -48,7 +54,7 @@ private struct ExpandedChecklistView: View {
                     : nil
             )
 
-            if plugin.store.items.isEmpty {
+            if store.items.isEmpty {
                 NotchEmptyState(
                     systemImage: "checklist",
                     title: "No tasks yet",
@@ -57,13 +63,13 @@ private struct ExpandedChecklistView: View {
             } else {
                 // List + onMove enables drag reorder on macOS without an edit mode.
                 List {
-                    ForEach(plugin.store.items) { item in
+                    ForEach(store.items) { item in
                         row(item)
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                     }
                     .onMove { indices, newOffset in
-                        plugin.store.move(fromOffsets: indices, toOffset: newOffset)
+                        store.move(fromOffsets: indices, toOffset: newOffset)
                     }
                 }
                 .listStyle(.plain)
@@ -100,7 +106,7 @@ private struct ExpandedChecklistView: View {
                 .foregroundStyle(NotchTheme.textQuaternary)
 
             Button {
-                plugin.store.toggle(id: item.id)
+                store.toggle(id: item.id)
             } label: {
                 Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 14))
@@ -116,7 +122,7 @@ private struct ExpandedChecklistView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
-                plugin.store.remove(id: item.id)
+                store.remove(id: item.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))

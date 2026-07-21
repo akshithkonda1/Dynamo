@@ -68,13 +68,11 @@ final class WebcamCaptureController: ObservableObject {
             isMirrored = UserDefaults.standard.bool(forKey: Self.mirrorKey)
         }
         selectedDeviceID = UserDefaults.standard.string(forKey: Self.deviceKey)
-        // Seed from remembered OS grant so we don't flash "Requesting…" every launch.
         switch PermissionsStore.shared.status(for: .camera) {
         case .granted: authState = .authorized
         case .denied: authState = .denied
         default: break
         }
-        // Sync published auth from system without prompting yet.
         refreshAuthState(requestIfNeeded: false)
         refreshDevices()
     }
@@ -84,18 +82,14 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     func start() {
-        // Cancel a pending stop from a transient onDisappear.
         stopWorkItem?.cancel()
         stopWorkItem = nil
-        isFrozen = false
-        frozenImage = nil
+        // Don't clear freeze on soft restart — only explicit stopNow does.
 
-        // Always trust live OS status (not only remembered grants).
         refreshAuthState(requestIfNeeded: false)
 
         switch authState {
         case .notDetermined:
-            // First open of the Webcam tab — prompt once, then start on grant.
             refreshAuthState(requestIfNeeded: true)
             return
         case .denied, .unavailable:
@@ -120,7 +114,6 @@ final class WebcamCaptureController: ObservableObject {
         }
     }
 
-    /// Immediate stop (plugin disable / app quit).
     func stopNow() {
         stopWorkItem?.cancel()
         stopWorkItem = nil
@@ -129,8 +122,6 @@ final class WebcamCaptureController: ObservableObject {
         performStop()
     }
 
-    /// Soft stop — waits briefly so expand/collapse / view identity churn
-    /// doesn't kill a session the user still wants.
     func stop() {
         stopWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -152,8 +143,6 @@ final class WebcamCaptureController: ObservableObject {
         }
     }
 
-    /// Syncs `authState` from the OS. Set `requestIfNeeded` only when the user
-    /// is actively opening Webcam — never from plugin registration / app launch.
     func refreshAuthState(requestIfNeeded: Bool) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -185,19 +174,14 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     func refreshDevices() {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
-            mediaType: .video,
-            position: .unspecified
-        )
-        availableDevices = discovery.devices.map {
+        let devices = Self.discoverDevices()
+        availableDevices = devices.map {
             WebcamDeviceOption(id: $0.uniqueID, name: $0.localizedName)
         }
         if let selected = selectedDeviceID,
            availableDevices.contains(where: { $0.id == selected }) {
             return
         }
-        // Prefer system default, else first listed.
         if let def = AVCaptureDevice.default(for: .video) {
             selectedDeviceID = def.uniqueID
         } else {
@@ -209,11 +193,8 @@ final class WebcamCaptureController: ObservableObject {
         guard id != selectedDeviceID else { return }
         selectedDeviceID = id
         UserDefaults.standard.set(id, forKey: Self.deviceKey)
-        let wasRunning = isRunning
-        reconfigureInput()
-        if wasRunning {
-            start()
-        }
+        let wasRunning = isRunning || session.isRunning
+        reconfigureInput(restart: wasRunning)
     }
 
     func setZoom(_ factor: CGFloat) {
@@ -233,7 +214,6 @@ final class WebcamCaptureController: ObservableObject {
         }
     }
 
-    /// Snapshot to pasteboard; optionally also save a PNG on the Desktop.
     func snapshotToPasteboard(saveToDesktop: Bool = false) {
         captureSnapshot { image in
             guard let image else { return }
@@ -247,15 +227,23 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     private func captureSnapshot(completion: @escaping (NSImage?) -> Void) {
-        guard authState == .authorized, isRunning, !isFrozen else {
+        if isFrozen, let frozenImage {
             completion(frozenImage)
+            return
+        }
+        guard authState == .authorized, isRunning else {
+            completion(nil)
             return
         }
         guard session.outputs.contains(where: { $0 === photoOutput }) else {
             completion(nil)
             return
         }
+
         let settings = AVCapturePhotoSettings()
+        if photoOutput.availablePhotoCodecTypes.contains(.jpeg) {
+            // Prefer JPEG when listed — more reliable fileDataRepresentation.
+        }
         let delegate = PhotoCaptureDelegate { [weak self] image in
             Task { @MainActor in
                 self?.photoDelegate = nil
@@ -263,10 +251,10 @@ final class WebcamCaptureController: ObservableObject {
             }
         }
         photoDelegate = delegate
-        // Keep the delegate alive; capturePhoto is async on the session queue.
         nonisolated(unsafe) let output = photoOutput
         nonisolated(unsafe) let retained = delegate
         sessionQueue.async {
+            // Capture must run on the session queue while the session is running.
             output.capturePhoto(with: settings, delegate: retained)
         }
     }
@@ -282,32 +270,38 @@ final class WebcamCaptureController: ObservableObject {
         try? data.write(to: desktop.appendingPathComponent(name))
     }
 
-    private func reconfigureInput() {
-        configured = false
-        session.beginConfiguration()
-        if let videoInput {
-            session.removeInput(videoInput)
-            self.videoInput = nil
+    private func reconfigureInput(restart: Bool) {
+        // Stop before swapping inputs — mid-session reconfigure races the queue.
+        stopWorkItem?.cancel()
+        stopWorkItem = nil
+        nonisolated(unsafe) let session = self.session
+        sessionQueue.async { [weak self] in
+            if session.isRunning {
+                session.stopRunning()
+            }
+            Task { @MainActor in
+                guard let self else { return }
+                self.isRunning = false
+                self.configured = false
+                self.session.beginConfiguration()
+                if let videoInput = self.videoInput {
+                    self.session.removeInput(videoInput)
+                    self.videoInput = nil
+                }
+                self.session.commitConfiguration()
+                self.configureIfNeeded()
+                if restart, self.authState == .authorized {
+                    self.start()
+                }
+            }
         }
-        session.commitConfiguration()
-        configureIfNeeded()
     }
 
     private func configureIfNeeded() {
         if configured, videoInput != nil { return }
 
         refreshDevices()
-        let device: AVCaptureDevice?
-        if let id = selectedDeviceID {
-            device = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
-                mediaType: .video,
-                position: .unspecified
-            ).devices.first(where: { $0.uniqueID == id })
-                ?? AVCaptureDevice.default(for: .video)
-        } else {
-            device = AVCaptureDevice.default(for: .video)
-        }
+        let device = Self.device(for: selectedDeviceID)
 
         guard let device,
               let input = try? AVCaptureDeviceInput(device: device)
@@ -318,7 +312,12 @@ final class WebcamCaptureController: ObservableObject {
         }
 
         session.beginConfiguration()
-        session.sessionPreset = .medium
+        // Higher quality stills + mirror preview.
+        if session.canSetSessionPreset(.high) {
+            session.sessionPreset = .high
+        } else {
+            session.sessionPreset = .medium
+        }
         if let existing = videoInput {
             session.removeInput(existing)
         }
@@ -331,8 +330,24 @@ final class WebcamCaptureController: ObservableObject {
             session.addOutput(photoOutput)
         }
         session.commitConfiguration()
-        configured = true
-        authState = .authorized
+        configured = videoInput != nil
+        authState = videoInput != nil ? .authorized : .unavailable
+    }
+
+    private static func discoverDevices() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
+            mediaType: .video,
+            position: .unspecified
+        ).devices
+    }
+
+    private static func device(for id: String?) -> AVCaptureDevice? {
+        let devices = discoverDevices()
+        if let id, let match = devices.first(where: { $0.uniqueID == id }) {
+            return match
+        }
+        return AVCaptureDevice.default(for: .video) ?? devices.first
     }
 }
 

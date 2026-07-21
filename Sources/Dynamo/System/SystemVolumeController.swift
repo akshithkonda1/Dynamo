@@ -86,6 +86,12 @@ final class SystemVolumeController: ObservableObject {
         setMuted(!isMuted)
     }
 
+    /// Quiet `onExternalChange` for a short window (volume-key HUD path so
+    /// poll + key monitor don't both fire the notch HUD).
+    func suppressExternalAnnouncements(for seconds: TimeInterval = 0.5) {
+        suppressExternalUntil = Date().addingTimeInterval(seconds)
+    }
+
     /// One keyboard-like step (~6–7%).
     func nudge(by delta: Float) {
         let step = Int((delta * 100).rounded())

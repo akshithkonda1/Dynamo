@@ -79,6 +79,8 @@ extension CalendarEventItem {
 
     func phase(reference now: Date = Date()) -> Phase {
         if end <= now { return .ended }
+        // All-day events span the whole day — don't stamp "Now"/"Soon" chips.
+        if isAllDay { return .later }
         if start <= now { return .now }
         let until = start.timeIntervalSince(now)
         if until <= 30 * 60 { return .soon }

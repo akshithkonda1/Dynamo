@@ -28,7 +28,8 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     }
 
     func expandedView() -> AnyView {
-        AnyView(ExpandedBatteryView(snapshot: snapshot))
+        // Pass plugin so the expanded view observes live battery updates.
+        AnyView(ExpandedBatteryView(plugin: self))
     }
 
     var expandedContentHeight: CGFloat { 140 }
@@ -36,13 +37,15 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     // MARK: Ambient
 
     var isAmbientActive: Bool {
-        snapshot.isPresent && (snapshot.percent <= 20 || snapshot.isCharging)
+        // Only surface low battery in the collapsed strip — constant charging
+        // ambient was noise when media/calendar weren't active.
+        snapshot.isPresent && snapshot.percent <= 20
     }
 
     var ambientPriority: Int {
-        if snapshot.isPresent, snapshot.percent <= 15 { return 90 }
+        if snapshot.isPresent, snapshot.percent <= 10 { return 90 }
+        if snapshot.isPresent, snapshot.percent <= 15 { return 80 }
         if snapshot.isPresent, snapshot.percent <= 20 { return 70 }
-        if snapshot.isCharging { return 25 }
         return 10
     }
 
@@ -88,7 +91,9 @@ private struct AmbientBatteryView: View {
 // MARK: - Expanded
 
 private struct ExpandedBatteryView: View {
-    let snapshot: BatterySnapshot
+    @ObservedObject var plugin: BatteryPlugin
+
+    private var snapshot: BatterySnapshot { plugin.snapshot }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceMD) {

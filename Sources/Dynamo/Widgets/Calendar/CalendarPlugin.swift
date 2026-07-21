@@ -27,12 +27,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         self.provider = resolved
         resolved.onChange = { [weak self] in
             guard let self else { return }
-            // Drop fully ended events from the live list.
-            let now = Date()
-            self.events = self.provider.upcoming.filter { $0.end > now }
-            self.dueReminders = self.provider.dueReminders
-            self.authState = self.provider.authorizationState
-            self.remindersAuthState = self.provider.remindersAuthState
+            self.applyProviderSnapshot()
             self.checkUpcomingEvents()
             self.checkDueReminders()
         }
@@ -66,16 +61,22 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     func start() {
         provider.start()
-        events = provider.upcoming
-        dueReminders = provider.dueReminders
-        authState = provider.authorizationState
-        remindersAuthState = provider.remindersAuthState
+        applyProviderSnapshot()
         // Local DB path: requestAccess just re-checks file readability (no TCC).
         if authState != .authorized {
             Task { await provider.requestAccess() }
         } else {
             provider.refresh()
         }
+    }
+
+    /// Drop ended events immediately so the tray never flashes stale rows.
+    private func applyProviderSnapshot() {
+        let now = Date()
+        events = provider.upcoming.filter { $0.end > now }
+        dueReminders = provider.dueReminders
+        authState = provider.authorizationState
+        remindersAuthState = provider.remindersAuthState
     }
 
     func stop() {
