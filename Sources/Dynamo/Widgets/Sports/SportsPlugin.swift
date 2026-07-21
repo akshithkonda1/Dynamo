@@ -46,10 +46,20 @@ private struct AmbientSportsView: View {
                 .fill(store.liveFollowed != nil ? NotchTheme.positive : NotchTheme.textQuaternary)
                 .frame(width: 6, height: 6)
             if let live = store.liveFollowed {
-                Text("\(live.displayAway) \(live.awayScore ?? "")–\(live.homeScore ?? "") \(live.displayHome)")
-                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
+                Text(live.league.shortTitle)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(NotchTheme.textTertiary)
+                if let score = live.scoreLine {
+                    Text("\(live.displayAway) \(score) \(live.displayHome)")
+                        .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                } else {
+                    Text("\(live.displayAway) @ \(live.displayHome)")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                }
             } else {
                 Text("Sports")
                     .font(NotchTheme.micro.weight(.semibold))
@@ -75,13 +85,16 @@ private struct ExpandedSportsView: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             header
+            categoryRow
             leagueChips
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 5) {
                     if store.currentEvents.isEmpty {
                         empty
+                    } else if store.browseMode == .liveAll {
+                        section(title: "Live now", events: store.liveEvents, accent: NotchTheme.positive)
                     } else {
                         section(title: "Live", events: store.liveEvents, accent: NotchTheme.positive)
                         section(title: "Upcoming", events: store.upcomingEvents, accent: NotchTheme.mediaGlow)
@@ -102,13 +115,14 @@ private struct ExpandedSportsView: View {
                     .foregroundStyle(NotchTheme.textTertiary)
                     .textCase(.uppercase)
                     .tracking(0.7)
-                Text(store.selectedLeague.title)
+                Text(subtitle)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if store.liveCount > 0 {
-                Text("\(store.liveCount) live")
+            if store.globalLiveCount > 0 {
+                Text("\(store.globalLiveCount) live")
                     .font(.system(size: 9, weight: .bold, design: .rounded))
                     .foregroundStyle(NotchTheme.positive)
                     .padding(.horizontal, 7)
@@ -118,54 +132,110 @@ private struct ExpandedSportsView: View {
             if store.isLoading {
                 ProgressView().controlSize(.small).scaleEffect(0.65)
             }
-            Button { store.refresh(league: store.selectedLeague) } label: {
+            Button { store.refreshCurrent() } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchTheme.textTertiary)
             }
             .buttonStyle(.notchIcon(diameter: 22))
-            .help("Refresh")
+            .help("Refresh scores")
+        }
+    }
+
+    private var subtitle: String {
+        switch store.browseMode {
+        case .liveAll: return "All live · multi-league"
+        case .league(let l): return "\(l.title) · free ESPN feed"
+        }
+    }
+
+    private var categoryRow: some View {
+        HStack(spacing: 5) {
+            ForEach(SportsCategory.allCases) { cat in
+                let selected = store.categoryFilter == cat
+                Button {
+                    store.categoryFilter = cat
+                } label: {
+                    Text(cat.title)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textQuaternary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(selected ? Color.white.opacity(0.12) : Color.white.opacity(0.04))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+            Button {
+                store.followOnly.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: store.followOnly ? "star.fill" : "star")
+                        .font(.system(size: 8, weight: .bold))
+                    Text("Following")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(store.followOnly ? NotchTheme.caution : NotchTheme.textQuaternary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(store.followOnly ? NotchTheme.caution.opacity(0.14) : Color.white.opacity(0.04))
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
     private var leagueChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 5) {
-                ForEach(SportsLeague.allCases) { league in
-                    let selected = store.selectedLeague == league
-                    Button { store.select(league) } label: {
-                        Text(league.title)
-                            .font(NotchTheme.micro.weight(.semibold))
-                            .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(selected ? NotchTheme.chipFillActive : NotchTheme.chipFill)
-                            )
-                    }
-                    .buttonStyle(.plain)
+                // All Live aggregate
+                chip(
+                    title: "LIVE",
+                    selected: store.browseMode == .liveAll,
+                    accent: NotchTheme.positive
+                ) {
+                    store.selectLiveAll()
                 }
-                Button {
-                    store.followOnly.toggle()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: store.followOnly ? "star.fill" : "star")
-                            .font(.system(size: 8, weight: .bold))
-                        Text("Following")
-                            .font(NotchTheme.micro.weight(.semibold))
+
+                ForEach(store.chipLeagues) { league in
+                    chip(
+                        title: league.shortTitle,
+                        selected: store.selectedLeague == league,
+                        accent: nil
+                    ) {
+                        store.select(league)
                     }
-                    .foregroundStyle(store.followOnly ? NotchTheme.caution : NotchTheme.textTertiary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(store.followOnly ? NotchTheme.caution.opacity(0.15) : NotchTheme.chipFill)
-                    )
                 }
-                .buttonStyle(.plain)
             }
         }
+    }
+
+    private func chip(title: String, selected: Bool, accent: Color?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(
+                    selected
+                        ? (accent ?? NotchTheme.textPrimary)
+                        : NotchTheme.textTertiary
+                )
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            selected
+                                ? (accent?.opacity(0.16) ?? NotchTheme.chipFillActive)
+                                : NotchTheme.chipFill
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -176,7 +246,7 @@ private struct ExpandedSportsView: View {
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .padding(.top, 2)
             ForEach(events) { event in
-                eventRow(event, accent: accent)
+                eventRow(event)
             }
         }
     }
@@ -189,33 +259,33 @@ private struct ExpandedSportsView: View {
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(Color.white.opacity(0.05)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.isLoading ? "Loading scores…" : "No games in this window")
+                Text(store.isLoading ? "Loading scores…" : "No games right now")
                     .font(NotchTheme.caption.weight(.medium))
                     .foregroundStyle(NotchTheme.textSecondary)
-                Text("Showing yesterday → tomorrow · free ESPN feed")
+                Text("Try LIVE, another league, or US / Soccer filters")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
     }
 
     private var footerMeta: some View {
         Group {
-            if let err = store.lastError {
+            if let err = store.lastError, store.currentEvents.isEmpty {
                 Text(err)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             } else if let updated = store.lastUpdated {
-                Text("Updated \(Self.timeFormatter.string(from: updated))")
+                Text("Updated \(Self.timeFormatter.string(from: updated)) · \(store.chipLeagues.count)+ leagues")
                     .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textQuaternary.opacity(0.8))
+                    .foregroundStyle(NotchTheme.textQuaternary.opacity(0.85))
             }
         }
     }
 
-    private func eventRow(_ event: SportsEvent, accent: Color) -> some View {
+    private func eventRow(_ event: SportsEvent) -> some View {
         let live = event.isLive
         return Button {
             if let s = event.linkURL, let url = URL(string: s) {
@@ -225,18 +295,26 @@ private struct ExpandedSportsView: View {
             HStack(alignment: .center, spacing: 8) {
                 statusPill(event.status)
 
-                if event.league != .f1 {
+                // League badge when browsing All Live
+                if store.browseMode == .liveAll {
+                    Text(event.league.shortTitle)
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .frame(width: 36, alignment: .leading)
+                }
+
+                if !isHeadlineSport(event.league) {
                     logoStack(event)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    if event.league == .f1, let headline = event.headlineScore {
+                    if isHeadlineSport(event.league), let headline = event.headlineScore {
                         Text(headline)
                             .font(NotchTheme.caption.weight(.medium))
                             .foregroundStyle(NotchTheme.textPrimary)
                             .lineLimit(2)
                     } else {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Text("\(event.displayAway) @ \(event.displayHome)")
                                 .font(NotchTheme.caption.weight(.medium))
                                 .foregroundStyle(NotchTheme.textPrimary)
@@ -247,9 +325,9 @@ private struct ExpandedSportsView: View {
                                     .foregroundStyle(NotchTheme.caution)
                             }
                         }
-                        HStack(spacing: 8) {
-                            if let a = event.awayScore, let h = event.homeScore {
-                                Text("\(a) – \(h)")
+                        HStack(spacing: 7) {
+                            if let score = event.scoreLine {
+                                Text(score)
                                     .font(NotchTheme.body.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(live ? NotchTheme.positive : NotchTheme.textSecondary)
                             } else if let start = event.startDate, event.status == .scheduled {
@@ -273,7 +351,7 @@ private struct ExpandedSportsView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.white.opacity(live ? 0.08 : 0.035))
@@ -296,9 +374,19 @@ private struct ExpandedSportsView: View {
             if let abb = event.homeAbbrev {
                 Button("Follow \(abb)") { store.toggleFollow(teamName: abb) }
             }
+            if let abb = event.awayAbbrev {
+                Button("Follow \(abb)") { store.toggleFollow(teamName: abb) }
+            }
             if let s = event.linkURL, let url = URL(string: s) {
                 Button("Open in Browser") { NSWorkspace.shared.open(url) }
             }
+        }
+    }
+
+    private func isHeadlineSport(_ league: SportsLeague) -> Bool {
+        switch league {
+        case .f1, .pga, .ufc, .tennis: return true
+        default: return false
         }
     }
 
@@ -350,6 +438,6 @@ private struct ExpandedSportsView: View {
         return Text(status.label)
             .font(.system(size: 8, weight: .bold, design: .rounded))
             .foregroundStyle(color)
-            .frame(width: 40, alignment: .leading)
+            .frame(width: 36, alignment: .leading)
     }
 }

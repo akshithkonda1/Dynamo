@@ -5,16 +5,19 @@ final class SportsStore: ObservableObject {
     static let shared = SportsStore()
 
     @Published private(set) var eventsByLeague: [SportsLeague: [SportsEvent]] = [:]
+    @Published private(set) var liveAllEvents: [SportsEvent] = []
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
     @Published private(set) var lastUpdated: Date?
-    @Published var selectedLeague: SportsLeague = .nba
+    @Published var browseMode: SportsBrowseMode = .league(.nba)
+    @Published var categoryFilter: SportsCategory = .all
     @Published var followOnly = false
     @Published var follow = SportsFollowList(teamNames: [])
 
     private let client = ESPNScoreboardClient()
     private var timer: Timer?
     private let followKey = "dynamo.sports.follow"
+    private let leagueKey = "dynamo.sports.selectedLeague"
     private let cacheDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
@@ -32,16 +35,26 @@ final class SportsStore: ObservableObject {
            let decoded = try? JSONDecoder().decode(SportsFollowList.self, from: data) {
             follow = decoded
         }
-        loadCache(for: .nba)
+        if let raw = UserDefaults.standard.string(forKey: leagueKey),
+           let league = SportsLeague(rawValue: raw) {
+            browseMode = .league(league)
+            loadCache(for: league)
+        } else {
+            loadCache(for: .nba)
+        }
+    }
+
+    var selectedLeague: SportsLeague? {
+        if case .league(let l) = browseMode { return l }
+        return nil
     }
 
     func start() {
-        refresh(league: selectedLeague)
+        refreshCurrent()
+        // Warm a few high-traffic boards in background.
+        Task { await prefetchCore() }
         let t = Timer(timeInterval: 35, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.refresh(league: self.selectedLeague)
-            }
+            Task { @MainActor in self?.refreshCurrent() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -52,43 +65,89 @@ final class SportsStore: ObservableObject {
         timer = nil
     }
 
+    func selectLiveAll() {
+        browseMode = .liveAll
+        refreshCurrent()
+    }
+
     func select(_ league: SportsLeague) {
-        selectedLeague = league
+        browseMode = .league(league)
+        UserDefaults.standard.set(league.rawValue, forKey: leagueKey)
         if eventsByLeague[league] == nil {
             loadCache(for: league)
         }
-        refresh(league: league)
+        refreshCurrent()
+    }
+
+    func refreshCurrent() {
+        switch browseMode {
+        case .liveAll:
+            refreshLiveAll()
+        case .league(let league):
+            refresh(league: league)
+        }
     }
 
     func refresh(league: SportsLeague) {
         isLoading = true
         lastError = nil
         Task {
-            do {
-                let events = try await client.fetchEvents(league: league)
-                await MainActor.run {
-                    self.eventsByLeague[league] = Array(events.prefix(48))
-                    self.isLoading = false
-                    self.lastUpdated = Date()
-                    self.saveCache(events, league: league)
-                    self.detectChanges(events)
+            let events = await client.fetchEvents(league: league)
+            await MainActor.run {
+                self.eventsByLeague[league] = Array(events.prefix(56))
+                self.isLoading = false
+                self.lastUpdated = Date()
+                if events.isEmpty {
+                    self.lastError = self.eventsByLeague[league]?.isEmpty == false ? nil : "No games in window"
+                } else {
+                    self.lastError = nil
                 }
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.lastError = "Scores unavailable"
-                    // Keep cache visible
+                self.saveCache(events, league: league)
+                self.detectChanges(events)
+            }
+        }
+    }
+
+    func refreshLiveAll() {
+        isLoading = true
+        lastError = nil
+        Task {
+            let events = await client.fetchLiveAcross(SportsLeague.liveAggregateLeagues)
+            await MainActor.run {
+                self.liveAllEvents = events
+                self.isLoading = false
+                self.lastUpdated = Date()
+                self.lastError = events.isEmpty ? "No live games right now" : nil
+                self.detectChanges(events)
+            }
+        }
+    }
+
+    private func prefetchCore() async {
+        let core: [SportsLeague] = [.nba, .nfl, .nhl, .mlb, .epl]
+        for league in core {
+            let events = await client.fetchEvents(league: league)
+            await MainActor.run {
+                if !events.isEmpty {
+                    self.eventsByLeague[league] = Array(events.prefix(40))
+                    self.saveCache(events, league: league)
                 }
             }
         }
     }
 
     var currentEvents: [SportsEvent] {
-        let all = eventsByLeague[selectedLeague] ?? []
-        if followOnly {
-            return all.filter { isFollowed($0) }
+        let base: [SportsEvent]
+        switch browseMode {
+        case .liveAll:
+            base = liveAllEvents
+        case .league(let league):
+            base = eventsByLeague[league] ?? []
         }
-        return all
+        if followOnly {
+            return base.filter { isFollowed($0) }
+        }
+        return base
     }
 
     var liveEvents: [SportsEvent] { currentEvents.filter { $0.status == .live } }
@@ -97,14 +156,25 @@ final class SportsStore: ObservableObject {
     }
     var finalEvents: [SportsEvent] { currentEvents.filter { $0.status == .final } }
 
-    var liveCount: Int {
-        (eventsByLeague[selectedLeague] ?? []).filter(\.isLive).count
+    var liveCount: Int { liveEvents.count }
+
+    var globalLiveCount: Int {
+        let fromCache = eventsByLeague.values.flatMap { $0 }.filter(\.isLive)
+        let merged = Dictionary(uniqueKeysWithValues: (fromCache + liveAllEvents).map { ($0.id, $0) })
+        return merged.count
     }
 
     var liveFollowed: SportsEvent? {
-        let all = eventsByLeague.values.flatMap { $0 }
-        if let f = all.first(where: { $0.isLive && isFollowed($0) }) { return f }
-        return (eventsByLeague[selectedLeague] ?? []).first(where: \.isLive)
+        let pool = eventsByLeague.values.flatMap { $0 } + liveAllEvents
+        if let f = pool.first(where: { $0.isLive && isFollowed($0) }) { return f }
+        if case .league(let l) = browseMode {
+            return (eventsByLeague[l] ?? []).first(where: \.isLive)
+        }
+        return liveAllEvents.first
+    }
+
+    var chipLeagues: [SportsLeague] {
+        categoryFilter.leagues(includingAggregate: true)
     }
 
     func isFollowed(_ event: SportsEvent) -> Bool {
@@ -142,12 +212,11 @@ final class SportsStore: ObservableObject {
 
             guard isFollowed(ev) else { continue }
 
-            // Game went live
             if prevStatus == .scheduled, ev.status == .live {
                 onScorePeek?(NotchSneakPeek(
                     systemImage: ev.league.systemImage,
                     title: "\(ev.displayAway) @ \(ev.displayHome)",
-                    subtitle: "Tip-off · \(ev.league.title)",
+                    subtitle: "Live · \(ev.league.title)",
                     urgency: .high,
                     detail: ev.statusText
                 ))
@@ -155,13 +224,12 @@ final class SportsStore: ObservableObject {
             }
 
             guard let prevScore, prevScore != scoreKey else { continue }
-            // Score change — quiet in Meeting for normal peeks
             if FocusController.shared.isMeetingActive { continue }
             let title = "\(ev.displayAway) \(ev.awayScore ?? "") – \(ev.homeScore ?? "") \(ev.displayHome)"
             onScorePeek?(NotchSneakPeek(
                 systemImage: ev.league.systemImage,
                 title: title,
-                subtitle: ev.isLive ? "Score update · \(ev.league.title)" : "Final · \(ev.league.title)",
+                subtitle: ev.isLive ? "Score · \(ev.league.title)" : "Final · \(ev.league.title)",
                 urgency: .normal,
                 detail: ev.statusText
             ))

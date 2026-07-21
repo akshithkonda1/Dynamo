@@ -5,7 +5,7 @@ actor ESPNScoreboardClient {
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 12
-        c.timeoutIntervalForResource = 24
+        c.timeoutIntervalForResource = 28
         c.httpAdditionalHeaders = [
             "User-Agent": "Dynamo/1.0 (macOS; scoreboard)",
             "Accept": "application/json"
@@ -14,7 +14,7 @@ actor ESPNScoreboardClient {
     }()
 
     /// Fetch a 3-day window (yesterday…tomorrow) and merge unique events.
-    func fetchEvents(league: SportsLeague, around date: Date = Date()) async throws -> [SportsEvent] {
+    func fetchEvents(league: SportsLeague, around date: Date = Date()) async -> [SportsEvent] {
         let cal = Calendar.current
         let days: [Date] = [
             cal.date(byAdding: .day, value: -1, to: date) ?? date,
@@ -29,29 +29,57 @@ actor ESPNScoreboardClient {
             for path in paths {
                 for day in days {
                     group.addTask {
-                        (try? await self.fetchScoreboard(path: path, league: league, date: day)) ?? []
+                        await self.fetchScoreboard(path: path, league: league, date: day)
                     }
                 }
-                // Also try undated “current” board once per path.
                 group.addTask {
-                    (try? await self.fetchScoreboard(path: path, league: league, date: nil)) ?? []
+                    await self.fetchScoreboard(path: path, league: league, date: nil)
                 }
             }
             for await batch in group {
-                for ev in batch {
-                    // Prefer live over scheduled if duplicate ids.
-                    if let existing = combined[ev.id] {
-                        if existing.status != .live, ev.status == .live {
-                            combined[ev.id] = ev
-                        }
-                    } else {
-                        combined[ev.id] = ev
-                    }
-                }
+                merge(batch, into: &combined)
             }
         }
 
-        return combined.values.sorted { lhs, rhs in
+        return sortEvents(Array(combined.values))
+    }
+
+    /// Parallel live-ish fetch across several leagues (All Live).
+    func fetchLiveAcross(_ leagues: [SportsLeague]) async -> [SportsEvent] {
+        var combined: [String: SportsEvent] = [:]
+        await withTaskGroup(of: [SportsEvent].self) { group in
+            for league in leagues {
+                group.addTask {
+                    // Prefer undated + today for speed.
+                    var out: [SportsEvent] = []
+                    out += await self.fetchScoreboard(path: league.espnPath, league: league, date: nil)
+                    out += await self.fetchScoreboard(path: league.espnPath, league: league, date: Date())
+                    return out.filter(\.isLive)
+                }
+            }
+            for await batch in group {
+                merge(batch, into: &combined)
+            }
+        }
+        return sortEvents(Array(combined.values))
+    }
+
+    private func merge(_ batch: [SportsEvent], into combined: inout [String: SportsEvent]) {
+        for ev in batch {
+            if let existing = combined[ev.id] {
+                if existing.status != .live, ev.status == .live {
+                    combined[ev.id] = ev
+                } else if existing.homeLogoURL == nil, ev.homeLogoURL != nil {
+                    combined[ev.id] = ev
+                }
+            } else {
+                combined[ev.id] = ev
+            }
+        }
+    }
+
+    private func sortEvents(_ events: [SportsEvent]) -> [SportsEvent] {
+        events.sorted { lhs, rhs in
             let lo = statusRank(lhs.status)
             let ro = statusRank(rhs.status)
             if lo != ro { return lo < ro }
@@ -70,28 +98,26 @@ actor ESPNScoreboardClient {
         }
     }
 
-    private func fetchScoreboard(path: String, league: SportsLeague, date: Date?) async throws -> [SportsEvent] {
+    private func fetchScoreboard(path: String, league: SportsLeague, date: Date?) async -> [SportsEvent] {
         var components = URLComponents(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/scoreboard")
-        var items: [URLQueryItem] = []
         if let date {
-            items.append(URLQueryItem(name: "dates", value: Self.dayString(date)))
+            components?.queryItems = [URLQueryItem(name: "dates", value: Self.dayString(date))]
         }
-        components?.queryItems = items.isEmpty ? nil : items
         guard let url = components?.url else { return [] }
 
         do {
             let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse else { return [] }
-            guard (200..<300).contains(http.statusCode) else { return [] }
-            return try parseScoreboard(data: data, league: league)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return []
+            }
+            return parseScoreboard(data: data, league: league)
         } catch {
-            // Soft-fail single path/day so fan-out still works.
             return []
         }
     }
 
-    private func parseScoreboard(data: Data, league: SportsLeague) throws -> [SportsEvent] {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    private func parseScoreboard(data: Data, league: SportsLeague) -> [SportsEvent] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return []
         }
         let eventsJSON = root["events"] as? [[String: Any]] ?? []
@@ -101,8 +127,7 @@ actor ESPNScoreboardClient {
             let rawID = (ev["id"] as? String) ?? UUID().uuidString
             let id = "\(league.rawValue)-\(rawID)"
             let name = (ev["name"] as? String) ?? (ev["shortName"] as? String) ?? "Event"
-            let dateStr = ev["date"] as? String
-            let start = Self.parseISO(dateStr)
+            let start = Self.parseISO(ev["date"] as? String)
 
             let statusObj = ev["status"] as? [String: Any]
             let typeObj = statusObj?["type"] as? [String: Any]
@@ -131,49 +156,51 @@ actor ESPNScoreboardClient {
             if let competitions = ev["competitions"] as? [[String: Any]],
                let comp = competitions.first {
                 if let links = comp["links"] as? [[String: Any]] {
-                    link = (links.first?["href"] as? String)
-                        ?? (links.first { ($0["rel"] as? [String])?.contains("summary") == true }?["href"] as? String)
+                    link = links.first?["href"] as? String
                 }
                 if let broadcasts = comp["broadcasts"] as? [[String: Any]] {
                     let names = broadcasts.compactMap { $0["names"] as? [String] }.flatMap { $0 }
                     if let first = names.first { broadcast = first }
                 }
-                if let geo = comp["geoBroadcasts"] as? [[String: Any]] {
-                    if broadcast == nil,
-                       let media = geo.first?["media"] as? [String: Any],
-                       let short = media["shortName"] as? String {
-                        broadcast = short
-                    }
+                if broadcast == nil,
+                   let geo = comp["geoBroadcasts"] as? [[String: Any]],
+                   let media = geo.first?["media"] as? [String: Any],
+                   let short = media["shortName"] as? String {
+                    broadcast = short
                 }
+
                 if let competitors = comp["competitors"] as? [[String: Any]] {
-                    for c in competitors {
-                        let team = c["team"] as? [String: Any]
-                        let display = (team?["displayName"] as? String)
-                            ?? (team?["shortDisplayName"] as? String)
-                            ?? (team?["name"] as? String)
-                            ?? "Team"
-                        let abbrev = team?["abbreviation"] as? String
-                        let logo = team?["logo"] as? String
-                            ?? (team?["logos"] as? [[String: Any]])?.first?["href"] as? String
-                        let score = c["score"] as? String
-                        let homeAway = (c["homeAway"] as? String)?.lowercased()
-                        // F1: no home/away — treat order as away/home labels lightly.
-                        if homeAway == "home" || (homeAway == nil && homeName == "Home" && awayName != "Away") {
-                            homeName = display
-                            homeScore = score
-                            homeAbbrev = abbrev
-                            homeLogo = logo
-                        } else if homeAway == "away" || homeAway == nil {
-                            if awayName == "Away" {
-                                awayName = display
-                                awayScore = score
-                                awayAbbrev = abbrev
-                                awayLogo = logo
+                    // Golf / racing / MMA often rank-ordered competitors.
+                    if league == .f1 || league == .pga || league == .ufc || league == .tennis {
+                        let parsed = parseRankedCompetitors(competitors)
+                        if let first = parsed.first {
+                            awayName = first.name
+                            awayScore = first.score
+                            awayAbbrev = first.abbrev
+                            awayLogo = first.logo
+                        }
+                        if parsed.count > 1 {
+                            homeName = parsed[1].name
+                            homeScore = parsed[1].score
+                            homeAbbrev = parsed[1].abbrev
+                            homeLogo = parsed[1].logo
+                        } else {
+                            homeName = detail.isEmpty ? league.title : detail
+                        }
+                    } else {
+                        for c in competitors {
+                            let parsed = parseCompetitor(c)
+                            let homeAway = (c["homeAway"] as? String)?.lowercased()
+                            if homeAway == "home" {
+                                homeName = parsed.name
+                                homeScore = parsed.score
+                                homeAbbrev = parsed.abbrev
+                                homeLogo = parsed.logo
                             } else {
-                                homeName = display
-                                homeScore = score
-                                homeAbbrev = abbrev
-                                homeLogo = logo
+                                awayName = parsed.name
+                                awayScore = parsed.score
+                                awayAbbrev = parsed.abbrev
+                                awayLogo = parsed.logo
                             }
                         }
                     }
@@ -181,9 +208,10 @@ actor ESPNScoreboardClient {
             }
 
             let headline: String?
-            if league == .f1 {
+            switch league {
+            case .f1, .pga, .ufc, .tennis:
                 headline = detail.isEmpty ? name : "\(name) · \(detail)"
-            } else {
+            default:
                 headline = nil
             }
 
@@ -209,6 +237,40 @@ actor ESPNScoreboardClient {
             ))
         }
         return out
+    }
+
+    private struct ParsedCompetitor {
+        var name: String
+        var score: String?
+        var abbrev: String?
+        var logo: String?
+    }
+
+    private func parseCompetitor(_ c: [String: Any]) -> ParsedCompetitor {
+        let team = c["team"] as? [String: Any]
+        let athlete = c["athlete"] as? [String: Any]
+        let display = (team?["displayName"] as? String)
+            ?? (team?["shortDisplayName"] as? String)
+            ?? (athlete?["displayName"] as? String)
+            ?? (c["name"] as? String)
+            ?? "Team"
+        let abbrev = team?["abbreviation"] as? String
+        let logo = team?["logo"] as? String
+            ?? (team?["logos"] as? [[String: Any]])?.first?["href"] as? String
+            ?? athlete?["headshot"] as? String
+        let score = c["score"] as? String
+            ?? (c["linescores"] as? [[String: Any]])?.last.flatMap { $0["value"] as? NSNumber }?.stringValue
+        return ParsedCompetitor(name: display, score: score, abbrev: abbrev, logo: logo)
+    }
+
+    private func parseRankedCompetitors(_ competitors: [[String: Any]]) -> [ParsedCompetitor] {
+        competitors
+            .sorted {
+                let o0 = ($0["order"] as? Int) ?? ($0["order"] as? NSNumber)?.intValue ?? 99
+                let o1 = ($1["order"] as? Int) ?? ($1["order"] as? NSNumber)?.intValue ?? 99
+                return o0 < o1
+            }
+            .map { parseCompetitor($0) }
     }
 
     private static func dayString(_ date: Date) -> String {
