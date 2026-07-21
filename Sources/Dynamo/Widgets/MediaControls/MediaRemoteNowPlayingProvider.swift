@@ -135,8 +135,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         } else {
             _ = send(MRCommand.nextTrack)
         }
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.7)
+        // Dense refreshes so track-change peeks fire promptly after skip.
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.55)
+        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 1.6)
     }
 
     func previousTrack() {
@@ -146,8 +150,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         } else {
             _ = send(MRCommand.previousTrack)
         }
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.7)
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.55)
+        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 1.6)
     }
 
     func openConnectedApp() {

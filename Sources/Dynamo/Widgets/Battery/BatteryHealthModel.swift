@@ -83,17 +83,25 @@ enum BatteryHealthModel {
 
         let summary: String
         if snapshot.isCharging {
-            if let m = predictedFull {
-                summary = "Charging · ~\(formatDuration(m)) to full (learned)"
+            if let os = osRemain {
+                summary = "Charging · ~\(formatDuration(os)) to full"
+            } else if let m = predictedFull {
+                summary = "Charging · ~\(formatDuration(m)) to full (estimated)"
             } else {
-                summary = "Charging · learning charge rate…"
+                summary = "Charging"
             }
         } else if snapshot.isPluggedIn {
             summary = "Plugged in · not discharging"
         } else if let drain {
-            summary = String(format: "Using ~%.1f%%/h · health %d%%", drain, healthScore)
+            if let hw = hardware {
+                summary = String(format: "Using ~%.1f%%/h · capacity %d%%", drain, hw)
+            } else {
+                summary = String(format: "Using ~%.1f%%/h", drain)
+            }
+        } else if let os = osRemain {
+            summary = "~\(formatDuration(os)) remaining"
         } else {
-            summary = "Gathering usage samples for predictions…"
+            summary = "Reading system battery…"
         }
 
         let tip = makeTip(
@@ -157,31 +165,33 @@ enum BatteryHealthModel {
 
     // MARK: - Health score
 
+    /// Prefer IOKit max/design capacity. Never invent a fake “90%” prior.
     private static func compositeHealth(
         hardware: Int?,
         cycles: Int?,
         samples: [BatterySample]
     ) -> Int {
-        // Primary: hardware max/design.
+        // Primary: firmware max/design capacity from AppleSmartBattery.
         if let hardware {
-            return min(100, max(40, hardware))
+            return min(100, max(0, hardware))
         }
-        // Fallback from cycles (Li-ion laptop packs often ~1000 cycles to ~80%).
+        // Last stored hardware reading from local history.
+        let healthSeries = samples.compactMap(\.hardwareHealthPercent)
+        if let last = healthSeries.last {
+            return min(100, max(0, last))
+        }
+        // Coarse cycle-based estimate only when hardware health is unavailable.
         if let cycles {
             let wear = min(1.0, Double(cycles) / 1000.0)
             let fromCycles = Int((100.0 - wear * 25.0).rounded())
             return min(100, max(50, fromCycles))
         }
-        // Trend of reported hardware health if we ever stored it.
-        let healthSeries = samples.compactMap(\.hardwareHealthPercent)
-        if let last = healthSeries.last {
-            return last
-        }
-        return 90 // optimistic prior until we learn
+        return 0
     }
 
-    private static func healthLabel(for score: Int) -> String {
+    static func healthLabel(for score: Int) -> String {
         switch score {
+        case 0: return "Unknown"
         case 90...100: return "Excellent"
         case 80..<90: return "Good"
         case 70..<80: return "Fair"

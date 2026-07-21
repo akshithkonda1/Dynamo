@@ -9,7 +9,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
     let displayName = "Weather"
     let systemImage = "cloud.sun"
 
-    var expandedContentHeight: CGFloat { 230 }
+    var expandedContentHeight: CGFloat { 255 }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []
@@ -61,7 +61,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
                 systemImage: "exclamationmark.triangle.fill",
                 title: "Severe Weather Alert",
                 subtitle: alert.summary,
-                emphasis: .critical
+                urgency: .critical
             ))
         }
     }

@@ -70,7 +70,7 @@ final class PeekBridge: ObservableObject {
                 systemImage: critical ? "bell.badge.fill" : "bell",
                 title: title,
                 subtitle: subtitle,
-                emphasis: critical ? .critical : .normal
+                urgency: critical ? .critical : .normal
             )
         )
     }

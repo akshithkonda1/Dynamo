@@ -2,44 +2,37 @@ import AppKit
 import EventKit
 import Foundation
 
-/// EventKit-backed calendar + reminders source — reads **your** calendars
-/// (iCloud, Exchange, Google via Calendar.app, local, etc.) the same way the
-/// system Calendar app does.
+/// EventKit-backed calendar source — reads **your** calendars the same way
+/// Calendar.app does. Reminders live in the Checklist tab.
 @MainActor
 final class EventKitCalendarProvider: CalendarProvider {
     private(set) var authorizationState: CalendarAuthState = .notDetermined
     private(set) var upcoming: [CalendarEventItem] = []
-    private(set) var dueReminders: [ReminderItem] = []
     var onChange: (() -> Void)?
 
     private let store = EKEventStore()
     private var timer: Timer?
-    private var remindersAuthorized = false
     private var changeObserver: NSObjectProtocol?
 
     func start() {
         updateAuthState()
         if authorizationState == .authorized {
             refresh()
+        } else {
+            onChange?()
         }
-        // Live updates when the user edits Calendar.app / iCloud syncs.
         changeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
             object: store,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.refresh()
-            }
+            Task { @MainActor in self?.refresh() }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refresh()
-            }
+        let t = Timer(timeInterval: 45, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
         }
-        if let timer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func stop() {
@@ -60,48 +53,42 @@ final class EventKitCalendarProvider: CalendarProvider {
                 eventsGranted = try await store.requestAccess(to: .event)
             }
             authorizationState = eventsGranted ? .authorized : .denied
-
-            if #available(macOS 14.0, *) {
-                remindersAuthorized = (try? await store.requestFullAccessToReminders()) ?? false
-            } else {
-                remindersAuthorized = (try? await store.requestAccess(to: .reminder)) ?? false
-            }
-
             if eventsGranted {
                 refresh()
+            } else {
+                upcoming = []
+                onChange?()
             }
-            onChange?()
         } catch {
             authorizationState = .denied
+            upcoming = []
             onChange?()
         }
     }
 
     func refresh() {
         updateAuthState()
-        updateRemindersAuth()
         guard authorizationState == .authorized else {
             upcoming = []
-            dueReminders = []
             onChange?()
             return
         }
 
         let start = Date()
-        // Look further ahead so "your week" feels complete.
         let end = Calendar.current.date(byAdding: .day, value: 14, to: start)
             ?? start.addingTimeInterval(14 * 86_400)
 
-        // All calendars the user has enabled in Calendar.app (nil = all).
         let calendars = store.calendars(for: .event)
         let predicate = store.predicateForEvents(
-            withStart: start,
+            withStart: start.addingTimeInterval(-6 * 60 * 60),
             end: end,
             calendars: calendars.isEmpty ? nil : calendars
         )
+        let now = Date()
         let events = store.events(matching: predicate)
+            .filter { $0.endDate > now }
             .sorted { $0.startDate < $1.startDate }
-            .prefix(24)
+            .prefix(40)
             .map { event -> CalendarEventItem in
                 var color: CodableColor?
                 if let cg = event.calendar.cgColor,
@@ -115,8 +102,14 @@ final class EventKitCalendarProvider: CalendarProvider {
                     )
                 }
                 let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let id: String
+                if let ek = event.eventIdentifier, !ek.isEmpty {
+                    id = "\(ek)|\(event.startDate.timeIntervalSinceReferenceDate)"
+                } else {
+                    id = UUID().uuidString
+                }
                 return CalendarEventItem(
-                    id: event.eventIdentifier ?? UUID().uuidString,
+                    id: id,
                     title: event.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled",
                     start: event.startDate,
                     end: event.endDate,
@@ -127,22 +120,31 @@ final class EventKitCalendarProvider: CalendarProvider {
                 )
             }
         upcoming = Array(events)
-        refreshReminders()
         onChange?()
     }
 
     func openEvent(id: String) {
-        // Prefer deep-link into Calendar.app for this event.
-        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let ekID = id.split(separator: "|", maxSplits: 1).first.map(String.init) ?? id
+        let encoded = ekID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ekID
         if let url = URL(string: "ical://ekevent/\(encoded)"),
            NSWorkspace.shared.open(url) {
             return
         }
-        // Fallback: show the day in Calendar.
-        if let event = store.event(withIdentifier: id) {
+        if let event = store.event(withIdentifier: ekID) {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd"
             let day = formatter.string(from: event.startDate)
+            if let url = URL(string: "ical://\(day)") {
+                NSWorkspace.shared.open(url)
+                return
+            }
+        }
+        if let startPart = id.split(separator: "|").dropFirst().first,
+           let abs = TimeInterval(startPart) {
+            let date = Date(timeIntervalSinceReferenceDate: abs)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd"
+            let day = formatter.string(from: date)
             if let url = URL(string: "ical://\(day)") {
                 NSWorkspace.shared.open(url)
                 return
@@ -173,52 +175,20 @@ final class EventKitCalendarProvider: CalendarProvider {
         openCalendarApp()
     }
 
-    private func refreshReminders() {
-        guard remindersAuthorized else {
-            dueReminders = []
-            return
-        }
-        let end = Date().addingTimeInterval(24 * 60 * 60)
-        let predicate = store.predicateForIncompleteReminders(
-            withDueDateStarting: nil,
-            ending: end,
-            calendars: nil
-        )
-        store.fetchReminders(matching: predicate) { [weak self] reminders in
-            Task { @MainActor in
-                guard let self else { return }
-                let now = Date()
-                let items = (reminders ?? [])
-                    .compactMap { reminder -> ReminderItem? in
-                        guard let components = reminder.dueDateComponents,
-                              let due = Calendar.current.date(from: components)
-                        else { return nil }
-                        guard due.timeIntervalSince(now) <= 24 * 60 * 60,
-                              due.timeIntervalSince(now) > -60 * 60
-                        else { return nil }
-                        return ReminderItem(
-                            id: reminder.calendarItemIdentifier,
-                            title: reminder.title ?? "Reminder",
-                            due: due
-                        )
-                    }
-                    .sorted { $0.due < $1.due }
-                    .prefix(8)
-                self.dueReminders = Array(items)
-                self.onChange?()
-            }
-        }
-    }
-
     private func updateAuthState() {
-        let status: EKAuthorizationStatus
         if #available(macOS 14.0, *) {
-            status = EKEventStore.authorizationStatus(for: .event)
-            switch status {
-            case .fullAccess:
+            switch EKEventStore.authorizationStatus(for: .event) {
+            case .fullAccess, .authorized:
                 authorizationState = .authorized
             case .writeOnly:
                 authorizationState = .denied
+            case .notDetermined:
+                authorizationState = .notDetermined
+            default:
+                authorizationState = .denied
+            }
+        } else {
+            switch EKEventStore.authorizationStatus(for: .event) {
             case .authorized:
                 authorizationState = .authorized
             case .notDetermined:
@@ -226,26 +196,6 @@ final class EventKitCalendarProvider: CalendarProvider {
             default:
                 authorizationState = .denied
             }
-        } else {
-            status = EKEventStore.authorizationStatus(for: .event)
-            switch status {
-            case .authorized:
-                authorizationState = .authorized
-            case .notDetermined:
-                authorizationState = .notDetermined
-            default:
-                authorizationState = .denied
-            }
-        }
-    }
-
-    private func updateRemindersAuth() {
-        if #available(macOS 14.0, *) {
-            let status = EKEventStore.authorizationStatus(for: .reminder)
-            remindersAuthorized = (status == .fullAccess || status == .authorized)
-        } else {
-            let status = EKEventStore.authorizationStatus(for: .reminder)
-            remindersAuthorized = (status == .authorized)
         }
     }
 }

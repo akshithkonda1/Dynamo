@@ -6,16 +6,34 @@ import Foundation
 enum CalendarNewEventOpener {
     @MainActor
     static func open() {
-        // Always activate Calendar, then ⌘N — bare ical:// opens the app but
-        // is not a compose deep link, so we never treat open() alone as success.
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
-            NSWorkspace.shared.open(url)
-        } else if let ical = URL(string: "ical://") {
-            NSWorkspace.shared.open(ical)
-        } else {
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+        // 1) Try known compose deep-links (vary by macOS / Calendar build).
+        let candidates = [
+            "ical://ekevent",
+            "webcal://",
+            "ical://"
+        ]
+        var opened = false
+        for s in candidates {
+            if let url = URL(string: s), NSWorkspace.shared.open(url) {
+                opened = true
+                break
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        if !opened {
+            if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                NSWorkspace.shared.open(app)
+            } else {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+            }
+        }
+
+        // 2) After Calendar is frontmost, send ⌘N via System Events (best-effort).
+        //    Requires Automation permission for System Events once; fails quietly otherwise.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            sendCommandNViaAppleScript()
+        }
+        // Retry once — Calendar cold-launch is slow on some machines.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.25) {
             sendCommandNViaAppleScript()
         }
     }
@@ -24,12 +42,15 @@ enum CalendarNewEventOpener {
     private static func sendCommandNViaAppleScript() {
         let source = """
         tell application "Calendar" to activate
-        delay 0.15
+        delay 0.2
         try
             tell application "System Events"
-                tell process "Calendar"
-                    keystroke "n" using command down
-                end tell
+                if exists process "Calendar" then
+                    tell process "Calendar"
+                        set frontmost to true
+                        keystroke "n" using command down
+                    end tell
+                end if
             end tell
         end try
         """

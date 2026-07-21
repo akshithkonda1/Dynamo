@@ -53,7 +53,8 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
         AnyView(ExpandedBatteryView(plugin: self))
     }
 
-    var expandedContentHeight: CGFloat { 280 }
+    /// Match Media / Calendar / Shelf / Webcam so tab switches don’t drop taller.
+    var expandedContentHeight: CGFloat { 255 }
 
     // MARK: - Snapshot pipeline
 
@@ -147,6 +148,9 @@ private struct AmbientBatteryView: View {
 }
 
 // MARK: - Expanded
+// Compact, peer-height layout. Metrics are read-only from IOKit / ProcessInfo
+// (charge %, cycles, design/max capacity, OS time remaining). Local drain
+// history is secondary; nothing here invents battery capacity.
 
 private struct ExpandedBatteryView: View {
     @ObservedObject var plugin: BatteryPlugin
@@ -155,9 +159,11 @@ private struct ExpandedBatteryView: View {
 
     private var snapshot: BatterySnapshot { plugin.snapshot }
     private var insight: BatteryInsight {
-        // Live recompute so UI tracks history without stale plugin cache edge cases.
         BatteryHealthModel.insight(snapshot: snapshot, samples: history.samples)
     }
+
+    /// Prefer firmware max/design capacity when IOKit reports it.
+    private var hardwareHealth: Int? { snapshot.hardwareHealthPercent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
@@ -165,7 +171,7 @@ private struct ExpandedBatteryView: View {
                 "Battery",
                 trailing: snapshot.isPresent
                     ? AnyView(
-                        Text(insight.healthLabel)
+                        Text(headerHealthLabel)
                             .font(NotchTheme.micro.weight(.semibold))
                             .foregroundStyle(healthColor)
                     )
@@ -180,14 +186,14 @@ private struct ExpandedBatteryView: View {
                     prominent: true
                 )
             } else {
-                // Charge level
+                // Charge + status — system IOKit values only
                 NotchCard(compact: true) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: NotchTheme.spaceSM) {
                             Text("\(snapshot.percent)%")
                                 .font(NotchTheme.heroDigit.monospacedDigit())
                                 .foregroundStyle(barColor)
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 1) {
                                 Text(statusLabel)
                                     .font(NotchTheme.body)
                                     .foregroundStyle(NotchTheme.textSecondary)
@@ -198,6 +204,16 @@ private struct ExpandedBatteryView: View {
                                 }
                             }
                             Spacer(minLength: 0)
+                            if let hw = hardwareHealth {
+                                VStack(alignment: .trailing, spacing: 1) {
+                                    Text("Health")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.textQuaternary)
+                                    Text("\(hw)%")
+                                        .font(NotchTheme.body.weight(.semibold).monospacedDigit())
+                                        .foregroundStyle(healthColor)
+                                }
+                            }
                         }
 
                         GeometryReader { geo in
@@ -208,55 +224,30 @@ private struct ExpandedBatteryView: View {
                                     .frame(width: max(8, geo.size.width * CGFloat(snapshot.percent) / 100))
                             }
                         }
-                        .frame(height: 7)
-                    }
-                }
+                        .frame(height: 6)
 
-                // Health model
-                NotchCard(compact: true) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Health")
-                                .font(NotchTheme.micro.weight(.semibold))
-                                .foregroundStyle(NotchTheme.textTertiary)
-                                .textCase(.uppercase)
-                            Spacer()
-                            Text("\(insight.healthScore)%")
-                                .font(NotchTheme.body.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(healthColor)
-                        }
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(NotchTheme.chipFill)
-                                Capsule()
-                                    .fill(healthColor.opacity(0.9))
-                                    .frame(width: max(6, geo.size.width * CGFloat(insight.healthScore) / 100))
-                            }
-                        }
-                        .frame(height: 5)
-
-                        HStack(spacing: 10) {
+                        // Read-only system metrics row
+                        HStack(spacing: 12) {
                             if let cycles = snapshot.cycleCount {
                                 metricChip("Cycles", "\(cycles)")
+                            }
+                            if let maxC = snapshot.maxCapacity, let design = snapshot.designCapacity, design > 0 {
+                                metricChip("Capacity", "\(maxC)/\(design)")
+                            } else if let maxC = snapshot.maxCapacity {
+                                metricChip("Max cap", "\(maxC)")
+                            }
+                            if let temp = snapshot.temperatureC {
+                                metricChip("Temp", String(format: "%.0f°C", temp))
                             }
                             if let drain = insight.drainPercentPerHour {
                                 metricChip("Drain", String(format: "%.1f%%/h", drain))
                             }
-                            metricChip("Samples", "\(insight.samplesUsed)")
+                            Spacer(minLength: 0)
                         }
-
-                        Text(insight.summary)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(insight.tip)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
-                // Power saving controls
+                // Low Power Mode (writes only on explicit user toggle)
                 HStack(spacing: 8) {
                     Button {
                         plugin.toggleLowPowerMode()
@@ -286,6 +277,11 @@ private struct ExpandedBatteryView: View {
 
                     Spacer(minLength: 0)
                 }
+
+                Text(footerNote)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -305,11 +301,13 @@ private struct ExpandedBatteryView: View {
         }
     }
 
+    /// Prefer macOS IOKit time remaining; fall back to local rate estimate.
     private var displayMinutes: Int? {
+        if let os = snapshot.timeRemainingMinutes { return os }
         if snapshot.isCharging {
-            return insight.predictedToFullMinutes ?? snapshot.timeRemainingMinutes
+            return insight.predictedToFullMinutes
         }
-        return insight.predictedRemainingMinutes ?? snapshot.timeRemainingMinutes
+        return insight.predictedRemainingMinutes
     }
 
     private var statusLabel: String {
@@ -328,6 +326,34 @@ private struct ExpandedBatteryView: View {
         return h > 0 ? "~\(h)h \(m)m remaining" : "~\(m)m remaining"
     }
 
+    private var headerHealthLabel: String {
+        if let hw = hardwareHealth {
+            return BatteryHealthModel.healthLabel(for: hw)
+        }
+        if let cycles = snapshot.cycleCount {
+            return "\(cycles) cycles"
+        }
+        return "System"
+    }
+
+    private var footerNote: String {
+        if let tip = compactTip { return tip }
+        return "Read-only from this Mac’s battery (IOKit)."
+    }
+
+    private var compactTip: String? {
+        if snapshot.percent <= 20, !power.isLowPowerModeEnabled, !snapshot.isCharging {
+            return "Enable Low Power Mode to stretch remaining charge."
+        }
+        if let drain = insight.drainPercentPerHour, drain > 18 {
+            return "High drain — bright display and heavy apps shorten runtime."
+        }
+        if let hw = hardwareHealth, hw < 80 {
+            return "Capacity reduced — keep charge between ~20–80% when you can."
+        }
+        return nil
+    }
+
     private var barColor: Color {
         if power.isLowPowerModeEnabled { return NotchTheme.caution }
         if snapshot.isCharging { return NotchTheme.positive }
@@ -337,9 +363,10 @@ private struct ExpandedBatteryView: View {
     }
 
     private var healthColor: Color {
-        let s = insight.healthScore
+        let s = hardwareHealth ?? insight.healthScore
         if s >= 85 { return NotchTheme.positive }
         if s >= 70 { return NotchTheme.caution }
+        if hardwareHealth == nil, insight.healthScore == 0 { return NotchTheme.textTertiary }
         return NotchTheme.negative
     }
 }

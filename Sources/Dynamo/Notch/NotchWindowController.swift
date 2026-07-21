@@ -46,14 +46,23 @@ final class NotchWindowController: ObservableObject {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    private let overlaySize = NSSize(width: 320, height: 44)
+    /// Volume / brightness HUD — compact strip under the physical notch.
+    private let hudOverlaySize = NSSize(width: 320, height: 48)
+    /// Track / calendar / reminder peeks — tall enough for aurora EQ + cover art.
+    private let peekOverlaySize = NSSize(width: 420, height: 98)
+    /// How many overlay holders want the taller peek silhouette.
+    private var peekOverlayHolders = 0
+
+    private var overlaySize: NSSize {
+        peekOverlayHolders > 0 ? peekOverlaySize : hudOverlaySize
+    }
     private static let expandedWidth: CGFloat = 660
     /// Widget content height + shared chrome (tray / clock / divider).
     /// Chrome is owned by `NotchTheme.expandedChromeHeight` so SwiftUI layout
     /// and AppKit frame stay in lockstep — mismatched values caused clipping
     /// and “jumpy” tab switches.
     private var expandedSize: NSSize {
-        let content = registry?.activePlugin?.expandedContentHeight ?? 240
+        let content = registry?.activePlugin?.expandedContentHeight ?? 255
         return NSSize(
             width: Self.expandedWidth,
             height: content + NotchTheme.expandedChromeHeight
@@ -266,27 +275,49 @@ final class NotchWindowController: ObservableObject {
 
     // MARK: - Transient overlays
 
+    /// Style of transient overlay — peeks hang lower than volume/brightness.
+    enum OverlayStyle {
+        case compact
+        case peek
+    }
+
     /// Begin a transient HUD/peek session. Call **once** when a holder starts
-    /// showing (not on every content refresh). Pair with `overlayDidHide()`.
+    /// showing (not on every content refresh). Pair with `overlayDidHide(style:)`.
     /// Multiple holders (HUD + sneak peek) use a refcount so one ending early
     /// doesn't collapse the other.
-    func presentForOverlay() {
+    func presentForOverlay(style: OverlayStyle = .compact) {
         cancelRetreat()
         cancelCollapse()
         if !isVisible { showPanel() }
         let wasIdle = activeOverlayCount == 0
         activeOverlayCount += 1
-        if wasIdle, !isExpanded {
+        if style == .peek {
+            peekOverlayHolders += 1
+        }
+        if !isExpanded {
             suppressHoverExitUntil = Date().addingTimeInterval(0.5)
+            // Always re-size so a peek after a compact HUD grows further down.
             animateFrame(to: overlaySize)
+        } else if wasIdle {
+            // Expanded tray already owns the frame; no-op.
         }
     }
 
     /// End one overlay holder. Safe if already zero (e.g. teardown double-call).
-    func overlayDidHide() {
+    func overlayDidHide(style: OverlayStyle = .compact) {
+        if style == .peek, peekOverlayHolders > 0 {
+            peekOverlayHolders -= 1
+        }
         guard activeOverlayCount > 0 else { return }
         activeOverlayCount -= 1
-        guard activeOverlayCount == 0 else { return }
+        if activeOverlayCount > 0 {
+            // Another holder still up — shrink/grow to remaining style.
+            if !isExpanded {
+                animateFrame(to: overlaySize)
+            }
+            return
+        }
+        peekOverlayHolders = 0
         if mouseIsNearPanel() {
             // Cursor still on the notch — keep or expand rather than snap shut.
             if !isExpanded { expand() }
@@ -485,6 +516,20 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
     var onMouseExited: (() -> Void)?
 
     private var hoverTrackingArea: NSTrackingArea?
+
+    required init(rootView: NotchContentView) {
+        super.init(rootView: rootView)
+        // Prevent AppKit from painting an opaque rect behind the island
+        // (shows up as a hard bottom rim under SwiftUI glass).
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     /// Critical for accessory / nonactivating panels: the first click must
     /// reach SwiftUI buttons, not only focus the window.

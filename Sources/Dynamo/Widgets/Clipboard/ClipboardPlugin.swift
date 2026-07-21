@@ -7,7 +7,7 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
 
-    var expandedContentHeight: CGFloat { 260 }
+    var expandedContentHeight: CGFloat { 255 }
 
     let store = ClipboardStore()
 

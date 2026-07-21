@@ -2,43 +2,46 @@ import SwiftUI
 
 // MARK: - Card
 
-/// Standard content surface inside the expanded notch — soft glass plate.
+/// Content surface inside the expanded notch — native material + Dynamo edge.
 struct NotchCard<Content: View>: View {
     var padding: CGFloat = NotchTheme.spaceMD
     var compact: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
+        // Material plate owns the glass; padding keeps legacy NotchCard API.
         content()
             .padding(compact ? NotchTheme.spaceSM : padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background {
                 ZStack {
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                        .fill(NotchTheme.cardFill)
-                    // Inner top sheen
+                        .fill(.ultraThinMaterial)
+                        .environment(\.colorScheme, .dark)
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Color.white.opacity(0.07), Color.clear],
+                                colors: [
+                                    Color.white.opacity(0.08),
+                                    NotchTheme.cardFill.opacity(0.5),
+                                    Color.clear
+                                ],
                                 startPoint: .top,
-                                endPoint: .center
+                                endPoint: .bottom
                             )
                         )
-                }
-                .overlay(
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
-                                colors: [Color.white.opacity(0.18), Color.white.opacity(0.05)],
+                                colors: [Color.white.opacity(0.20), Color.white.opacity(0.05)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
-                            lineWidth: 0.75
+                            lineWidth: 0.6
                         )
-                )
-                .shadow(color: Color.black.opacity(0.22), radius: 8, y: 3)
-            )
+                }
+                .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+            }
     }
 }
 
@@ -59,12 +62,13 @@ struct NotchSectionHeader: View {
                 .font(NotchTheme.section)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
-                .tracking(0.8)
+                .tracking(0.7)
             Spacer(minLength: 0)
             if let trailing {
                 trailing
             }
         }
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -82,6 +86,7 @@ struct NotchEmptyState: View {
                 .font(.system(size: prominent ? 22 : 16, weight: .medium))
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .symbolRenderingMode(.hierarchical)
+                .symbolVariant(.none)
             Text(title)
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textSecondary)
@@ -99,7 +104,7 @@ struct NotchEmptyState: View {
     }
 }
 
-// MARK: - Status chip
+// MARK: - Status chip (system semantic colors)
 
 struct NotchStatusChip: View {
     enum Kind {
@@ -107,22 +112,20 @@ struct NotchStatusChip: View {
 
         var fill: Color {
             switch self {
-            case .neutral: return NotchTheme.chipFill
-            case .now: return Color.green.opacity(0.20)
-            case .soon: return Color.orange.opacity(0.20)
-            case .later: return NotchTheme.chipFill
-            case .danger: return Color.red.opacity(0.20)
-            case .success: return Color.green.opacity(0.16)
+            case .neutral, .later: return NotchTheme.chipFill
+            case .now: return NotchTheme.positive.opacity(0.18)
+            case .soon: return NotchTheme.caution.opacity(0.18)
+            case .danger: return NotchTheme.negative.opacity(0.18)
+            case .success: return NotchTheme.positive.opacity(0.14)
             }
         }
 
         var foreground: Color {
             switch self {
             case .neutral, .later: return NotchTheme.textTertiary
-            case .now: return Color.green.opacity(0.95)
-            case .soon: return Color.orange.opacity(0.95)
-            case .danger: return Color.red.opacity(0.95)
-            case .success: return Color.green.opacity(0.9)
+            case .now, .success: return NotchTheme.positive
+            case .soon: return NotchTheme.caution
+            case .danger: return NotchTheme.negative
             }
         }
     }
@@ -141,7 +144,7 @@ struct NotchStatusChip: View {
                     .fill(kind.fill)
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(kind.foreground.opacity(0.18), lineWidth: 0.5)
+                            .strokeBorder(kind.foreground.opacity(0.16), lineWidth: 0.5)
                     )
             )
     }
@@ -159,6 +162,7 @@ struct NotchChipLabel: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.system(size: 10, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
             }
             Text(title)
                 .font(NotchTheme.micro.weight(.semibold))
@@ -171,7 +175,12 @@ struct NotchChipLabel: View {
                 .fill(active ? NotchTheme.chipFillActive : NotchTheme.chipFill)
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(NotchTheme.hairline.opacity(active ? 0.9 : 0.45), lineWidth: 0.5)
+                        .strokeBorder(
+                            active
+                                ? NotchTheme.controlAccent.opacity(0.35)
+                                : NotchTheme.hairline.opacity(0.45),
+                            lineWidth: 0.5
+                        )
                 )
         )
     }
@@ -187,10 +196,10 @@ struct NotchRowBackground: ViewModifier {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(selected ? NotchTheme.chipFillActive : Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

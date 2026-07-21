@@ -25,9 +25,9 @@
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
+	<string>Dynamo reads and updates your Apple Reminders in the Checklist tab so you can list, create, complete, and delete reminders from the notch.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Dynamo peeks due reminders in the notch so you don’t miss them.</string>
+	<string>Dynamo needs full Reminders access to read, create, complete, and delete reminders from the Checklist tab. Changes sync with the Reminders app.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
 	<key>NSCameraUsageDescription</key>
@@ -37,6 +37,11 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, and playlists in the notch.</string>
+	<!-- Live peek equalizer samples system / player audio (Core Audio process tap). -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer to the beat and tone of what’s playing. Audio is analyzed on-device only and never recorded or sent anywhere.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dynamo may use macOS audio capture permission to analyze music playback for the notch equalizer. Sound is processed on-device only and is never stored or uploaded.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundleURLTypes</key>

@@ -48,9 +48,12 @@ final class MeetingMode: ObservableObject {
         }
     }
 
-    /// Suppress routine peeks while in a live meeting (or Focus if enabled).
+    /// Suppress low/normal peeks while in a live meeting (or Focus if enabled).
+    /// High/critical peeks and **media track-change peeks** always show — users
+    /// still want to know what song skipped forward/back during a meeting.
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
-        guard peek.emphasis != .critical else { return false }
+        if peek.style == .media { return false }
+        guard peek.urgency < .high else { return false }
         if isEnabled, isInActiveMeeting() { return true }
         if quietOnFocus, isFocusActive() { return true }
         return false

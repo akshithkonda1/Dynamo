@@ -13,23 +13,21 @@ struct NotchShape: InsettableShape {
 
     func path(in rect: CGRect) -> Path {
         let rect = rect.insetBy(dx: insetAmount, dy: insetAmount)
-        var path = Path()
+        // Continuous bottom corners (not sharp quad “kinks”) so the lower lip
+        // sits flush with the glass instead of reading as a separate border.
         let r = min(cornerRadius, min(rect.width, rect.height) / 2)
-        // Bottom-rounded capsule hanging from the top edge.
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - r, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        return Path(
+            roundedRect: rect,
+            // Top is flush with the menu bar / camera housing — square top.
+            // Bottom is fully rounded (Dynamic Island hang).
+            cornerRadii: RectangleCornerRadii(
+                topLeading: 0,
+                bottomLeading: r,
+                bottomTrailing: r,
+                topTrailing: 0
+            ),
+            style: .continuous
         )
-        path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - r),
-            control: CGPoint(x: rect.minX, y: rect.maxY)
-        )
-        path.closeSubpath()
-        return path
     }
 
     func inset(by amount: CGFloat) -> NotchShape {

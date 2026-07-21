@@ -18,16 +18,22 @@ final class SettingsWindowController: NSObject {
         if window == nil {
             let root = SettingsView(registry: registry, notch: notch)
             let hosting = NSHostingController(rootView: root)
+            // Standard macOS settings window — titled, translucent titlebar.
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 600, height: 760),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Dynamo Settings"
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .visible
+            window.toolbarStyle = .unified
+            window.backgroundColor = NSColor.windowBackgroundColor
             window.contentViewController = hosting
             window.center()
             window.isReleasedWhenClosed = false
+            window.setFrameAutosaveName("DynamoSettingsWindow")
             window.setContentSize(NSSize(width: 600, height: 760))
             window.minSize = NSSize(width: 520, height: 560)
             self.window = window
@@ -313,8 +319,8 @@ struct SettingsView: View {
     }
 }
 
-/// A titled, card-styled settings group — makes each block of settings visible
-/// and obvious at a glance rather than crammed into one list.
+/// Grouped settings block using system control background (native) with
+/// continuous corner radius (Dynamo softness).
 private struct SettingsSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
@@ -323,17 +329,18 @@ private struct SettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.title2.weight(.semibold))
+                .foregroundStyle(.primary)
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
         )
     }
 }

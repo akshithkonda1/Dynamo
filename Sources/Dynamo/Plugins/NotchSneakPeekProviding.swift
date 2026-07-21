@@ -1,22 +1,77 @@
 import Foundation
 
-/// How insistent a sneak peek should look/feel. `.critical` is for things that
-/// genuinely warrant grabbing attention (a severe weather alert) — it gets a
-/// warning-colored glow and stays up longer than a routine peek (a track
-/// change, a meeting reminder).
-enum NotchSneakPeekEmphasis: Equatable {
-    case normal
-    case critical
+/// How insistent a sneak peek should look/feel and how long it stays up.
+/// Higher values preempt lower ones and survive Meeting Mode quieting.
+enum NotchSneakPeekUrgency: Int, Equatable, Comparable {
+    /// Track change, ambient niceties — short, suppressible in meetings.
+    case low = 0
+    /// Routine heads-up.
+    case normal = 1
+    /// Calendar / reminder approaching (e.g. 15–5 min).
+    case high = 2
+    /// Starting now, overdue, severe alert — longest dwell, never suppressed.
+    case critical = 3
+
+    static func < (lhs: NotchSneakPeekUrgency, rhs: NotchSneakPeekUrgency) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
 }
 
-/// Content for a brief "sneak peek" pill that slides out of the notch when
-/// something noteworthy happens (e.g. a track change), then auto-hides — the
-/// same transient-overlay mechanic the volume/brightness HUD uses.
+/// Visual treatment for a sneak peek.
+enum NotchSneakPeekStyle: Equatable {
+    /// Default heads-up (calendar, health, weather).
+    case standard
+    /// Track change — full-bleed aurora equalizer island.
+    case media
+}
+
+/// Content for a brief "sneak peek" that slides out of the notch when something
+/// noteworthy happens (track change, meeting soon, due reminder), then auto-hides.
 struct NotchSneakPeek: Equatable {
     var systemImage: String
     var title: String
     var subtitle: String
-    var emphasis: NotchSneakPeekEmphasis = .normal
+    var urgency: NotchSneakPeekUrgency = .normal
+    /// Optional cover / thumbnail art (e.g. album art). Raw image bytes.
+    var artworkData: Data? = nil
+    /// Optional third line (location, calendar name, playlist).
+    var detail: String = ""
+    /// Presentation style (media peeks become an aurora equalizer).
+    var style: NotchSneakPeekStyle = .standard
+
+    /// Back-compat for call sites that still think in binary emphasis.
+    var emphasis: NotchSneakPeekEmphasis {
+        urgency >= .high ? .critical : .normal
+    }
+
+    init(
+        systemImage: String,
+        title: String,
+        subtitle: String,
+        urgency: NotchSneakPeekUrgency = .normal,
+        artworkData: Data? = nil,
+        detail: String = "",
+        style: NotchSneakPeekStyle = .standard,
+        emphasis: NotchSneakPeekEmphasis? = nil
+    ) {
+        self.systemImage = systemImage
+        self.title = title
+        self.subtitle = subtitle
+        if let emphasis {
+            self.urgency = emphasis == .critical ? .critical : .normal
+        } else {
+            self.urgency = urgency
+        }
+        self.artworkData = artworkData
+        self.detail = detail
+        self.style = style
+    }
+}
+
+/// Legacy binary emphasis — prefer `NotchSneakPeekUrgency`.
+enum NotchSneakPeekEmphasis: Equatable {
+    case normal
+    case critical
 }
 
 /// Optional capability: a widget that can request a brief sneak peek.

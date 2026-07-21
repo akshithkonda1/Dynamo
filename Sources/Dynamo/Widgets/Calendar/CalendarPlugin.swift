@@ -8,32 +8,25 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     let systemImage = "calendar"
 
     @Published private(set) var events: [CalendarEventItem] = []
-    @Published private(set) var dueReminders: [ReminderItem] = []
     @Published private(set) var authState: CalendarAuthState = .notDetermined
-    @Published private(set) var remindersAuthState: CalendarAuthState = .notDetermined
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: CalendarProvider
-    private var notifiedEventIDs: Set<String> = []
-    private var notifiedReminderIDs: Set<String> = []
-    private let leadTime: TimeInterval = 5 * 60
+    /// Stages already announced per event id (e.g. "t15", "t5", "now").
+    private var notifiedEventStages: [String: Set<String>] = [:]
+    private let leadTime: TimeInterval = 15 * 60
 
     init(provider: CalendarProvider? = nil) {
-        // Default: read-only snapshot of Calendar.app’s local SQLite store —
-        // no EventKit API, no write access. Click opens Calendar.app.
-        // Reminders (separate EventKit grant) are opt-in via the "Allow
-        // Reminders" button — never requested automatically.
-        let resolved = provider ?? LocalCalendarDatabaseProvider()
+        // Events only — system Reminders live in the Checklist tab.
+        let resolved = provider ?? EventKitCalendarProvider()
         self.provider = resolved
         resolved.onChange = { [weak self] in
             guard let self else { return }
             self.applyProviderSnapshot()
             self.checkUpcomingEvents()
-            self.checkDueReminders()
         }
     }
 
-    /// Next event useful for collapsed ambient (in progress or starting within 60m).
     var ambientEvent: CalendarEventItem? {
         let now = Date()
         return events
@@ -55,7 +48,6 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         }
     }
 
-    /// True when a non–all-day event is in progress (for Meeting Mode).
     var isMeetingNow: Bool {
         ambientEvent.map { $0.phase() == .now } ?? false
     }
@@ -65,27 +57,30 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     }
 
     func start() {
-        // Wire Meeting Mode to this calendar source (protocol-free callback).
         MeetingMode.shared.isInActiveMeeting = { [weak self] in
             self?.isMeetingNow == true
         }
         provider.start()
         applyProviderSnapshot()
-        // Local DB path: requestAccess just re-checks file readability (no TCC).
-        if authState != .authorized {
+        switch authState {
+        case .notDetermined:
             Task { await provider.requestAccess() }
-        } else {
+        case .authorized:
             provider.refresh()
+        case .denied:
+            break
         }
     }
 
-    /// Drop ended events immediately so the tray never flashes stale rows.
+    func refresh() {
+        provider.refresh()
+        applyProviderSnapshot()
+    }
+
     private func applyProviderSnapshot() {
         let now = Date()
         events = provider.upcoming.filter { $0.end > now }
-        dueReminders = provider.dueReminders
         authState = provider.authorizationState
-        remindersAuthState = provider.remindersAuthState
     }
 
     func stop() {
@@ -94,12 +89,6 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     func requestAccess() {
         Task { await provider.requestAccess() }
-    }
-
-    /// Explicit user action only — this is what triggers the Reminders
-    /// system permission dialog on first call.
-    func requestRemindersAccess() {
-        Task { await provider.requestRemindersAccess() }
     }
 
     func openEvent(_ event: CalendarEventItem) {
@@ -125,46 +114,48 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     var expandedContentHeight: CGFloat { 255 }
 
     private func checkUpcomingEvents() {
-        notifiedEventIDs.formIntersection(Set(events.map(\.id)))
+        let liveIDs = Set(events.map(\.id))
+        notifiedEventStages = notifiedEventStages.filter { liveIDs.contains($0.key) }
+
         for event in events {
-            guard !event.isAllDay, !notifiedEventIDs.contains(event.id) else { continue }
+            guard !event.isAllDay else { continue }
             let interval = event.start.timeIntervalSinceNow
-            guard interval <= leadTime, interval > -60 else { continue }
-            notifiedEventIDs.insert(event.id)
+            guard interval <= leadTime, interval > -90 else { continue }
+
+            let stage = peekStage(for: interval)
+            var seen = notifiedEventStages[event.id] ?? []
+            guard !seen.contains(stage) else { continue }
+            seen.insert(stage)
+            notifiedEventStages[event.id] = seen
+
+            let urgency: NotchSneakPeekUrgency = stage == "now" ? .critical : .high
+            var detailParts: [String] = []
+            if !event.calendarName.isEmpty { detailParts.append(event.calendarName) }
+            if let loc = event.location, !loc.isEmpty { detailParts.append(loc) }
             onSneakPeek?(NotchSneakPeek(
-                systemImage: "calendar",
+                systemImage: stage == "now" ? "calendar.badge.clock" : "calendar",
                 title: event.title,
-                subtitle: startingSoonLabel(interval)
+                subtitle: eventTimeLabel(event: event, interval: interval, stage: stage),
+                urgency: urgency,
+                detail: detailParts.joined(separator: " · ")
             ))
         }
     }
 
-    private func startingSoonLabel(_ interval: TimeInterval) -> String {
-        if interval <= 0 { return "Starting now" }
+    private func peekStage(for interval: TimeInterval) -> String {
+        if interval <= 45 { return "now" }
+        if interval <= 5 * 60 + 20 { return "t5" }
+        return "t15"
+    }
+
+    private func eventTimeLabel(event: CalendarEventItem, interval: TimeInterval, stage: String) -> String {
+        let time = event.start.formatted(date: .omitted, time: .shortened)
+        if stage == "now" || interval <= 0 {
+            return "Starting now · \(time)"
+        }
         let minutes = max(1, Int((interval / 60).rounded()))
-        return minutes == 1 ? "Starts in 1 minute" : "Starts in \(minutes) minutes"
-    }
-
-    private func checkDueReminders() {
-        notifiedReminderIDs.formIntersection(Set(dueReminders.map(\.id)))
-        for reminder in dueReminders {
-            guard !notifiedReminderIDs.contains(reminder.id) else { continue }
-            let interval = reminder.due.timeIntervalSinceNow
-            guard interval <= leadTime, interval > -60 else { continue }
-            notifiedReminderIDs.insert(reminder.id)
-            let subtitle: String
-            if interval <= 0 {
-                subtitle = "Due now"
-            } else {
-                let minutes = max(1, Int((interval / 60).rounded()))
-                subtitle = minutes == 1 ? "Due in 1 minute" : "Due in \(minutes) minutes"
-            }
-            onSneakPeek?(NotchSneakPeek(
-                systemImage: "checklist",
-                title: reminder.title,
-                subtitle: subtitle
-            ))
-        }
+        if minutes == 1 { return "Starts in 1 minute · \(time)" }
+        return "Starts in \(minutes) minutes · \(time)"
     }
 }
 
@@ -205,7 +196,7 @@ private struct AmbientCalendarView: View {
     }
 }
 
-// MARK: - Views
+// MARK: - Expanded
 
 private struct ExpandedCalendarView: View {
     @ObservedObject var plugin: CalendarPlugin
@@ -229,6 +220,16 @@ private struct ExpandedCalendarView: View {
                 NotchSectionHeader("Calendar")
                 Spacer(minLength: 0)
                 if plugin.authState == .authorized {
+                    Button {
+                        plugin.refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
+                    .buttonStyle(.notchIcon(diameter: 22))
+                    .help("Refresh events")
+
                     Button {
                         plugin.openToday()
                     } label: {
@@ -259,53 +260,50 @@ private struct ExpandedCalendarView: View {
 
             switch plugin.authState {
             case .notDetermined:
-                Text("Looking for Calendar data…")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                Button("Retry") { plugin.requestAccess() }
-                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Calendar access needed")
+                        .font(NotchTheme.caption.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textSecondary)
+                    Text("Allow Dynamo to read your calendars so upcoming events appear in the notch.")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Allow Calendar Access") { plugin.requestAccess() }
+                        .controlSize(.small)
+                }
             case .denied:
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Can’t read Calendar’s local database.")
-                        .font(NotchTheme.caption)
+                    Text("Calendar access is off")
+                        .font(NotchTheme.caption.weight(.semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
-                    Text("Dynamo reads Calendar.app’s files in read-only mode (no EventKit write). If blocked, grant Full Disk Access to Dynamo, then Retry.")
+                    Text("Grant Full Calendar Access in System Settings. Dynamo never writes to your calendar.")
                         .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
-                        Button("Open Full Disk Access") {
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") {
+                        Button("Open Calendar Privacy") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
                                 NSWorkspace.shared.open(url)
                             }
                         }
                         .controlSize(.small)
                         Button("Retry") { plugin.requestAccess() }
                             .controlSize(.small)
+                        Button("Open Calendar") { plugin.openCalendarApp() }
+                            .controlSize(.small)
                     }
                 }
             case .authorized:
-                if plugin.remindersAuthState != .authorized {
-                    remindersPrompt
-                }
-                if plugin.events.isEmpty && plugin.dueReminders.isEmpty {
+                if plugin.events.isEmpty {
                     NotchEmptyState(
                         systemImage: "calendar",
                         title: "No upcoming events",
-                        caption: "Next two weeks are clear — tap New to schedule.",
+                        caption: "Next two weeks are clear — tap New to schedule. Reminders live under Checklist.",
                         prominent: true
                     )
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                            if !plugin.dueReminders.isEmpty {
-                                Text("Reminders")
-                                    .font(NotchTheme.micro.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                                ForEach(plugin.dueReminders) { reminder in
-                                    reminderRow(reminder)
-                                }
-                            }
                             ForEach(groupedDays, id: \.dayStart) { group in
                                 Text(dayLabel(group.dayStart))
                                     .font(NotchTheme.micro.weight(.semibold))
@@ -321,31 +319,6 @@ private struct ExpandedCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    /// Reminders use a separate EventKit grant from Calendar's file access —
-    /// only requested here, in response to an explicit tap, never at launch.
-    @ViewBuilder
-    private var remindersPrompt: some View {
-        HStack(spacing: 6) {
-            Image(systemName: plugin.remindersAuthState == .denied ? "exclamationmark.circle" : "checklist")
-                .font(.system(size: 10, weight: .semibold))
-            if plugin.remindersAuthState == .denied {
-                Button("Reminders access denied — open Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.plain)
-            } else {
-                Button("Allow Reminders to show due items here") {
-                    plugin.requestRemindersAccess()
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .font(NotchTheme.micro)
-        .foregroundStyle(NotchTheme.textTertiary)
     }
 
     private struct DayGroup {
@@ -417,25 +390,6 @@ private struct ExpandedCalendarView: View {
             NotchStatusChip(text: "Soon", kind: .soon)
         case .later, .ended:
             EmptyView()
-        }
-    }
-
-    private func reminderRow(_ reminder: ReminderItem) -> some View {
-        HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
-            Image(systemName: "checklist")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchTheme.caution)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(reminder.title)
-                    .font(NotchTheme.body)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                Text(Self.timeFormatter.string(from: reminder.due))
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-            }
-            Spacer(minLength: 0)
         }
     }
 

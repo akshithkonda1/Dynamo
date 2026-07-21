@@ -8,8 +8,19 @@ struct NotchContentView: View {
     @ObservedObject var hud: SystemHUDController
     @ObservedObject var sneakPeek: NotchSneakPeekController
 
+    private var isShowingPeek: Bool {
+        sneakPeek.peek != nil && !controller.isExpanded && hud.state == nil
+    }
+
+    private var isShowingOverlay: Bool {
+        hud.state != nil || isShowingPeek
+    }
+
     private var cornerRadius: CGFloat {
-        controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed
+        if controller.isExpanded { return NotchTheme.radiusExpanded }
+        // Peeks hang lower/wider — use expanded radius so the clip matches the drop.
+        if isShowingOverlay { return NotchTheme.radiusExpanded }
+        return NotchTheme.radiusCollapsed
     }
 
     var body: some View {
@@ -29,36 +40,24 @@ struct NotchContentView: View {
             }
             .transition(.opacity)
         }
+        // Solid island: hard clip only — no soft-fade mask (that made the bottom ghosty).
+        .compositingGroup()
         .clipShape(NotchShape(cornerRadius: cornerRadius))
-        // Border uses the *same* shape as the clip — RoundedRectangle was misaligned.
-        .overlay(
-            NotchShape(cornerRadius: cornerRadius)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(controller.isExpanded ? 0.24 : 0.10),
-                            Color.white.opacity(controller.isExpanded ? 0.06 : 0.03)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: controller.isExpanded ? 1 : 0.6
-                )
-                .allowsHitTesting(false)
-        )
+        // No stroke. No expanded silhouette shadow. Clean continuous bottom lip.
         .overlay {
-            // Breathing rim only while collapsed (no continuous work when expanded).
-            if !controller.isExpanded {
+            if !controller.isExpanded && !isShowingOverlay {
                 AmbientBreathingRim(accent: ambientAccent)
                     .allowsHitTesting(false)
             }
         }
         .shadow(
-            color: controller.isExpanded ? NotchTheme.shadowExpanded : ambientAccent.opacity(0.20),
-            radius: controller.isExpanded ? NotchTheme.shadowRadius : 5,
-            y: controller.isExpanded ? NotchTheme.shadowY : 0
+            color: controller.isExpanded
+                ? Color.black.opacity(0.22)
+                : (isShowingOverlay ? Color.black.opacity(0.22) : ambientAccent.opacity(0.08)),
+            // Wide soft bloom — depth without a hard outlined bottom rim.
+            radius: controller.isExpanded ? 20 : (isShowingOverlay ? 10 : 2),
+            y: controller.isExpanded ? 6 : (isShowingOverlay ? 2 : 0)
         )
-        // Structural springs only — matches AppKit panel spring duration.
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
         .animation(NotchTheme.snappy, value: hud.state != nil)
@@ -75,19 +74,30 @@ struct NotchContentView: View {
     }
 
     private var glassBackground: some View {
-        VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
-            .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
-            .overlay(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(controller.isExpanded ? 0.09 : 0.045),
-                        Color.clear,
-                        Color.black.opacity(controller.isExpanded ? 0.10 : 0.05)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+        VibrancyBackground(
+            material: glassMaterial,
+            blendingMode: .behindWindow,
+            forceDark: true
+        )
+        // Full solid scrim top → bottom (no fade-to-clear; that left a hollow lip).
+        .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
+        .overlay(
+            // Soft top sheen only — bottom stays solid glass.
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(controller.isExpanded ? 0.06 : 0.035),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .center
             )
+        )
+    }
+
+    private var glassMaterial: NSVisualEffectView.Material {
+        if isShowingOverlay { return NotchTheme.materialOverlay }
+        if controller.isExpanded { return NotchTheme.materialExpanded }
+        return NotchTheme.materialCollapsed
     }
 
     @ViewBuilder
@@ -102,17 +112,14 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Tray
+            // Tray — primary widgets left; Health / Shelf / Webcam + Settings right.
             HStack(spacing: 4) {
                 ForEach(leadingTrayPlugins, id: \.id) { plugin in
                     trayButton(for: plugin)
                 }
                 Spacer(minLength: 0)
-                if let shelf = shelfPlugin {
-                    trayButton(for: shelf)
-                }
-                if let webcam = webcamPlugin {
-                    trayButton(for: webcam)
+                ForEach(trailingTrayPlugins, id: \.id) { plugin in
+                    trayButton(for: plugin)
                 }
                 TrayIconButton(
                     systemImage: "gearshape.fill",
@@ -199,16 +206,18 @@ struct NotchContentView: View {
         .help("Open Clock")
     }
 
+    /// Right-side tray cluster (before Settings): Health, Shelf, Webcam.
+    private static let trailingTrayIDs = ["system-health", "shelf", "webcam"]
+
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
-        registry.plugins.filter { $0.id != "webcam" && $0.id != "shelf" }
+        let trailing = Set(Self.trailingTrayIDs)
+        return registry.plugins.filter { !trailing.contains($0.id) }
     }
 
-    private var shelfPlugin: (any NotchWidgetPlugin)? {
-        registry.plugins.first { $0.id == "shelf" }
-    }
-
-    private var webcamPlugin: (any NotchWidgetPlugin)? {
-        registry.plugins.first { $0.id == "webcam" }
+    private var trailingTrayPlugins: [any NotchWidgetPlugin] {
+        Self.trailingTrayIDs.compactMap { id in
+            registry.plugins.first { $0.id == id }
+        }
     }
 
     @ViewBuilder

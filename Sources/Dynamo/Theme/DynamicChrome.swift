@@ -28,20 +28,38 @@ enum DynamoClockApp {
 
 /// Soft luminous rim for the collapsed notch while ambient content is live —
 /// reads as a Dynamic Island “alive” state without stealing attention.
+/// Hairline only on the *sides/top of the hang* — bottom edge stays un-stroked
+/// so it never reads as a second hard border under the island.
 struct AmbientBreathingRim: View {
     var accent: Color = NotchTheme.calmGlow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breathe = false
 
     var body: some View {
-        // Same silhouette as the panel clip — not a rounded rect that fights NotchShape.
+        // Glow bloom only — no strokeBorder (that painted a hard bottom rim).
         NotchShape(cornerRadius: NotchTheme.radiusCollapsed)
-            .strokeBorder(accent.opacity(reduceMotion ? 0.22 : (breathe ? 0.38 : 0.12)), lineWidth: 0.9)
+            .fill(Color.clear)
             .shadow(
-                color: accent.opacity(reduceMotion ? 0.1 : (breathe ? 0.26 : 0.08)),
-                radius: reduceMotion ? 2 : (breathe ? 5 : 2),
+                color: accent.opacity(reduceMotion ? 0.08 : (breathe ? 0.22 : 0.07)),
+                radius: reduceMotion ? 1.5 : (breathe ? 4 : 1.5),
                 y: 0
             )
+            .overlay {
+                // Very soft inner top sheen; bottom of path stays clean.
+                NotchShape(cornerRadius: NotchTheme.radiusCollapsed)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(reduceMotion ? 0.12 : (breathe ? 0.20 : 0.06)),
+                                accent.opacity(0.02),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
             .onAppear {
                 guard !reduceMotion else { return }
                 withAnimation(NotchTheme.pulse) { breathe = true }
@@ -156,40 +174,61 @@ struct DynamoQuickAction: View {
 
 // MARK: - Playing art ring
 
-/// Subtle rotating gradient border around album art while media plays.
+/// Flush “now playing” accent on album art — sits *on* the art edge (not a
+/// floating larger frame) so it never looks like a second border at launch.
 struct PlayingArtRing<Content: View>: View {
     var isPlaying: Bool
+    var size: CGFloat = 108
+    var cornerRadius: CGFloat = 16
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var spin = false
+    @State private var pulse = false
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
 
     var body: some View {
-        ZStack {
-            content()
-            if isPlaying {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(
-                        AngularGradient(
-                            colors: [
-                                NotchTheme.mediaGlow,
-                                Color.white.opacity(0.35),
-                                NotchTheme.calmGlow,
-                                NotchTheme.mediaGlow
-                            ],
-                            center: .center
-                        ),
-                        lineWidth: 2
-                    )
-                    .frame(width: 114, height: 114)
-                    .rotationEffect(.degrees((isPlaying && !reduceMotion && spin) ? 360 : 0))
-                    .onAppear {
-                        guard !reduceMotion else { return }
-                        withAnimation(.linear(duration: 10).repeatForever(autoreverses: false)) {
-                            spin = true
-                        }
-                    }
-                    .allowsHitTesting(false)
+        content()
+            .frame(width: size, height: size)
+            .clipShape(shape)
+            .overlay {
+                // Single hairline always flush to the clip.
+                shape
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
             }
-        }
+            .overlay {
+                if isPlaying {
+                    // Soft pulse on the same path — no oversized rotated rect.
+                    shape
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    NotchTheme.mediaGlow.opacity(pulse ? 0.55 : 0.22),
+                                    Color.white.opacity(pulse ? 0.28 : 0.10),
+                                    NotchTheme.mediaGlow.opacity(pulse ? 0.35 : 0.14)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.1
+                        )
+                        .shadow(
+                            color: NotchTheme.mediaGlow.opacity(pulse ? 0.35 : 0.12),
+                            radius: pulse ? 5 : 2
+                        )
+                        .animation(
+                            reduceMotion
+                                ? nil
+                                : .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                            value: pulse
+                        )
+                        .onAppear {
+                            guard !reduceMotion else { return }
+                            pulse = true
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
     }
 }

@@ -18,7 +18,10 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
     private let provider: NowPlayingProvider
     private var lastTrackKey: String
+    /// Suppress only the first synthetic update after launch (not real skips).
     private var suppressNextPeek = true
+    /// After next/previous, poll briefly until the track key changes.
+    private var skipProbeWorkItems: [DispatchWorkItem] = []
 
     init(provider: NowPlayingProvider? = nil) {
         let resolved = provider ?? MockNowPlayingProvider()
@@ -34,34 +37,75 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         suppressNextPeek = true
         provider.start()
         info = provider.current
+        lastTrackKey = Self.trackKey(info)
+        MediaPeekPulse.shared.sync(from: info)
         refreshPlaylists()
     }
 
     func stop() {
+        cancelSkipProbe()
         provider.stop()
     }
 
     private func handleInfoChange(_ newValue: NowPlayingInfo) {
+        let previous = info
         info = newValue
+        MediaPeekPulse.shared.sync(from: newValue)
+
         let key = Self.trackKey(newValue)
-        let shouldSuppress = suppressNextPeek
-        suppressNextPeek = false
-        defer { lastTrackKey = key }
-        guard !shouldSuppress,
-              newValue.isPlaying,
-              key != lastTrackKey,
-              !newValue.title.isEmpty,
+        let previousKey = lastTrackKey
+        let isNewTrack = key != previousKey
+
+        // Always remember the latest identity so skip-probes compare correctly.
+        lastTrackKey = key
+
+        // First post-launch snapshot only — never suppress a real track change after that.
+        if suppressNextPeek {
+            suppressNextPeek = false
+            // If launch already has a playing track, don't peek until the user skips.
+            return
+        }
+
+        guard !newValue.title.isEmpty,
               newValue.title != NowPlayingInfo.empty.title
         else { return }
+
+        if isNewTrack {
+            // Forward *or* backward skip, auto-advance, playlist jump — always peek.
+            presentTrackPeek(newValue)
+            return
+        }
+
+        // Same track: only refresh peek when cover art arrives after the title did.
+        let artArrived = previous.artworkData == nil && newValue.artworkData != nil
+        if artArrived {
+            presentTrackPeek(newValue)
+        }
+    }
+
+    private func presentTrackPeek(_ info: NowPlayingInfo) {
+        let subtitle: String
+        if !info.artist.isEmpty, !info.album.isEmpty {
+            subtitle = "\(info.artist) · \(info.album)"
+        } else if !info.artist.isEmpty {
+            subtitle = info.artist
+        } else {
+            subtitle = info.album
+        }
         onSneakPeek?(NotchSneakPeek(
             systemImage: "music.note",
-            title: newValue.title,
-            subtitle: newValue.artist.isEmpty ? newValue.album : newValue.artist
+            title: info.title,
+            subtitle: subtitle,
+            urgency: .normal,
+            artworkData: info.artworkData,
+            detail: info.playlistName ?? "",
+            style: .media
         ))
     }
 
     private static func trackKey(_ info: NowPlayingInfo) -> String {
-        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)"
+        // Include playlist when known so “same song, different context” still peeks.
+        "\(info.title)\u{1}\(info.artist)\u{1}\(info.album)\u{1}\(info.playlistName ?? "")"
     }
 
     func expandedView() -> AnyView {
@@ -69,8 +113,51 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     }
 
     func togglePlayPause() { provider.togglePlayPause() }
-    func nextTrack() { provider.nextTrack() }
-    func previousTrack() { provider.previousTrack() }
+
+    func nextTrack() {
+        provider.nextTrack()
+        // MediaRemote/AppleScript often lag; actively probe for the new track.
+        probeForTrackChange(reason: "next")
+    }
+
+    func previousTrack() {
+        provider.previousTrack()
+        probeForTrackChange(reason: "previous")
+    }
+
+    /// After skip, re-check now-playing a few times so peek always fires
+    /// even if the provider’s first onChange is delayed or empty.
+    private func probeForTrackChange(reason: String) {
+        cancelSkipProbe()
+        let baseline = lastTrackKey
+        // Staggered probes: 0.15s … ~1.8s covers Music + Spotify.
+        let delays: [TimeInterval] = [0.12, 0.28, 0.5, 0.85, 1.3, 1.9]
+        for delay in delays {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                // Provider may have already pushed onChange; if not, force a path
+                // through handleInfoChange with whatever is current now.
+                let current = self.provider.current
+                let key = Self.trackKey(current)
+                if key != baseline, !current.title.isEmpty,
+                   current.title != NowPlayingInfo.empty.title {
+                    self.handleInfoChange(current)
+                    self.cancelSkipProbe()
+                } else if key == baseline {
+                    // Nudge: re-assign onChange path with same object if fields updated
+                    // (e.g. title filled in after empty).
+                    self.handleInfoChange(current)
+                }
+            }
+            skipProbeWorkItems.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func cancelSkipProbe() {
+        for item in skipProbeWorkItems { item.cancel() }
+        skipProbeWorkItems.removeAll()
+    }
 
     /// Open Music / Spotify and reveal the current track / playlist context.
     func openConnectedApp() {
@@ -132,7 +219,12 @@ private struct AmbientMediaView: View {
             .frame(maxWidth: 90, alignment: .leading)
             Spacer(minLength: 0)
             if !dimmed {
-                MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12, color: NotchTheme.mediaGlow.opacity(0.95))
+                MusicBarsView(
+                    isPlaying: plugin.info.isPlaying,
+                    barCount: 6,
+                    maxHeight: 16,
+                    color: NotchTheme.mediaGlow.opacity(0.95)
+                )
                     .fixedSize()
             }
         }
@@ -204,29 +296,27 @@ private struct ExpandedMediaView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceLG) {
+        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
             artwork
-                .onTapGesture { plugin.openConnectedApp() }
-                .help("Open in \(playerAppName)")
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 header
                 if hasTrack {
                     MarqueeText(
                         text: plugin.info.title,
-                        font: .system(size: 17, weight: .semibold),
+                        font: .system(size: 16, weight: .semibold),
                         foreground: NotchTheme.textPrimary,
                         speed: 32
                     )
-                    .frame(height: 22)
+                    .frame(height: 20)
                     .onTapGesture { plugin.openConnectedApp() }
                     MarqueeText(
                         text: subtitle,
-                        font: NotchTheme.body,
+                        font: NotchTheme.caption,
                         foreground: NotchTheme.textSecondary,
                         speed: 28
                     )
-                    .frame(height: 18)
+                    .frame(height: 16)
                     timelineBar
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
@@ -246,14 +336,13 @@ private struct ExpandedMediaView: View {
                     .padding(.vertical, 4)
                 }
 
-                // Always show exact system volume percent (compact by default).
                 systemVolumeSection
 
                 if hasTrack {
                     playlistRow
                 }
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 2)
                 transportRow
             }
             Spacer(minLength: 0)
@@ -314,7 +403,12 @@ private struct ExpandedMediaView: View {
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
             if plugin.info.isPlaying {
-                MusicBarsView(isPlaying: true, maxHeight: 11)
+                MusicBarsView(
+                    isPlaying: plugin.info.isPlaying,
+                    barCount: 6,
+                    maxHeight: 16,
+                    color: NotchTheme.mediaGlow.opacity(0.95)
+                )
                     .fixedSize()
             }
             Spacer(minLength: 0)
@@ -519,44 +613,40 @@ private struct ExpandedMediaView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        PlayingArtRing(isPlaying: plugin.info.isPlaying) {
+        let corner: CGFloat = 16
+        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: 104, cornerRadius: corner) {
             Group {
                 if let data = plugin.info.artworkData, let image = NSImage(data: data) {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(1, contentMode: .fill)
-                        .frame(width: 108, height: 108)
-                        .clipShape(shape)
-                        .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
-                        .shadow(color: .black.opacity(0.40), radius: 14, y: 5)
                 } else {
-                    shape
-                        .fill(
-                            LinearGradient(
-                                colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                    ZStack {
+                        LinearGradient(
+                            colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .frame(width: 108, height: 108)
-                        .overlay(
-                            Image(systemName: "music.note")
-                                .font(.system(size: 30, weight: .medium))
-                                .foregroundStyle(NotchTheme.textTertiary)
-                        )
-                        .overlay(shape.strokeBorder(NotchTheme.hairline, lineWidth: 1))
+                        Image(systemName: "music.note")
+                            .font(.system(size: 28, weight: .medium))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
                 }
             }
-            .contentShape(shape)
+            .frame(width: 104, height: 104)
+            .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
             .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "arrow.up.right.square.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-                    .padding(7)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(5)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+                    .padding(6)
             }
         }
+        .shadow(color: .black.opacity(0.32), radius: 10, y: 4)
+        .help("Open in \(playerAppName)")
+        .onTapGesture { plugin.openConnectedApp() }
     }
 
     private var transportRow: some View {

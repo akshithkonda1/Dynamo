@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(ChecklistPlugin())
         registry.register(WeatherPlugin())
         registry.register(BatteryPlugin())
+        registry.register(SystemHealthPlugin())
         registry.register(ShelfPlugin())
         registry.register(WebcamPlugin())
 

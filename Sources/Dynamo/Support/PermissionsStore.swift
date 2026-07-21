@@ -170,7 +170,7 @@ final class PermissionsStore: ObservableObject {
     /// Passive status read only — `EKEventStore.authorizationStatus(for:)`
     /// never prompts; only `requestFullAccessToReminders()` /
     /// `requestAccess(to:)` do, and those are only ever called from
-    /// `LocalCalendarDatabaseProvider.requestRemindersAccess()` in response
+    /// `RemindersProvider.requestAccess()` (Checklist tab) in response
     /// to explicit user action.
     private static func probeReminders() -> PermissionMemoryStatus {
         let status = EKEventStore.authorizationStatus(for: .reminder)
