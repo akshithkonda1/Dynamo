@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var settingsController: SettingsWindowController?
     private var hiddenModeMenuItem: NSMenuItem?
+    private weak var mediaPlugin: MediaControlsPlugin?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
@@ -52,7 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.sneakPeekController = sneakPeekController
 
         // Default tray order. Settings can reorder without hosts knowing names.
-        registry.register(MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider()))
+        let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
+        mediaPlugin = media
+        registry.register(media)
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
@@ -129,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         menu.addItem(NSMenuItem(title: "Show Notch", action: #selector(showNotch), keyEquivalent: "n"))
+        menu.addItem(NSMenuItem(title: "Focus File Shelf", action: #selector(focusShelf), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Play/Pause", action: #selector(menuPlayPause), keyEquivalent: "p"))
+        menu.addItem(NSMenuItem(title: "Mute / Unmute", action: #selector(menuMute), keyEquivalent: "m"))
         menu.addItem(NSMenuItem.separator())
         let hiddenItem = NSMenuItem(title: "Hidden mode", action: #selector(toggleHiddenMode), keyEquivalent: "")
         hiddenItem.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
@@ -147,6 +154,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showNotch() {
         MainActor.assumeIsolated {
             notchController?.revealAndExpand()
+        }
+    }
+
+    @objc private func focusShelf() {
+        MainActor.assumeIsolated {
+            notchController?.focusPlugin(id: "shelf")
+        }
+    }
+
+    @objc private func menuPlayPause() {
+        MainActor.assumeIsolated {
+            mediaPlugin?.togglePlayPause()
+        }
+    }
+
+    @objc private func menuMute() {
+        MainActor.assumeIsolated {
+            SystemVolumeController.shared.toggleMute()
         }
     }
 

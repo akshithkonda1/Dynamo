@@ -57,9 +57,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // IA: General · Appearance · Widgets · Permissions · About
                 generalSection
-                permissionsSection
+                appearanceSection
                 widgetsSection
+                permissionsSection
 
                 // Per-widget configuration, discovered generically via
                 // `WidgetSettingsProviding` — Settings never names a widget.
@@ -69,6 +71,8 @@ struct SettingsView: View {
                         section.view
                     }
                 }
+
+                aboutSection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,6 +102,25 @@ struct SettingsView: View {
 
             Divider()
 
+            Text("Collapse after leaving notch")
+                .font(.subheadline.weight(.semibold))
+            Picker("Collapse delay", selection: Binding(
+                get: { Int(notch.collapseDelaySeconds) },
+                set: { notch.setCollapseDelay(TimeInterval($0)) }
+            )) {
+                Text("Hover only (immediate)").tag(0)
+                Text("3 seconds").tag(3)
+                Text("10 seconds").tag(10)
+                Text("30 seconds").tag(30)
+            }
+            .labelsHidden()
+            Text("How long the expanded tray stays open after the cursor leaves. Hover-only collapses as soon as you leave.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
             Toggle("Hidden mode (peek from the top edge)", isOn: Binding(
                 get: { notch.isHiddenModeEnabled },
                 set: { notch.setHiddenMode($0) }
@@ -106,9 +129,11 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 
-            Divider()
-
+    private var appearanceSection: some View {
+        SettingsSection(title: "Appearance") {
             Text("Display for notch")
                 .font(.subheadline.weight(.semibold))
             Picker("Display", selection: Binding(
@@ -125,10 +150,35 @@ struct SettingsView: View {
                 }
             }
             .labelsHidden()
-            Text("Pick which monitor hosts the notch tray when you use multiple displays.")
+            Text("Pick which monitor hosts the notch tray when you use multiple displays. Automatic prefers a notched built-in display.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var aboutSection: some View {
+        SettingsSection(title: "About") {
+            Text("Dynamo")
+                .font(.body.weight(.semibold))
+            Text("Notch widget dock for macOS — media, calendar, clipboard, shelf, webcam, and more.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Daily driver build: ~/Documents/Dynamo/dist/Dynamo.app")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            HStack(spacing: 12) {
+                Button("Show Notch") {
+                    notch.revealAndExpand()
+                }
+                .controlSize(.small)
+                Button("Focus File Shelf") {
+                    notch.focusPlugin(id: "shelf")
+                }
+                .controlSize(.small)
+            }
         }
     }
 

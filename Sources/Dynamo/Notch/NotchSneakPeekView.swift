@@ -13,7 +13,8 @@ struct NotchSneakPeekView: View {
             Image(systemName: peek.systemImage)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(accentColor)
-                .frame(width: 20)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(isCritical ? NotchTheme.caution.opacity(0.22) : NotchTheme.chipFill))
                 .shadow(color: isCritical ? NotchTheme.caution.opacity(0.85) : .clear, radius: isCritical ? 6 : 0)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -34,7 +35,15 @@ struct NotchSneakPeekView: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(glowBackground)
-        .overlay(glowBorder)
+        .overlay(unifiedBorder)
+    }
+
+    private var unifiedBorder: some View {
+        RoundedRectangle(cornerRadius: NotchTheme.radiusExpanded, style: .continuous)
+            .strokeBorder(
+                isCritical ? NotchTheme.caution.opacity(0.55) : NotchTheme.hairline,
+                lineWidth: 1
+            )
     }
 
     // A soft warning-colored wash + border behind critical peeks — the
@@ -47,11 +56,4 @@ struct NotchSneakPeekView: View {
         }
     }
 
-    @ViewBuilder
-    private var glowBorder: some View {
-        if isCritical {
-            RoundedRectangle(cornerRadius: NotchTheme.radiusExpanded, style: .continuous)
-                .stroke(NotchTheme.caution.opacity(0.55), lineWidth: 1)
-        }
-    }
 }

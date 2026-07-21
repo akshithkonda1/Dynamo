@@ -47,13 +47,28 @@ final class NotchWindowController: ObservableObject {
         let height = registry?.activePlugin?.expandedContentHeight ?? 220
         return NSSize(width: Self.expandedWidth, height: height)
     }
-    /// Stay open while the cursor is over the notch; collapse 10s after leave.
-    private let collapseDelay: TimeInterval = 10.0
+    /// Stay open while the cursor is over the notch; collapse after leave
+    /// (delay from Settings — 3 / 10 / 30s, or hover-only = 0).
     private let retreatDelay: TimeInterval = 1.0
     /// Extra padding around the panel when deciding if the mouse is "still near".
     private let nearPadding: CGFloat = 14
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
+    static let collapseDelayKey = "dynamo.collapseDelaySeconds"
+    /// Published for Settings binding. `0` = collapse immediately on leave (hover-only).
+    @Published private(set) var collapseDelaySeconds: TimeInterval = 10.0
+
+    /// Effective collapse delay. Values: 0 (hover-only), 3, 10, 30.
+    var collapseDelay: TimeInterval {
+        collapseDelaySeconds
+    }
+
+    func setCollapseDelay(_ seconds: TimeInterval) {
+        let allowed: [TimeInterval] = [0, 3, 10, 30]
+        let value = allowed.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? 10
+        collapseDelaySeconds = value
+        UserDefaults.standard.set(value, forKey: Self.collapseDelayKey)
+    }
 
     func attach(registry: WidgetRegistry, hud: SystemHUDController, sneakPeek: NotchSneakPeekController) {
         self.registry = registry
@@ -72,8 +87,22 @@ final class NotchWindowController: ObservableObject {
             hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
         isHiddenModeEnabled = UserDefaults.standard.bool(forKey: Self.hiddenModeKey)
+        if UserDefaults.standard.object(forKey: Self.collapseDelayKey) != nil {
+            let stored = UserDefaults.standard.double(forKey: Self.collapseDelayKey)
+            setCollapseDelay(stored)
+        } else {
+            collapseDelaySeconds = 10
+        }
         reposition()
         applyInitialVisibility()
+    }
+
+    /// Switch the tray to a widget by id and expand (menu quick action / Shelf focus).
+    func focusPlugin(id: String) {
+        if registry?.plugins.contains(where: { $0.id == id }) == true {
+            registry?.activePluginID = id
+        }
+        revealAndExpand()
     }
 
     private func activeWidgetDidChange() {
