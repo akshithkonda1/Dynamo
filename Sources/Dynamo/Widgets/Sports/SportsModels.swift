@@ -4,7 +4,7 @@ enum SportsLeague: String, CaseIterable, Identifiable, Codable {
     case nba
     case nfl
     case mls
-    case soccer // FIFA / intl + top leagues via ESPN soccer scoreboard
+    case soccer
     case f1
 
     var id: String { rawValue }
@@ -28,14 +28,32 @@ enum SportsLeague: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// ESPN site/league path segment for scoreboard API.
+    /// Primary ESPN path (single-league chips).
     var espnPath: String {
         switch self {
         case .nba: return "basketball/nba"
         case .nfl: return "football/nfl"
         case .mls: return "soccer/usa.1"
-        case .soccer: return "soccer/fifa.world"
+        case .soccer: return "soccer/eng.1" // EPL primary; fan-out adds more
         case .f1: return "racing/f1"
+        }
+    }
+
+    /// Extra free scoreboard paths merged for this chip (soccer breadth).
+    var espnExtraPaths: [String] {
+        switch self {
+        case .soccer:
+            return [
+                "soccer/eng.1",
+                "soccer/usa.1",
+                "soccer/uefa.champions",
+                "soccer/esp.1",
+                "soccer/fifa.world"
+            ]
+        case .mls:
+            return ["soccer/usa.1"]
+        default:
+            return [espnPath]
         }
     }
 }
@@ -49,11 +67,20 @@ enum SportsEventStatus: String, Codable, Equatable {
 
     var label: String {
         switch self {
-        case .scheduled: return "Scheduled"
+        case .scheduled: return "Soon"
         case .live: return "Live"
         case .final: return "Final"
-        case .delayed: return "Delayed"
-        case .other: return ""
+        case .delayed: return "Delay"
+        case .other: return "—"
+        }
+    }
+
+    var sectionTitle: String {
+        switch self {
+        case .live: return "Live"
+        case .scheduled, .delayed: return "Upcoming"
+        case .final: return "Final"
+        case .other: return "Other"
         }
     }
 }
@@ -68,15 +95,26 @@ struct SportsEvent: Identifiable, Equatable, Codable {
     let awayName: String
     let homeScore: String?
     let awayScore: String?
+    let homeAbbrev: String?
+    let awayAbbrev: String?
+    let homeLogoURL: String?
+    let awayLogoURL: String?
     let statusText: String
     let startDate: Date?
     let linkURL: String?
-    /// For F1 / non-matchup: single headline score line.
     let headlineScore: String?
+    let broadcast: String?
 
     var isLive: Bool { status == .live }
+
+    var displayAway: String { awayAbbrev?.nilIfEmpty ?? awayName }
+    var displayHome: String { homeAbbrev?.nilIfEmpty ?? homeName }
 }
 
 struct SportsFollowList: Codable, Equatable {
-    var teamNames: [String] // lowercase match against home/away
+    var teamNames: [String]
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

@@ -1,27 +1,93 @@
 import Foundation
 
-/// Public ESPN CDN scoreboard (no API key). Shape can change — fail soft.
+/// Public ESPN CDN scoreboard (no API key). Multi-day + multi-path fan-out.
 actor ESPNScoreboardClient {
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 12
-        c.timeoutIntervalForResource = 20
+        c.timeoutIntervalForResource = 24
+        c.httpAdditionalHeaders = [
+            "User-Agent": "Dynamo/1.0 (macOS; scoreboard)",
+            "Accept": "application/json"
+        ]
         return URLSession(configuration: c)
     }()
 
-    func fetchEvents(league: SportsLeague, date: Date = Date()) async throws -> [SportsEvent] {
-        let day = Self.dayString(date)
-        // site.api.espn.com/apis/site/v2/sports/{path}/scoreboard?dates=YYYYMMDD
-        let path = league.espnPath
+    /// Fetch a 3-day window (yesterday…tomorrow) and merge unique events.
+    func fetchEvents(league: SportsLeague, around date: Date = Date()) async throws -> [SportsEvent] {
+        let cal = Calendar.current
+        let days: [Date] = [
+            cal.date(byAdding: .day, value: -1, to: date) ?? date,
+            date,
+            cal.date(byAdding: .day, value: 1, to: date) ?? date
+        ]
+        let paths = Array(Set(league.espnExtraPaths))
+
+        var combined: [String: SportsEvent] = [:]
+
+        await withTaskGroup(of: [SportsEvent].self) { group in
+            for path in paths {
+                for day in days {
+                    group.addTask {
+                        (try? await self.fetchScoreboard(path: path, league: league, date: day)) ?? []
+                    }
+                }
+                // Also try undated “current” board once per path.
+                group.addTask {
+                    (try? await self.fetchScoreboard(path: path, league: league, date: nil)) ?? []
+                }
+            }
+            for await batch in group {
+                for ev in batch {
+                    // Prefer live over scheduled if duplicate ids.
+                    if let existing = combined[ev.id] {
+                        if existing.status != .live, ev.status == .live {
+                            combined[ev.id] = ev
+                        }
+                    } else {
+                        combined[ev.id] = ev
+                    }
+                }
+            }
+        }
+
+        return combined.values.sorted { lhs, rhs in
+            let lo = statusRank(lhs.status)
+            let ro = statusRank(rhs.status)
+            if lo != ro { return lo < ro }
+            let ld = lhs.startDate ?? .distantFuture
+            let rd = rhs.startDate ?? .distantFuture
+            return ld < rd
+        }
+    }
+
+    private func statusRank(_ s: SportsEventStatus) -> Int {
+        switch s {
+        case .live: return 0
+        case .scheduled, .delayed: return 1
+        case .other: return 2
+        case .final: return 3
+        }
+    }
+
+    private func fetchScoreboard(path: String, league: SportsLeague, date: Date?) async throws -> [SportsEvent] {
         var components = URLComponents(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/scoreboard")
-        components?.queryItems = [URLQueryItem(name: "dates", value: day)]
+        var items: [URLQueryItem] = []
+        if let date {
+            items.append(URLQueryItem(name: "dates", value: Self.dayString(date)))
+        }
+        components?.queryItems = items.isEmpty ? nil : items
         guard let url = components?.url else { return [] }
 
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse else { return [] }
+            guard (200..<300).contains(http.statusCode) else { return [] }
+            return try parseScoreboard(data: data, league: league)
+        } catch {
+            // Soft-fail single path/day so fan-out still works.
+            return []
         }
-        return try parseScoreboard(data: data, league: league)
     }
 
     private func parseScoreboard(data: Data, league: SportsLeague) throws -> [SportsEvent] {
@@ -32,16 +98,19 @@ actor ESPNScoreboardClient {
         var out: [SportsEvent] = []
 
         for ev in eventsJSON {
-            let id = (ev["id"] as? String) ?? UUID().uuidString
+            let rawID = (ev["id"] as? String) ?? UUID().uuidString
+            let id = "\(league.rawValue)-\(rawID)"
             let name = (ev["name"] as? String) ?? (ev["shortName"] as? String) ?? "Event"
             let dateStr = ev["date"] as? String
-            let start = dateStr.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let start = Self.parseISO(dateStr)
 
             let statusObj = ev["status"] as? [String: Any]
             let typeObj = statusObj?["type"] as? [String: Any]
             let state = (typeObj?["state"] as? String)?.lowercased() ?? ""
             let completed = typeObj?["completed"] as? Bool ?? false
-            let detail = (typeObj?["detail"] as? String) ?? (typeObj?["shortDetail"] as? String) ?? ""
+            let detail = (typeObj?["detail"] as? String)
+                ?? (typeObj?["shortDetail"] as? String)
+                ?? ""
             let status: SportsEventStatus
             if completed || state == "post" { status = .final }
             else if state == "in" { status = .live }
@@ -52,12 +121,29 @@ actor ESPNScoreboardClient {
             var awayName = "Away"
             var homeScore: String?
             var awayScore: String?
+            var homeAbbrev: String?
+            var awayAbbrev: String?
+            var homeLogo: String?
+            var awayLogo: String?
             var link: String?
+            var broadcast: String?
 
             if let competitions = ev["competitions"] as? [[String: Any]],
                let comp = competitions.first {
                 if let links = comp["links"] as? [[String: Any]] {
-                    link = links.first?["href"] as? String
+                    link = (links.first?["href"] as? String)
+                        ?? (links.first { ($0["rel"] as? [String])?.contains("summary") == true }?["href"] as? String)
+                }
+                if let broadcasts = comp["broadcasts"] as? [[String: Any]] {
+                    let names = broadcasts.compactMap { $0["names"] as? [String] }.flatMap { $0 }
+                    if let first = names.first { broadcast = first }
+                }
+                if let geo = comp["geoBroadcasts"] as? [[String: Any]] {
+                    if broadcast == nil,
+                       let media = geo.first?["media"] as? [String: Any],
+                       let short = media["shortName"] as? String {
+                        broadcast = short
+                    }
                 }
                 if let competitors = comp["competitors"] as? [[String: Any]] {
                     for c in competitors {
@@ -66,20 +152,34 @@ actor ESPNScoreboardClient {
                             ?? (team?["shortDisplayName"] as? String)
                             ?? (team?["name"] as? String)
                             ?? "Team"
+                        let abbrev = team?["abbreviation"] as? String
+                        let logo = team?["logo"] as? String
+                            ?? (team?["logos"] as? [[String: Any]])?.first?["href"] as? String
                         let score = c["score"] as? String
                         let homeAway = (c["homeAway"] as? String)?.lowercased()
-                        if homeAway == "home" {
+                        // F1: no home/away — treat order as away/home labels lightly.
+                        if homeAway == "home" || (homeAway == nil && homeName == "Home" && awayName != "Away") {
                             homeName = display
                             homeScore = score
-                        } else {
-                            awayName = display
-                            awayScore = score
+                            homeAbbrev = abbrev
+                            homeLogo = logo
+                        } else if homeAway == "away" || homeAway == nil {
+                            if awayName == "Away" {
+                                awayName = display
+                                awayScore = score
+                                awayAbbrev = abbrev
+                                awayLogo = logo
+                            } else {
+                                homeName = display
+                                homeScore = score
+                                homeAbbrev = abbrev
+                                homeLogo = logo
+                            }
                         }
                     }
                 }
             }
 
-            // F1 / racing sometimes uses different competitor layout — keep name as headline.
             let headline: String?
             if league == .f1 {
                 headline = detail.isEmpty ? name : "\(name) · \(detail)"
@@ -88,7 +188,7 @@ actor ESPNScoreboardClient {
             }
 
             out.append(SportsEvent(
-                id: "\(league.rawValue)-\(id)",
+                id: id,
                 league: league,
                 name: name,
                 detail: detail,
@@ -97,10 +197,15 @@ actor ESPNScoreboardClient {
                 awayName: awayName,
                 homeScore: homeScore,
                 awayScore: awayScore,
+                homeAbbrev: homeAbbrev,
+                awayAbbrev: awayAbbrev,
+                homeLogoURL: homeLogo,
+                awayLogoURL: awayLogo,
                 statusText: detail,
                 startDate: start,
                 linkURL: link,
-                headlineScore: headline
+                headlineScore: headline,
+                broadcast: broadcast
             ))
         }
         return out
@@ -109,8 +214,18 @@ actor ESPNScoreboardClient {
     private static func dayString(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.timeZone = TimeZone.current
         f.dateFormat = "yyyyMMdd"
         return f.string(from: date)
+    }
+
+    private static func parseISO(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        let f1 = ISO8601DateFormatter()
+        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f1.date(from: s) { return d }
+        let f2 = ISO8601DateFormatter()
+        f2.formatOptions = [.withInternetDateTime]
+        return f2.date(from: s)
     }
 }

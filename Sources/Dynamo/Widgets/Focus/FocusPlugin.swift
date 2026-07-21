@@ -9,8 +9,19 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
 
     var expandedContentHeight: CGFloat { 255 }
 
-    var isAmbientActive: Bool { FocusController.shared.isMeetingActive }
-    var ambientPriority: Int { FocusController.shared.isMeetingActive ? 88 : 0 }
+    var isAmbientActive: Bool {
+        let f = FocusController.shared
+        if f.isMeetingActive { return true }
+        if f.baseMode == .trueFocus, FocusAgendaEngine.shared.snapshot.now != nil { return true }
+        return false
+    }
+
+    var ambientPriority: Int {
+        if FocusController.shared.isMeetingActive { return 88 }
+        if FocusController.shared.baseMode == .trueFocus,
+           FocusAgendaEngine.shared.snapshot.now != nil { return 70 }
+        return 0
+    }
 
     func start() {
         FocusController.shared.start()
@@ -33,19 +44,30 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
 
 private struct AmbientFocusView: View {
     @ObservedObject private var focus = FocusController.shared
+    @ObservedObject private var agenda = FocusAgendaEngine.shared
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "video.fill")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(NotchTheme.caution)
-            Text("Meeting")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-            if let reason = focus.meetingReason {
-                Text(reason.label)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
+            if focus.isMeetingActive {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.caution)
+                Text("Meeting")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                if let reason = focus.meetingReason {
+                    Text(reason.label)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .lineLimit(1)
+                }
+            } else if let now = agenda.snapshot.now {
+                Image(systemName: "target")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.positive)
+                Text(now.title)
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -60,22 +82,45 @@ private struct AmbientFocusView: View {
 private struct ExpandedFocusView: View {
     @ObservedObject private var focus = FocusController.shared
     @ObservedObject private var agenda = FocusAgendaEngine.shared
+    @ObservedObject private var volume = SystemVolumeController.shared
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             header
+                .padding(.bottom, 8)
             modePicker
-            if focus.isMeetingActive {
-                meetingBanner
+                .padding(.bottom, 8)
+            meetingStrip
+                .padding(.bottom, 8)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 8) {
+                    modeBody
+                }
             }
-            modeDetail
-            Spacer(minLength: 0)
+
+            footerActions
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            FocusController.shared.reevaluateMeeting()
+            SystemVolumeController.shared.start()
+            DynamicCompanion.shared.maybeSessionNudge { _ in }
+        }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack {
+        HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Focus")
                     .font(NotchTheme.section)
@@ -88,30 +133,52 @@ private struct ExpandedFocusView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            effectiveChip
+            Text(focus.effectiveTitle)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(focus.isMeetingActive ? NotchTheme.caution : NotchTheme.textPrimary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(focus.isMeetingActive
+                              ? NotchTheme.caution.opacity(0.18)
+                              : NotchTheme.chipFillActive)
+                )
         }
     }
 
     private var statusLine: String {
         if focus.isMeetingActive {
-            return "Meeting overlay · volume \(focus.duckPercent)%"
+            let vol = volume.percent
+            return "Meeting · volume \(vol)% (target \(focus.duckPercent)%)"
         }
-        return focus.baseMode.subtitle
+        switch focus.baseMode {
+        case .normal: return "Default Dynamo"
+        case .dynamic: return dynamicHint
+        case .trueFocus: return trueFocusHint
+        }
     }
 
-    private var effectiveChip: some View {
-        Text(focus.effectiveTitle)
-            .font(.system(size: 10, weight: .bold, design: .rounded))
-            .foregroundStyle(focus.isMeetingActive ? NotchTheme.caution : NotchTheme.textPrimary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(focus.isMeetingActive
-                          ? NotchTheme.caution.opacity(0.18)
-                          : NotchTheme.chipFillActive)
-            )
+    private var dynamicHint: String {
+        if let next = agenda.snapshot.upNext.first {
+            return "Next: \(next.title)"
+        }
+        if let att = agenda.snapshot.needsAttention.first {
+            return "Overdue: \(att.title)"
+        }
+        return "Companion peeks · no AI"
     }
+
+    private var trueFocusHint: String {
+        let n = agenda.snapshot.upNext.count
+        let a = agenda.snapshot.needsAttention.count
+        if agenda.snapshot.now != nil { return "In progress now" }
+        if a > 0 { return "\(a) need attention" }
+        if n > 0 { return "\(n) upcoming today" }
+        return "Agenda from Calendar & Reminders"
+    }
+
+    // MARK: Mode picker
 
     private var modePicker: some View {
         HStack(spacing: 0) {
@@ -128,7 +195,7 @@ private struct ExpandedFocusView: View {
                         Text(mode.title)
                             .font(NotchTheme.micro.weight(.semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(0.75)
                     }
                     .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textTertiary)
                     .frame(maxWidth: .infinity)
@@ -152,133 +219,244 @@ private struct ExpandedFocusView: View {
         )
     }
 
-    private var meetingBanner: some View {
+    // MARK: Meeting strip
+
+    private var meetingStrip: some View {
         HStack(spacing: 8) {
-            Image(systemName: "video.fill")
+            Image(systemName: focus.isMeetingActive ? "video.fill" : "video")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchTheme.caution)
+                .foregroundStyle(focus.isMeetingActive ? NotchTheme.caution : NotchTheme.textQuaternary)
+                .frame(width: 22)
+
             VStack(alignment: .leading, spacing: 1) {
-                Text("In a meeting")
+                Text(focus.isMeetingActive ? "In a meeting" : "Auto-meeting")
                     .font(NotchTheme.caption.weight(.semibold))
                     .foregroundStyle(NotchTheme.textPrimary)
-                Text(focus.meetingReason.map(\.label) ?? "Auto")
+                Text(meetingSubtitle)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
             }
+
             Spacer(minLength: 0)
-            Text("Auto")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
+
+            // Duck % control
+            HStack(spacing: 4) {
+                Button {
+                    focus.duckPercent = max(10, focus.duckPercent - 5)
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+
+                Text("\(focus.duckPercent)%")
+                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(NotchTheme.textSecondary)
+                    .frame(width: 32)
+
+                Button {
+                    focus.duckPercent = min(40, focus.duckPercent + 5)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .help("Volume duck target when Meeting auto-activates")
         }
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(NotchTheme.caution.opacity(0.1))
+                .fill(focus.isMeetingActive
+                      ? NotchTheme.caution.opacity(0.1)
+                      : Color.white.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(NotchTheme.caution.opacity(0.25), lineWidth: 0.5)
+                        .strokeBorder(
+                            focus.isMeetingActive
+                                ? NotchTheme.caution.opacity(0.28)
+                                : Color.white.opacity(0.07),
+                            lineWidth: 0.5
+                        )
                 )
         )
     }
 
+    private var meetingSubtitle: String {
+        if focus.isMeetingActive {
+            return focus.meetingReason.map(\.label) ?? "Active"
+        }
+        return focus.autoMeetingEnabled
+            ? "Listens for Zoom, FaceTime, Teams & calendar Now"
+            : "Disabled in settings"
+    }
+
+    // MARK: Body
+
     @ViewBuilder
-    private var modeDetail: some View {
+    private var modeBody: some View {
         switch focus.baseMode {
         case .normal:
-            detailCard(
+            tipCard(
+                icon: "circle",
                 title: "Normal",
-                body: "Dynamo runs without extra policy. Meeting still auto-activates on calls and calendar events."
+                body: "Default Dynamo. Meeting still auto-ducks volume and quiets peeks when you’re on a call or in a calendar event."
             )
         case .dynamic:
-            VStack(alignment: .leading, spacing: 6) {
-                detailCard(
-                    title: "Dynamic companion",
-                    body: "Peeks surface what’s next. Media stays first-class. No AI — just smarter timing."
-                )
-                if !focus.recentDynamicPeeks.isEmpty {
-                    Text("Recent")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    ForEach(focus.recentDynamicPeeks.prefix(3), id: \.self) { title in
-                        Text(title)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
-            }
+            dynamicBody
         case .trueFocus:
-            trueFocusAgenda
+            trueFocusBody
         }
     }
 
-    private var trueFocusAgenda: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let now = agenda.snapshot.now {
-                    agendaRow(label: "Now", item: now, accent: NotchTheme.positive)
-                }
-                if !agenda.snapshot.upNext.isEmpty {
-                    Text("Up next")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    ForEach(agenda.snapshot.upNext.prefix(3)) { item in
-                        agendaRow(label: nil, item: item, accent: NotchTheme.mediaGlow)
-                    }
-                }
-                if !agenda.snapshot.needsAttention.isEmpty {
-                    Text("Needs attention")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.caution.opacity(0.9))
-                    ForEach(agenda.snapshot.needsAttention.prefix(3)) { item in
-                        agendaRow(label: nil, item: item, accent: NotchTheme.caution)
-                    }
-                }
-                if agenda.snapshot.now == nil
-                    && agenda.snapshot.upNext.isEmpty
-                    && agenda.snapshot.needsAttention.isEmpty {
-                    Text("No agenda yet — open Calendar & allow access.")
+    private var dynamicBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            tipCard(
+                icon: "bolt.horizontal.circle",
+                title: "Dynamic companion",
+                body: "Uses peeks as tools — next event, overdue reminders. Media stays first-class. No AI."
+            )
+            if let next = agenda.snapshot.upNext.first {
+                miniRow(title: "Up next", value: next.title, detail: timeLabel(next.when))
+            }
+            if let overdue = agenda.snapshot.needsAttention.first {
+                miniRow(title: "Overdue", value: overdue.title, detail: overdue.detail)
+            }
+            if !focus.recentDynamicPeeks.isEmpty {
+                Text("Recent peeks")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                ForEach(focus.recentDynamicPeeks.prefix(3), id: \.self) { title in
+                    Text(title)
                         .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .lineLimit(1)
                 }
             }
         }
     }
 
-    private func agendaRow(label: String?, item: FocusAgendaItem, accent: Color) -> some View {
+    private var trueFocusBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let now = agenda.snapshot.now {
+                agendaBlock(label: "Now", item: now, accent: NotchTheme.positive)
+            }
+            if !agenda.snapshot.upNext.isEmpty {
+                Text("Up next")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                ForEach(agenda.snapshot.upNext.prefix(3)) { item in
+                    agendaBlock(label: nil, item: item, accent: NotchTheme.mediaGlow)
+                }
+            }
+            if !agenda.snapshot.needsAttention.isEmpty {
+                Text("Needs attention")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.caution.opacity(0.95))
+                ForEach(agenda.snapshot.needsAttention.prefix(3)) { item in
+                    agendaBlock(label: nil, item: item, accent: NotchTheme.caution)
+                }
+            }
+            if agenda.snapshot.now == nil
+                && agenda.snapshot.upNext.isEmpty
+                && agenda.snapshot.needsAttention.isEmpty {
+                tipCard(
+                    icon: "target",
+                    title: "No agenda yet",
+                    body: "Allow Calendar & Reminders so True Focus can organize your day."
+                )
+                HStack(spacing: 8) {
+                    privacyButton("Calendar") {
+                        openPrivacy("Privacy_Calendars")
+                    }
+                    privacyButton("Reminders") {
+                        openPrivacy("Privacy_Reminders")
+                    }
+                }
+            }
+        }
+    }
+
+    private func agendaBlock(label: String?, item: FocusAgendaItem, accent: Color) -> some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(accent.opacity(0.9))
-                .frame(width: 2.5, height: 22)
+                .frame(width: 2.5, height: 26)
             VStack(alignment: .leading, spacing: 1) {
-                if let label {
-                    Text(label.uppercased())
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .foregroundStyle(accent)
+                HStack(spacing: 6) {
+                    if let label {
+                        Text(label.uppercased())
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(accent)
+                    }
+                    Text(item.title)
+                        .font(NotchTheme.caption.weight(.medium))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
                 }
-                Text(item.title)
-                    .font(NotchTheme.caption.weight(.medium))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                Text(item.detail)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(item.detail)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                    if let when = item.when {
+                        Text(timeLabel(when))
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
     }
 
-    private func detailCard(title: String, body: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func miniRow(title: String, value: String, detail: String) -> some View {
+        HStack {
             Text(title)
-                .font(NotchTheme.caption.weight(.semibold))
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .frame(width: 56, alignment: .leading)
+            Text(value)
+                .font(NotchTheme.caption.weight(.medium))
                 .foregroundStyle(NotchTheme.textPrimary)
-            Text(body)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Text(detail)
                 .font(NotchTheme.micro)
                 .foregroundStyle(NotchTheme.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func tipCard(icon: String, title: String, body: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NotchTheme.textSecondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.white.opacity(0.07)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(NotchTheme.caption.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                Text(body)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,5 +468,77 @@ private struct ExpandedFocusView: View {
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
                 )
         )
+    }
+
+    // MARK: Footer
+
+    private var footerActions: some View {
+        HStack(spacing: 8) {
+            actionChip("Refresh", systemImage: "arrow.clockwise") {
+                FocusController.shared.reevaluateMeeting()
+                FocusAgendaEngine.shared.rebuild()
+            }
+            actionChip("Calendar", systemImage: "calendar") {
+                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            actionChip("Reminders", systemImage: "checklist") {
+                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func actionChip(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(title)
+                    .font(NotchTheme.micro.weight(.semibold))
+            }
+            .foregroundStyle(NotchTheme.textTertiary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func privacyButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("Allow \(title)")
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(NotchTheme.chipFillActive))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openPrivacy(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func timeLabel(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let now = Date()
+        let mins = Int(date.timeIntervalSince(now) / 60)
+        if mins > 0 && mins < 180 {
+            return "in \(mins)m"
+        }
+        if mins < 0 && mins > -120 {
+            return "now"
+        }
+        return Self.timeFormatter.string(from: date)
     }
 }
