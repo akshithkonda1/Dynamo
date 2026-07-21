@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 /// Hosts an `AVCaptureVideoPreviewLayer` bound to the capture session.
-/// Applies the remembered mirror preference (selfie flip).
+/// Boring Notch style: aspect-fill, optional selfie mirror.
 struct WebcamPreviewView: NSViewRepresentable {
     let session: AVCaptureSession
     var isMirrored: Bool
@@ -11,6 +11,7 @@ struct WebcamPreviewView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> PreviewHostView {
         let view = PreviewHostView()
+        // Same as Boring Notch: the preview layer *is* the view layer.
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
         view.applyMirroring(isMirrored)
@@ -22,7 +23,6 @@ struct WebcamPreviewView: NSViewRepresentable {
             nsView.previewLayer.session = session
         }
         nsView.applyMirroring(isMirrored)
-        // Force a layout pass when running flips so the first frame isn't blank.
         if isRunning {
             nsView.needsLayout = true
         }
@@ -34,11 +34,11 @@ struct WebcamPreviewView: NSViewRepresentable {
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             wantsLayer = true
-            layer = CALayer()
-            layer?.backgroundColor = NSColor.black.cgColor
-            previewLayer.frame = bounds
-            previewLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-            layer?.addSublayer(previewLayer)
+            // Boring Notch sets `view.layer = previewLayer` so the feed fills
+            // the square without a nested sublayer mismatch.
+            previewLayer.videoGravity = .resizeAspectFill
+            previewLayer.backgroundColor = NSColor.black.cgColor
+            layer = previewLayer
         }
 
         required init?(coder: NSCoder) {
@@ -47,16 +47,22 @@ struct WebcamPreviewView: NSViewRepresentable {
 
         override func layout() {
             super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             previewLayer.frame = bounds
+            CATransaction.commit()
         }
 
         func applyMirroring(_ mirrored: Bool) {
-            guard let connection = previewLayer.connection else { return }
+            guard let connection = previewLayer.connection else {
+                // Connection may appear after session starts — retry on layout.
+                return
+            }
             if connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = mirrored
+                previewLayer.setAffineTransform(.identity)
             } else {
-                // Fallback: affine flip when the connection can't mirror natively.
                 previewLayer.setAffineTransform(
                     mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity
                 )
