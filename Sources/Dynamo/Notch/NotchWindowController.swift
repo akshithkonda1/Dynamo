@@ -55,17 +55,22 @@ final class NotchWindowController: ObservableObject {
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
     static let collapseDelayKey = "dynamo.collapseDelaySeconds"
+    /// Default: mid 5–10s window so the tray stays usable after you leave.
+    static let defaultCollapseDelay: TimeInterval = 7.0
     /// Published for Settings binding. `0` = collapse immediately on leave (hover-only).
-    @Published private(set) var collapseDelaySeconds: TimeInterval = 10.0
+    @Published private(set) var collapseDelaySeconds: TimeInterval = defaultCollapseDelay
 
-    /// Effective collapse delay. Values: 0 (hover-only), 3, 10, 30.
+    /// Effective collapse delay. Values: 0 (hover-only), 5, 7, 10, 30.
     var collapseDelay: TimeInterval {
         collapseDelaySeconds
     }
 
     func setCollapseDelay(_ seconds: TimeInterval) {
-        let allowed: [TimeInterval] = [0, 3, 10, 30]
-        let value = allowed.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? 10
+        // Snap to allowed steps; map legacy 3s → 5s.
+        var input = seconds
+        if abs(input - 3) < 0.5 { input = 5 }
+        let allowed: [TimeInterval] = [0, 5, 7, 10, 30]
+        let value = allowed.min(by: { abs($0 - input) < abs($1 - input) }) ?? Self.defaultCollapseDelay
         collapseDelaySeconds = value
         UserDefaults.standard.set(value, forKey: Self.collapseDelayKey)
     }
@@ -104,7 +109,8 @@ final class NotchWindowController: ObservableObject {
             let stored = UserDefaults.standard.double(forKey: Self.collapseDelayKey)
             setCollapseDelay(stored)
         } else {
-            collapseDelaySeconds = 10
+            // First launch / unset: 7s (comfortably in the 5–10s range).
+            setCollapseDelay(Self.defaultCollapseDelay)
         }
         reposition()
         applyInitialVisibility()

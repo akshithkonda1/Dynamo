@@ -109,12 +109,13 @@ struct SettingsView: View {
                 set: { notch.setCollapseDelay(TimeInterval($0)) }
             )) {
                 Text("Hover only (immediate)").tag(0)
-                Text("3 seconds").tag(3)
+                Text("5 seconds").tag(5)
+                Text("7 seconds (default)").tag(7)
                 Text("10 seconds").tag(10)
                 Text("30 seconds").tag(30)
             }
             .labelsHidden()
-            Text("How long the expanded tray stays open after the cursor leaves. Hover-only collapses as soon as you leave.")
+            Text("How long the expanded tray stays open after the cursor leaves. Default is 7 seconds (in the 5–10s sweet spot). Hover-only collapses as soon as you leave.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
