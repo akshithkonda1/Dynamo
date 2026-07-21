@@ -73,6 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(ChecklistPlugin())
         registry.register(WeatherPlugin())
         registry.register(BatteryPlugin())
+        registry.register(FocusPlugin())
+        registry.register(SportsPlugin())
         registry.register(SystemHealthPlugin())
         registry.register(ShelfPlugin())
         registry.register(WebcamPlugin())
@@ -82,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
         PeekBridge.shared.attach(registry: registry)
+        FocusController.shared.start()
         FocusQuietMonitor.shared.start()
 
         installStatusItem()

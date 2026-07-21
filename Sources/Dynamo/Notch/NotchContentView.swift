@@ -206,8 +206,8 @@ struct NotchContentView: View {
         .help("Open Clock")
     }
 
-    /// Right-side tray cluster (before Settings): Health, Shelf, Webcam.
-    private static let trailingTrayIDs = ["system-health", "shelf", "webcam"]
+    /// Right-side tray cluster (before Settings): Focus, Sports, Health, Shelf, Webcam.
+    private static let trailingTrayIDs = ["focus", "sports", "system-health", "shelf", "webcam"]
 
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
         let trailing = Set(Self.trailingTrayIDs)

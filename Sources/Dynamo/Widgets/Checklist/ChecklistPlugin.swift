@@ -34,8 +34,22 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     func start() {
         store.start()
         reminders.onChange = { [weak self] in
-            self?.objectWillChange.send()
-            self?.checkDueReminders()
+            guard let self else { return }
+            self.objectWillChange.send()
+            self.checkDueReminders()
+            // Feed True Focus agenda + Dynamic pulses.
+            FocusAgendaEngine.shared.updateReminders(
+                self.reminders.items,
+                localOpen: self.store.items.filter { !$0.isDone }.map { ($0.id, $0.text) }
+            )
+            if FocusController.shared.effective == .dynamic {
+                DynamicCompanion.shared.maybePulse(
+                    events: [],
+                    reminders: self.reminders.items
+                ) { [weak self] peek in
+                    self?.onSneakPeek?(peek)
+                }
+            }
         }
         reminders.start()
         if reminders.authState == .notDetermined {

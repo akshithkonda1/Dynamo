@@ -1,7 +1,7 @@
 import Foundation
 
-/// When enabled and a calendar event is **Now**, Dynamo quiets non-critical
-/// sneak peeks and can dim media ambient so the notch stays useful in meetings.
+/// Legacy facade kept so existing call sites compile while FocusController owns policy.
+/// Prefer `FocusController.shared` for new code.
 @MainActor
 final class MeetingMode: ObservableObject {
     static let shared = MeetingMode()
@@ -11,24 +11,36 @@ final class MeetingMode: ObservableObject {
     private static let quietOnFocusKey = "dynamo.meetingMode.quietOnFocus"
 
     @Published var isEnabled: Bool {
-        didSet { UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey) }
+        didSet {
+            UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
+            // Keep FocusController in sync when toggled from Settings/menu.
+            if FocusController.shared.autoMeetingEnabled != isEnabled {
+                FocusController.shared.autoMeetingEnabled = isEnabled
+            }
+        }
     }
 
-    /// Dim music ambient while a meeting is Now.
     @Published var dimMediaAmbient: Bool {
         didSet { UserDefaults.standard.set(dimMediaAmbient, forKey: Self.dimMediaKey) }
     }
 
-    /// Also suppress normal peeks when system Focus is active (best-effort).
     @Published var quietOnFocus: Bool {
         didSet { UserDefaults.standard.set(quietOnFocus, forKey: Self.quietOnFocusKey) }
     }
 
-    /// Injected by the calendar plugin.
-    var isInActiveMeeting: () -> Bool = { false }
+    /// Injected by calendar (also mirrored into FocusController).
+    var isInActiveMeeting: () -> Bool = { false } {
+        didSet {
+            FocusController.shared.isCalendarMeetingNow = { [weak self] in
+                self?.isInActiveMeeting() == true
+            }
+        }
+    }
 
-    /// Optional Focus status provider (set by FocusQuietMonitor).
     var isFocusActive: () -> Bool = { false }
+
+    /// Live meeting signal from FocusController when available.
+    private var focusMeetingNow = false
 
     private init() {
         if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
@@ -48,19 +60,23 @@ final class MeetingMode: ObservableObject {
         }
     }
 
-    /// Suppress low/normal peeks while in a live meeting (or Focus if enabled).
-    /// High/critical peeks and **media track-change peeks** always show — users
-    /// still want to know what song skipped forward/back during a meeting.
+    func syncFromFocus(enabled: Bool, meetingNow: Bool) {
+        focusMeetingNow = meetingNow
+        if isEnabled != enabled {
+            // Avoid write-loop: set storage without re-entering Focus.
+            UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+            isEnabled = enabled
+        }
+        objectWillChange.send()
+    }
+
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
-        if peek.style == .media { return false }
-        guard peek.urgency < .high else { return false }
-        if isEnabled, isInActiveMeeting() { return true }
-        if quietOnFocus, isFocusActive() { return true }
-        return false
+        FocusController.shared.shouldSuppress(peek: peek)
     }
 
     func shouldDimMediaAmbient() -> Bool {
-        guard isEnabled, dimMediaAmbient else { return false }
-        return isInActiveMeeting()
+        guard dimMediaAmbient else { return false }
+        return FocusController.shared.shouldDimMediaAmbient()
+            || (isEnabled && (focusMeetingNow || isInActiveMeeting()))
     }
 }

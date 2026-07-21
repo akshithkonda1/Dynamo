@@ -48,7 +48,8 @@ final class NotchSneakPeekController: ObservableObject {
     private func show(_ content: NotchSneakPeek) {
         // Meeting Mode: drop low/normal peeks while a calendar event is Now
         // (media track peeks are exempt — see MeetingMode.shouldSuppress).
-        if MeetingMode.shared.shouldSuppress(peek: content) {
+        if FocusController.shared.shouldSuppress(peek: content)
+            || MeetingMode.shared.shouldSuppress(peek: content) {
             return
         }
 

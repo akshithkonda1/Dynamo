@@ -60,6 +60,9 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         MeetingMode.shared.isInActiveMeeting = { [weak self] in
             self?.isMeetingNow == true
         }
+        FocusController.shared.isCalendarMeetingNow = { [weak self] in
+            self?.isMeetingNow == true
+        }
         provider.start()
         applyProviderSnapshot()
         switch authState {
@@ -81,6 +84,22 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         let now = Date()
         events = provider.upcoming.filter { $0.end > now }
         authState = provider.authorizationState
+        // Feed Focus modes.
+        FocusController.shared.reevaluateMeeting()
+        FocusAgendaEngine.shared.updateEvents(events)
+        if FocusController.shared.effective == .dynamic {
+            DynamicCompanion.shared.maybePulse(events: events, reminders: []) { [weak self] peek in
+                self?.onSneakPeek?(peek)
+            }
+            DynamicCompanion.shared.maybeSessionNudge { [weak self] peek in
+                self?.onSneakPeek?(peek)
+            }
+        }
+        if FocusController.shared.effective == .trueFocus {
+            FocusAgendaEngine.shared.trueFocusPeeks(events: events) { [weak self] peek in
+                self?.onSneakPeek?(peek)
+            }
+        }
     }
 
     func stop() {
