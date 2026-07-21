@@ -17,7 +17,6 @@ final class MeetingVolumeDucker {
             savedPercent = SystemVolumeController.shared.percent
         }
         let target = min(100, max(1, targetPercent))
-        // Only duck if currently louder than target.
         let current = SystemVolumeController.shared.percent
         if current > target {
             SystemVolumeController.shared.suppressExternalAnnouncements(for: 1.0)

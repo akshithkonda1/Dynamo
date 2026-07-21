@@ -340,8 +340,8 @@ private struct ExpandedFocusView: View {
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))
             }
 
-            // Recent bullets
-            ForEach(notes.bullets.suffix(4).reversed()) { b in
+            // Recent bullets (newest first)
+            ForEach(Array(notes.bullets.suffix(4).reversed())) { b in
                 HStack(alignment: .top, spacing: 6) {
                     Text(Self.timeFormatter.string(from: b.createdAt))
                         .font(.system(size: 8, weight: .medium).monospacedDigit())

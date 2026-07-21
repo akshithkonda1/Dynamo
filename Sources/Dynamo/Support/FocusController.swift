@@ -54,27 +54,42 @@ final class FocusController: ObservableObject {
     private static let suggestMeetingKey = "dynamo.focus.suggestMeeting"
     private static let duckPercentKey = "dynamo.focus.duckPercent"
 
-    @Published var baseMode: FocusBaseMode {
+    @Published var baseMode: FocusBaseMode = .normal {
         didSet {
+            guard !isConfiguring else { return }
+            guard oldValue != baseMode else { return }
             UserDefaults.standard.set(baseMode.rawValue, forKey: Self.baseModeKey)
             handleModeTransition(from: oldValue, to: baseMode)
-            objectWillChange.send()
         }
     }
 
     /// When true, frontmost call apps can offer “Enter Meeting Mode?” once per session.
-    @Published var suggestMeetingOnCall: Bool {
-        didSet { UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey) }
+    @Published var suggestMeetingOnCall: Bool = true {
+        didSet {
+            guard !isConfiguring else { return }
+            UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey)
+        }
     }
 
-    @Published var duckPercent: Int {
+    @Published var duckPercent: Int = 25 {
         didSet {
+            guard !isConfiguring else { return }
             let p = min(40, max(10, duckPercent))
-            if p != duckPercent { duckPercent = p; return }
+            if p != duckPercent {
+                // Clamp without re-entering didSet recursion loops.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.duckPercent != p else { return }
+                    self.duckPercent = p
+                }
+                return
+            }
             UserDefaults.standard.set(duckPercent, forKey: Self.duckPercentKey)
             ducker.targetPercent = duckPercent
         }
     }
+
+    /// Suppress didSet side effects while loading UserDefaults in init.
+    private var isConfiguring = true
 
     /// Call app currently frontmost / visible (for UI + suggestions only).
     @Published private(set) var suggestedCallApp: String?
@@ -113,6 +128,7 @@ final class FocusController: ObservableObject {
     }
 
     private init() {
+        isConfiguring = true
         if let raw = UserDefaults.standard.string(forKey: Self.baseModeKey),
            let mode = FocusBaseMode(rawValue: raw) {
             baseMode = mode
@@ -124,9 +140,10 @@ final class FocusController: ObservableObject {
         } else {
             suggestMeetingOnCall = UserDefaults.standard.bool(forKey: Self.suggestMeetingKey)
         }
-        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int
-        duckPercent = storedDuck ?? 25
+        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int ?? 25
+        duckPercent = min(40, max(10, storedDuck))
         ducker.targetPercent = duckPercent
+        isConfiguring = false
     }
 
     func start() {
@@ -141,11 +158,14 @@ final class FocusController: ObservableObject {
             Task { @MainActor in self?.refreshCallContext() }
         }
         refreshCallContext()
-        // If relaunched already in Meeting, re-apply duck.
+        // If relaunched already in Meeting, re-apply duck + notes session.
         if baseMode == .meeting {
             meetingEnteredAt = meetingEnteredAt ?? Date()
             ducker.enter()
-            MeetingNotesStore.shared.ensureSession()
+            MeetingNotesStore.shared.ensureSession(
+                calendarTitle: calendarMeetingTitle(),
+                callApp: suggestedCallApp
+            )
         }
     }
 
@@ -189,8 +209,12 @@ final class FocusController: ObservableObject {
     private func maybeOfferMeeting() {
         guard suggestMeetingOnCall else { return }
         guard baseMode != .meeting else { return }
-        guard let app = suggestedCallApp else { return }
+        guard let app = suggestedCallApp else {
+            // Reset so a later call can suggest again after leaving the app.
+            return
+        }
         guard !didSuggestMeetingThisSession else { return }
+        guard emitPeek != nil else { return }
         didSuggestMeetingThisSession = true
         emitPeek?(NotchSneakPeek(
             systemImage: "video.fill",
@@ -199,6 +223,11 @@ final class FocusController: ObservableObject {
             urgency: .high,
             detail: "Focus · Meeting companion"
         ))
+    }
+
+    /// Allow another “Enter Meeting?” offer after the user leaves Meeting mode.
+    func resetMeetingSuggestion() {
+        didSuggestMeetingThisSession = false
     }
 
     private func handleModeTransition(from old: FocusBaseMode, to new: FocusBaseMode) {
@@ -216,6 +245,8 @@ final class FocusController: ObservableObject {
             ducker.exit()
             meetingEnteredAt = nil
             MeetingNotesStore.shared.endSession()
+            // Allow a fresh suggest next time a call app is frontmost.
+            resetMeetingSuggestion()
         }
         if new == .trueFocus {
             FocusAgendaEngine.shared.rebuild()

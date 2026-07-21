@@ -65,23 +65,30 @@ final class MeetingNotesStore: ObservableObject {
     private init() {}
 
     func ensureSession(calendarTitle: String? = nil, callApp: String? = nil) {
-        if session != nil {
+        // Ended sessions must not be reused — start a fresh note pad.
+        if let existing = session, existing.endedAt == nil {
             if let calendarTitle { session?.calendarTitle = calendarTitle }
             if let callApp { session?.callApp = callApp }
             persist()
+            objectWillChange.send()
             return
         }
         session = MeetingNoteSession(calendarTitle: calendarTitle, callApp: callApp)
+        draft = ""
         persist()
         objectWillChange.send()
     }
 
     func endSession() {
-        guard var s = session else { return }
+        guard var s = session, s.endedAt == nil else {
+            draft = ""
+            return
+        }
         s.endedAt = Date()
         session = s
         persist()
         draft = ""
+        objectWillChange.send()
     }
 
     @discardableResult
@@ -89,6 +96,7 @@ final class MeetingNotesStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         ensureSession()
+        guard session?.endedAt == nil else { return nil }
         let bullet = MeetingNoteBullet(text: trimmed, source: source)
         session?.bullets.append(bullet)
         persist()
