@@ -185,10 +185,11 @@ private struct ExpandedWeatherView: View {
                 .font(NotchTheme.micro)
                 .foregroundStyle(NotchTheme.textTertiary)
         } else if plugin.snapshot == nil, plugin.locationAuth == .denied {
-            Text("Location access denied. Enable it in System Settings → Privacy & Security → Location Services, or set a location in Settings → Weather.")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            NotchEmptyState(
+                systemImage: "location.slash",
+                title: "Location access denied",
+                caption: "Enable Location Services, or set a city in Settings → Weather."
+            )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)
             if !plugin.alerts.isEmpty {
@@ -208,24 +209,26 @@ private struct ExpandedWeatherView: View {
     }
 
     private func currentConditions(_ snapshot: WeatherSnapshot) -> some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-            Image(systemName: snapshot.symbolName)
-                .symbolRenderingMode(.multicolor)
-                .font(.system(size: 34))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(TemperatureFormat.short(snapshot.temperature))
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text(snapshot.conditionDescription)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textSecondary)
-                if let high = snapshot.high, let low = snapshot.low {
-                    Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textTertiary)
+        NotchCard {
+            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+                Image(systemName: snapshot.symbolName)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: 36))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(TemperatureFormat.short(snapshot.temperature))
+                        .font(NotchTheme.heroDigit)
+                        .foregroundStyle(NotchTheme.textPrimary)
+                    Text(snapshot.conditionDescription)
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textSecondary)
+                    if let high = snapshot.high, let low = snapshot.low {
+                        Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
     }
 

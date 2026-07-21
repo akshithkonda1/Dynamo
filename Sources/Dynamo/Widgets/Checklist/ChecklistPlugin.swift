@@ -32,17 +32,28 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin {
 private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
 
+    private var doneCount: Int { plugin.store.items.filter(\.isDone).count }
+    private var totalCount: Int { plugin.store.items.count }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Checklist")
-                .font(NotchTheme.section)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .textCase(.uppercase)
+            NotchSectionHeader(
+                "Checklist",
+                trailing: totalCount > 0
+                    ? AnyView(
+                        Text("\(doneCount)/\(totalCount)")
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    )
+                    : nil
+            )
 
             if plugin.store.items.isEmpty {
-                Text("Add a task below. Drag the handle to reorder.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                NotchEmptyState(
+                    systemImage: "checklist",
+                    title: "No tasks yet",
+                    caption: "Add one below — drag the handle to reorder."
+                )
             } else {
                 // List + onMove enables drag reorder on macOS without an edit mode.
                 List {

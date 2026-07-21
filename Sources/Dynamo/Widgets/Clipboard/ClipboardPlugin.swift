@@ -45,11 +45,13 @@ private struct ExpandedClipboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Pinned")
+            NotchSectionHeader("Pinned")
             if plugin.store.snippets.isEmpty && !plugin.isAddingSnippet {
-                Text("No pinned snippets yet.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                NotchEmptyState(
+                    systemImage: "pin",
+                    title: "No pinned snippets",
+                    caption: "Pin from history or add one below."
+                )
             } else {
                 ForEach(plugin.store.snippets) { snippet in
                     snippetRow(snippet)
@@ -62,30 +64,31 @@ private struct ExpandedClipboardView: View {
                 Button {
                     plugin.isAddingSnippet = true
                 } label: {
-                    Label("Add snippet", systemImage: "plus")
-                        .font(NotchTheme.caption)
+                    NotchChipLabel(title: "Add snippet", systemImage: "plus")
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(NotchTheme.textSecondary)
             }
 
             Divider().overlay(NotchTheme.separator)
 
-            HStack {
-                sectionHeader("History")
-                Spacer()
-                if !plugin.store.history.isEmpty {
-                    Button("Clear") { plugin.store.clearHistory() }
-                        .buttonStyle(.plain)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                }
-            }
+            NotchSectionHeader(
+                "History",
+                trailing: plugin.store.history.isEmpty
+                    ? nil
+                    : AnyView(
+                        Button("Clear") { plugin.store.clearHistory() }
+                            .buttonStyle(.plain)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    )
+            )
 
             if plugin.store.history.isEmpty {
-                Text("Copy anything system-wide — it shows up here.")
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                NotchEmptyState(
+                    systemImage: "doc.on.clipboard",
+                    title: "Clipboard history is empty",
+                    caption: "Copy anything system-wide — it shows up here."
+                )
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -97,13 +100,6 @@ private struct ExpandedClipboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(NotchTheme.section)
-            .foregroundStyle(NotchTheme.textTertiary)
-            .textCase(.uppercase)
     }
 
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
@@ -152,6 +148,7 @@ private struct ExpandedClipboardView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Copy again")
 
             Button {
                 plugin.store.pinCurrentOrText(item.text)
@@ -162,6 +159,16 @@ private struct ExpandedClipboardView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Pin as snippet")
+
+            Button {
+                plugin.store.removeHistoryItem(id: item.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.notchIcon(diameter: 24))
+            .help("Remove from history")
         }
     }
 

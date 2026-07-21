@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AppKit
 import Foundation
 
 enum WebcamAuthState: Equatable {
@@ -7,6 +8,11 @@ enum WebcamAuthState: Equatable {
     case denied
     /// Access is fine, but no camera device could be opened.
     case unavailable
+}
+
+struct WebcamDeviceOption: Identifiable, Equatable {
+    let id: String
+    let name: String
 }
 
 /// Owns the `AVCaptureSession` for the webcam mirror widget.
@@ -21,6 +27,20 @@ enum WebcamAuthState: Equatable {
 final class WebcamCaptureController: ObservableObject {
     @Published private(set) var authState: WebcamAuthState = .notDetermined
     @Published private(set) var isRunning = false
+    @Published private(set) var availableDevices: [WebcamDeviceOption] = []
+    @Published private(set) var selectedDeviceID: String?
+    @Published private(set) var isFrozen = false
+    @Published private(set) var frozenImage: NSImage?
+    /// Digital zoom applied in the preview (macOS has no AVCapture videoZoomFactor).
+    @Published var zoomFactor: CGFloat = 1.0 {
+        didSet {
+            let clamped = min(2.0, max(1.0, zoomFactor))
+            if clamped != zoomFactor {
+                zoomFactor = clamped
+            }
+        }
+    }
+
     /// Selfie-style horizontal flip — the point of a "mirror" widget.
     @Published var isMirrored: Bool {
         didSet {
@@ -30,11 +50,15 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     let session = AVCaptureSession()
+    private var videoInput: AVCaptureDeviceInput?
+    private let photoOutput = AVCapturePhotoOutput()
+    private var photoDelegate: PhotoCaptureDelegate?
     private var configured = false
     private var stopWorkItem: DispatchWorkItem?
     private let sessionQueue = DispatchQueue(label: "com.akshithkonda.Dynamo.webcam", qos: .userInitiated)
 
     private static let mirrorKey = "dynamo.webcam.isMirrored"
+    private static let deviceKey = "dynamo.webcam.deviceID"
 
     init() {
         // Default ON — this is a mirror. User can turn off in Settings / expanded UI.
@@ -43,6 +67,7 @@ final class WebcamCaptureController: ObservableObject {
         } else {
             isMirrored = UserDefaults.standard.bool(forKey: Self.mirrorKey)
         }
+        selectedDeviceID = UserDefaults.standard.string(forKey: Self.deviceKey)
         // Seed from remembered OS grant so we don't flash "Requesting…" every launch.
         switch PermissionsStore.shared.status(for: .camera) {
         case .granted: authState = .authorized
@@ -51,6 +76,7 @@ final class WebcamCaptureController: ObservableObject {
         }
         // Sync published auth from system without prompting yet.
         refreshAuthState(requestIfNeeded: false)
+        refreshDevices()
     }
 
     func requestAccessIfNeeded() {
@@ -61,6 +87,8 @@ final class WebcamCaptureController: ObservableObject {
         // Cancel a pending stop from a transient onDisappear.
         stopWorkItem?.cancel()
         stopWorkItem = nil
+        isFrozen = false
+        frozenImage = nil
 
         // Always trust live OS status (not only remembered grants).
         refreshAuthState(requestIfNeeded: false)
@@ -96,6 +124,8 @@ final class WebcamCaptureController: ObservableObject {
     func stopNow() {
         stopWorkItem?.cancel()
         stopWorkItem = nil
+        isFrozen = false
+        frozenImage = nil
         performStop()
     }
 
@@ -129,6 +159,7 @@ final class WebcamCaptureController: ObservableObject {
         case .authorized:
             authState = .authorized
             PermissionsStore.shared.recordGranted(.camera)
+            refreshDevices()
         case .notDetermined:
             authState = .notDetermined
             if requestIfNeeded {
@@ -137,6 +168,7 @@ final class WebcamCaptureController: ObservableObject {
                         self?.authState = granted ? .authorized : .denied
                         if granted {
                             PermissionsStore.shared.recordGranted(.camera)
+                            self?.refreshDevices()
                             self?.start()
                         } else {
                             PermissionsStore.shared.recordDenied(.camera)
@@ -152,15 +184,133 @@ final class WebcamCaptureController: ObservableObject {
         }
     }
 
-    private func configureIfNeeded() {
-        guard !configured else { return }
+    func refreshDevices() {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
+            mediaType: .video,
+            position: .unspecified
+        )
+        availableDevices = discovery.devices.map {
+            WebcamDeviceOption(id: $0.uniqueID, name: $0.localizedName)
+        }
+        if let selected = selectedDeviceID,
+           availableDevices.contains(where: { $0.id == selected }) {
+            return
+        }
+        // Prefer system default, else first listed.
+        if let def = AVCaptureDevice.default(for: .video) {
+            selectedDeviceID = def.uniqueID
+        } else {
+            selectedDeviceID = availableDevices.first?.id
+        }
+    }
 
-        // Prefer the system default video device (built-in FaceTime camera when present).
-        let device = AVCaptureDevice.default(for: .video)
+    func selectDevice(id: String) {
+        guard id != selectedDeviceID else { return }
+        selectedDeviceID = id
+        UserDefaults.standard.set(id, forKey: Self.deviceKey)
+        let wasRunning = isRunning
+        reconfigureInput()
+        if wasRunning {
+            start()
+        }
+    }
+
+    func setZoom(_ factor: CGFloat) {
+        zoomFactor = min(2.0, max(1.0, factor))
+    }
+
+    func toggleFreeze() {
+        if isFrozen {
+            isFrozen = false
+            frozenImage = nil
+            return
+        }
+        captureSnapshot { [weak self] image in
+            guard let self, let image else { return }
+            self.frozenImage = image
+            self.isFrozen = true
+        }
+    }
+
+    /// Snapshot to pasteboard; optionally also save a PNG on the Desktop.
+    func snapshotToPasteboard(saveToDesktop: Bool = false) {
+        captureSnapshot { image in
+            guard let image else { return }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.writeObjects([image])
+            if saveToDesktop {
+                Self.savePNGToDesktop(image)
+            }
+        }
+    }
+
+    private func captureSnapshot(completion: @escaping (NSImage?) -> Void) {
+        guard authState == .authorized, isRunning, !isFrozen else {
+            completion(frozenImage)
+            return
+        }
+        guard session.outputs.contains(where: { $0 === photoOutput }) else {
+            completion(nil)
+            return
+        }
+        let settings = AVCapturePhotoSettings()
+        let delegate = PhotoCaptureDelegate { [weak self] image in
+            Task { @MainActor in
+                self?.photoDelegate = nil
+                completion(image)
+            }
+        }
+        photoDelegate = delegate
+        // Keep the delegate alive; capturePhoto is async on the session queue.
+        nonisolated(unsafe) let output = photoOutput
+        nonisolated(unsafe) let retained = delegate
+        sessionQueue.async {
+            output.capturePhoto(with: settings, delegate: retained)
+        }
+    }
+
+    private static func savePNGToDesktop(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let data = rep.representation(using: .png, properties: [:])
+        else { return }
+        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        guard let desktop else { return }
+        let name = "Dynamo-Mirror-\(Int(Date().timeIntervalSince1970)).png"
+        try? data.write(to: desktop.appendingPathComponent(name))
+    }
+
+    private func reconfigureInput() {
+        configured = false
+        session.beginConfiguration()
+        if let videoInput {
+            session.removeInput(videoInput)
+            self.videoInput = nil
+        }
+        session.commitConfiguration()
+        configureIfNeeded()
+    }
+
+    private func configureIfNeeded() {
+        if configured, videoInput != nil { return }
+
+        refreshDevices()
+        let device: AVCaptureDevice?
+        if let id = selectedDeviceID {
+            device = AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
+                mediaType: .video,
+                position: .unspecified
+            ).devices.first(where: { $0.uniqueID == id })
+                ?? AVCaptureDevice.default(for: .video)
+        } else {
+            device = AVCaptureDevice.default(for: .video)
+        }
 
         guard let device,
-              let input = try? AVCaptureDeviceInput(device: device),
-              session.canAddInput(input)
+              let input = try? AVCaptureDeviceInput(device: device)
         else {
             authState = .unavailable
             configured = true
@@ -169,12 +319,44 @@ final class WebcamCaptureController: ObservableObject {
 
         session.beginConfiguration()
         session.sessionPreset = .medium
+        if let existing = videoInput {
+            session.removeInput(existing)
+        }
         if session.canAddInput(input) {
             session.addInput(input)
+            videoInput = input
+            selectedDeviceID = device.uniqueID
+        }
+        if !session.outputs.contains(where: { $0 === photoOutput }), session.canAddOutput(photoOutput) {
+            session.addOutput(photoOutput)
         }
         session.commitConfiguration()
         configured = true
         authState = .authorized
+    }
+}
+
+// MARK: - Photo capture
+
+private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+    private let completion: (NSImage?) -> Void
+
+    init(completion: @escaping (NSImage?) -> Void) {
+        self.completion = completion
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        guard error == nil, let data = photo.fileDataRepresentation(),
+              let image = NSImage(data: data)
+        else {
+            completion(nil)
+            return
+        }
+        completion(image)
     }
 }
 
