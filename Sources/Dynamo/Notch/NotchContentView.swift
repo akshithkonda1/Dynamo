@@ -11,7 +11,14 @@ struct NotchContentView: View {
     var body: some View {
         ZStack(alignment: .top) {
             VibrancyBackground(material: .hudWindow, blendingMode: .behindWindow)
-                .overlay(Color.black.opacity(0.28))
+                .overlay(NotchTheme.panelScrim)
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: controller.isExpanded ? NotchTheme.radiusExpanded : NotchTheme.radiusCollapsed,
+                        style: .continuous
+                    )
+                    .strokeBorder(NotchTheme.hairline, lineWidth: controller.isExpanded ? 1 : 0)
+                )
 
             if let hudState = hud.state {
                 SystemHUDView(state: hudState)
@@ -138,12 +145,19 @@ private struct TrayIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: isActive ? .bold : .semibold))
                 .foregroundStyle(isActive ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle()
+                        .fill(isActive ? NotchTheme.chipFillActive : Color.clear)
+                )
         }
-        .buttonStyle(.notchIcon(diameter: 26, prominent: isActive))
+        .buttonStyle(.plain)
+        .contentShape(Circle())
         .help(displayName)
         .accessibilityLabel(displayName)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 

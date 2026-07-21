@@ -37,7 +37,7 @@ private struct NotchIconButtonBody: View {
 
     private var fillColor: Color {
         if prominent { return NotchTheme.chipFillActive }
-        return isHovering ? NotchTheme.chipFill : .clear
+        return isHovering ? NotchTheme.chipFillHover : .clear
     }
 }
 
