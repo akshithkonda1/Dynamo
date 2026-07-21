@@ -60,22 +60,15 @@ struct NotchContentView: View {
     private var expandedBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                ForEach(registry.plugins, id: \.id) { plugin in
-                    TrayIconButton(
-                        systemImage: plugin.systemImage,
-                        displayName: plugin.displayName,
-                        isActive: registry.activePluginID == plugin.id
-                    ) {
-                        // Re-tap an already-active player widget → open Music/Spotify.
-                        if registry.activePluginID == plugin.id,
-                           let opener = plugin as? any PlayerAppOpening {
-                            opener.openPlayerApp()
-                        } else {
-                            registry.activePluginID = plugin.id
-                        }
-                    }
+                // Main tray icons (Webcam is pinned next to Settings, not here).
+                ForEach(leadingTrayPlugins, id: \.id) { plugin in
+                    trayButton(for: plugin)
                 }
                 Spacer(minLength: 0)
+                // Webcam sits immediately left of Settings (gear).
+                if let webcam = webcamPlugin {
+                    trayButton(for: webcam)
+                }
                 TrayIconButton(
                     systemImage: "gearshape.fill",
                     displayName: "Settings",
@@ -96,6 +89,32 @@ struct NotchContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Everything except Webcam — Webcam is always drawn beside Settings.
+    private var leadingTrayPlugins: [any NotchWidgetPlugin] {
+        registry.plugins.filter { $0.id != "webcam" }
+    }
+
+    private var webcamPlugin: (any NotchWidgetPlugin)? {
+        registry.plugins.first { $0.id == "webcam" }
+    }
+
+    @ViewBuilder
+    private func trayButton(for plugin: any NotchWidgetPlugin) -> some View {
+        TrayIconButton(
+            systemImage: plugin.systemImage,
+            displayName: plugin.displayName,
+            isActive: registry.activePluginID == plugin.id
+        ) {
+            // Re-tap an already-active player widget → open Music/Spotify.
+            if registry.activePluginID == plugin.id,
+               let opener = plugin as? any PlayerAppOpening {
+                opener.openPlayerApp()
+            } else {
+                registry.activePluginID = plugin.id
+            }
+        }
     }
 }
 
