@@ -8,11 +8,19 @@ import UniformTypeIdentifiers
 /// 1. **Hidden ↔ Peek** (only when Hidden mode is on): top-edge sensor.
 /// 2. **Collapsed ↔ Expanded**: hover on the notch panel.
 ///
-/// Stability notes (why this file is careful about timers):
+/// # Open / close contract (predictable behaviour)
+/// - **Open** always goes through `revealAndExpand()` (hover, ⌃⌥D, menu, Settings,
+///   focus-plugin). That path cancels pending collapse/retreat, shows the panel,
+///   then `expand()` with the shared spring.
+/// - **Focus tab** uses `focusPlugin(id:)` → set `activePluginID` → `revealAndExpand()`.
+/// - **Close** only via `scheduleCollapse()` after hover leave (settings delay),
+///   or when overlays finish and the cursor is away. Never snap shut mid-spring
+///   (`suppressHoverExitUntil` covers expand overshoot).
+///
+/// Stability notes:
 /// - Expanding resizes the panel under the cursor; AppKit often fires a spurious
-///   `mouseExited` mid-animation. Collapsing immediately made the tray flicker.
-/// - The collapsed panel is only ~notch height; a few points of miss used to
-///   drop expand instantly. We debounce collapse and re-check mouse position.
+///   `mouseExited` mid-animation — we ignore exit until the spring settles.
+/// - Collapse re-checks mouse nearness + overlay count before collapsing.
 @MainActor
 final class NotchWindowController: ObservableObject {
     @Published private(set) var isExpanded: Bool = false
@@ -177,9 +185,8 @@ final class NotchWindowController: ObservableObject {
     // MARK: - Hover
 
     private func hoverEntered() {
-        cancelCollapse()
-        cancelRetreat()
-        expand()
+        // Same open path as hotkeys / menu — one spring, one height model.
+        revealAndExpand()
     }
 
     private func hoverExited() {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -6,7 +7,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
 
-    /// Tall enough for Pinned + History without compressing content upward.
     var expandedContentHeight: CGFloat { 260 }
 
     let store = ClipboardStore()
@@ -25,10 +25,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 
     func expandedView() -> AnyView {
         AnyView(ExpandedClipboardView(plugin: self))
-    }
-
-    func copy(_ text: String) {
-        store.copyToPasteboard(text)
     }
 
     func saveDraftSnippet() {
@@ -53,8 +49,6 @@ private struct ExpandedClipboardView: View {
     }
 
     var body: some View {
-        // Fixed section chrome + scrollable body so Pinned items never
-        // compress History / empty states upward into the tray.
         VStack(alignment: .leading, spacing: 0) {
             NotchSectionHeader("Pinned")
                 .padding(.bottom, 8)
@@ -101,7 +95,7 @@ private struct ExpandedClipboardView: View {
     @ViewBuilder
     private var pinnedSection: some View {
         if store.snippets.isEmpty && !plugin.isAddingSnippet {
-            Text("No pins yet — star items from History or add one.")
+            Text("No pins yet — pin from History or add text.")
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .padding(.vertical, 2)
@@ -117,7 +111,7 @@ private struct ExpandedClipboardView: View {
     @ViewBuilder
     private var historySection: some View {
         if store.history.isEmpty {
-            Text("Copy anything system-wide — it shows up here.")
+            Text("Copy text or a screenshot — it shows up here.")
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .padding(.vertical, 2)
@@ -131,25 +125,36 @@ private struct ExpandedClipboardView: View {
     }
 
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Button {
-                plugin.copy(snippet.text)
+                store.copySnippet(snippet)
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snippet.title)
-                        .font(NotchTheme.body.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                    Text(snippet.text)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    if snippet.kind == .image {
+                        thumb(fileName: snippet.imageFileName)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snippet.title)
+                            .font(NotchTheme.body.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textPrimary)
+                            .lineLimit(1)
+                        if snippet.kind == .text {
+                            Text(snippet.text)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .lineLimit(1)
+                        } else {
+                            Text("Image")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Copy snippet")
+            .help("Copy")
 
             Button {
                 store.deleteSnippet(id: snippet.id)
@@ -159,35 +164,48 @@ private struct ExpandedClipboardView: View {
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             .buttonStyle(.notchIcon(diameter: 24))
-            .help("Delete snippet")
+            .help("Delete pin")
         }
         .notchRowBackground()
     }
 
     private func historyRow(_ item: ClipboardHistoryItem) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Button {
-                plugin.copy(item.text)
+                store.copyHistoryItem(item)
             } label: {
-                Text(item.text)
-                    .font(NotchTheme.caption)
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    if item.kind == .image {
+                        thumb(fileName: item.imageFileName)
+                    }
+                    Group {
+                        if item.kind == .text {
+                            Text(item.text)
+                                .font(NotchTheme.caption)
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .lineLimit(2)
+                        } else {
+                            Text("Image")
+                                .font(NotchTheme.caption)
+                                .foregroundStyle(NotchTheme.textPrimary)
+                        }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Copy again")
 
             Button {
-                store.pinCurrentOrText(item.text)
+                store.pinHistoryItem(item)
             } label: {
                 Image(systemName: "pin")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             .buttonStyle(.notchIcon(diameter: 24))
-            .help("Pin as snippet")
+            .help("Pin")
 
             Button {
                 store.removeHistoryItem(id: item.id)
@@ -197,9 +215,29 @@ private struct ExpandedClipboardView: View {
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
             .buttonStyle(.notchIcon(diameter: 24))
-            .help("Remove from history")
+            .help("Remove")
         }
         .notchRowBackground()
+    }
+
+    @ViewBuilder
+    private func thumb(fileName: String?) -> some View {
+        if let image = store.loadImage(fileName: fileName) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(NotchTheme.chipFill)
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Image(systemName: "photo")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                )
+        }
     }
 
     private var addSnippetForm: some View {

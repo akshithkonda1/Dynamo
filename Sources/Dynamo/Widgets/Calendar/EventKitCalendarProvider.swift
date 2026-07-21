@@ -163,6 +163,16 @@ final class EventKitCalendarProvider: CalendarProvider {
         CalendarNewEventOpener.open()
     }
 
+    func openToday() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        let day = formatter.string(from: Date())
+        if let url = URL(string: "ical://\(day)"), NSWorkspace.shared.open(url) {
+            return
+        }
+        openCalendarApp()
+    }
+
     private func refreshReminders() {
         guard remindersAuthorized else {
             dueReminders = []

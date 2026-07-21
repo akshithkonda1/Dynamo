@@ -26,9 +26,20 @@ final class GlobalHotKeys: @unchecked Sendable {
     private var handlerRef: EventHandlerRef?
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private let signature: OSType = 0x444E4D4F // 'DNMO'
+    /// Actions that failed to register (shortcut conflict).
+    private(set) var failedActions: [Action] = []
+
+    var registrationSummary: String {
+        if failedActions.isEmpty {
+            return "All hotkeys registered (⌃⌥ D/P/M/S/C)."
+        }
+        let names = failedActions.map(\.label).joined(separator: ", ")
+        return "Some hotkeys unavailable (conflict): \(names)."
+    }
 
     func install() {
         uninstall()
+        failedActions = []
 
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
@@ -101,7 +112,7 @@ final class GlobalHotKeys: @unchecked Sendable {
 
     private func register(keyCode: UInt32, id: Action, modifiers: UInt32) {
         var hotKeyRef: EventHotKeyRef?
-        var hotKeyID = EventHotKeyID(signature: signature, id: id.rawValue)
+        let hotKeyID = EventHotKeyID(signature: signature, id: id.rawValue)
         let status = RegisterEventHotKey(
             keyCode,
             modifiers,
@@ -112,6 +123,20 @@ final class GlobalHotKeys: @unchecked Sendable {
         )
         if status == noErr {
             hotKeyRefs.append(hotKeyRef)
+        } else {
+            failedActions.append(id)
+        }
+    }
+}
+
+extension GlobalHotKeys.Action {
+    var label: String {
+        switch self {
+        case .showNotch: return "⌃⌥D"
+        case .playPause: return "⌃⌥P"
+        case .mute: return "⌃⌥M"
+        case .focusShelf: return "⌃⌥S"
+        case .focusCalendar: return "⌃⌥C"
         }
     }
 }

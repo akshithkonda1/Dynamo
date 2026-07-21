@@ -137,7 +137,26 @@ struct SettingsView: View {
                 get: { MeetingMode.shared.isEnabled },
                 set: { MeetingMode.shared.isEnabled = $0 }
             ))
-            Text("While a calendar event is in progress (Now), suppress routine sneak peeks like track changes. Critical alerts still show. Global hotkeys: ⌃⌥D show notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar.")
+            Toggle("Dim music ambient during meetings", isOn: Binding(
+                get: { MeetingMode.shared.dimMediaAmbient },
+                set: { MeetingMode.shared.dimMediaAmbient = $0 }
+            ))
+            Toggle("Also quiet peeks when Low Power / Focus proxy is on", isOn: Binding(
+                get: { MeetingMode.shared.quietOnFocus },
+                set: { MeetingMode.shared.quietOnFocus = $0 }
+            ))
+            Text("While a calendar event is Now, suppress routine sneak peeks. Critical alerts still show. Dim ambient softens music in the collapsed strip during meetings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Critical Peek bridge (external)", isOn: Binding(
+                get: { PeekBridge.shared.isEnabled },
+                set: { PeekBridge.shared.isEnabled = $0 }
+            ))
+            Text("Allow Shortcuts/scripts to show a notch peek via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek. Off by default.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -184,6 +203,10 @@ struct SettingsView: View {
             Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text("URLs: dynamo://show · mute · play · shelf · calendar · peek?title=")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
             HStack(spacing: 12) {
                 Button("Show Notch") {
                     notch.revealAndExpand()

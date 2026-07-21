@@ -22,10 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             hotKeys.uninstall()
+            PeekBridge.shared.teardown()
             registry?.stopAll()
             hudController?.teardown()
             sneakPeekController?.teardown()
             notchController?.teardown()
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated {
+            for url in urls {
+                DynamoURLRouter.handle(url, notch: notchController, media: mediaPlugin)
+            }
         }
     }
 
@@ -71,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
+        PeekBridge.shared.attach(registry: registry)
+        FocusQuietMonitor.shared.start()
 
         installStatusItem()
         installHotKeys()

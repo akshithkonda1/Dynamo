@@ -114,6 +114,10 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         provider.openNewEvent()
     }
 
+    func openToday() {
+        provider.openToday()
+    }
+
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
     }
@@ -225,6 +229,14 @@ private struct ExpandedCalendarView: View {
                 NotchSectionHeader("Calendar")
                 Spacer(minLength: 0)
                 if plugin.authState == .authorized {
+                    Button {
+                        plugin.openToday()
+                    } label: {
+                        NotchChipLabel(title: "Today", systemImage: "calendar")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open today in Calendar")
+
                     Button {
                         plugin.openNewEvent()
                     } label: {

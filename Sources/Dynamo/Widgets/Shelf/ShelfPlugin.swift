@@ -117,7 +117,7 @@ private struct ExpandedShelfView: View {
                 Text(isDropTargeted ? "Drop to stash" : "Drop files here")
                     .font(NotchTheme.caption)
                     .foregroundStyle(NotchTheme.textSecondary)
-                Text("or use Add to pick from Finder")
+                Text("Copies into Dynamo — originals can be deleted safely")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
@@ -150,10 +150,17 @@ private struct ExpandedShelfView: View {
                         .font(NotchTheme.body)
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
-                    if let size = fileSizeString(for: item) {
-                        Text(size)
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textQuaternary)
+                    HStack(spacing: 6) {
+                        if item.isStashed {
+                            Text("Stashed")
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.positive.opacity(0.9))
+                        }
+                        if let size = fileSizeString(for: item) {
+                            Text(size)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

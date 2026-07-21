@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct CalendarEventItem: Identifiable, Equatable {
@@ -58,6 +59,8 @@ protocol CalendarProvider: AnyObject {
     func openCalendarApp()
     /// Open Calendar’s new-event UI when possible.
     func openNewEvent()
+    /// Open Calendar focused on today.
+    func openToday()
 }
 
 extension CalendarProvider {
@@ -67,6 +70,16 @@ extension CalendarProvider {
     func openEvent(id: String) {}
     func openCalendarApp() {}
     func openNewEvent() { openCalendarApp() }
+    func openToday() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        let day = formatter.string(from: Date())
+        if let url = URL(string: "ical://\(day)") {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        openCalendarApp()
+    }
 }
 
 extension CalendarEventItem {

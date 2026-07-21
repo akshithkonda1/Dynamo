@@ -106,6 +106,9 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
 private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
+    @ObservedObject private var meeting = MeetingMode.shared
+
+    private var dimmed: Bool { meeting.shouldDimMediaAmbient() }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -128,11 +131,14 @@ private struct AmbientMediaView: View {
             }
             .frame(maxWidth: 90, alignment: .leading)
             Spacer(minLength: 0)
-            MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12, color: NotchTheme.mediaGlow.opacity(0.95))
-                .fixedSize()
+            if !dimmed {
+                MusicBarsView(isPlaying: plugin.info.isPlaying, maxHeight: 12, color: NotchTheme.mediaGlow.opacity(0.95))
+                    .fixedSize()
+            }
         }
         .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .opacity(dimmed ? 0.42 : 1)
     }
 
     private var remainingLabel: String? {
@@ -410,12 +416,7 @@ private struct ExpandedMediaView: View {
 
                 if showSystemVolume {
                     VStack(alignment: .leading, spacing: 6) {
-                        if let name = volume.deviceName, !name.isEmpty {
-                            Text(name)
-                                .font(NotchTheme.micro)
-                                .foregroundStyle(NotchTheme.textQuaternary)
-                                .lineLimit(1)
-                        }
+                        OutputDeviceMenu()
 
                         HStack(spacing: 8) {
                             Button {
@@ -600,5 +601,51 @@ private struct ExpandedMediaView: View {
         .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
         .help(accessibility)
         .accessibilityLabel(accessibility)
+    }
+}
+
+// MARK: - Output device menu
+
+private struct OutputDeviceMenu: View {
+    @ObservedObject private var outputs = AudioOutputController.shared
+
+    var body: some View {
+        Menu {
+            ForEach(outputs.devices) { device in
+                Button {
+                    outputs.select(id: device.id)
+                } label: {
+                    HStack {
+                        Text(device.name)
+                        if device.id == outputs.selectedID {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "hifispeaker.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(currentName)
+                    .font(NotchTheme.micro)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(NotchTheme.textQuaternary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: false, vertical: true)
+        .help("Choose audio output")
+        .onAppear { outputs.refresh() }
+    }
+
+    private var currentName: String {
+        if let id = outputs.selectedID,
+           let match = outputs.devices.first(where: { $0.id == id }) {
+            return match.name
+        }
+        return SystemVolumeController.shared.deviceName ?? "Output"
     }
 }

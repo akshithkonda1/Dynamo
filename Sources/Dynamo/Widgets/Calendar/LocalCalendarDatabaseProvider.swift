@@ -272,6 +272,16 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
         CalendarNewEventOpener.open()
     }
 
+    func openToday() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        let day = formatter.string(from: Date())
+        if let url = URL(string: "ical://\(day)"), NSWorkspace.shared.open(url) {
+            return
+        }
+        openCalendarApp()
+    }
+
     // MARK: - Snapshot
 
     /// True if the db can actually be opened for reading right now — a real

@@ -39,5 +39,16 @@
 	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, and playlists in the notch.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.akshithkonda.Dynamo</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dynamo</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
