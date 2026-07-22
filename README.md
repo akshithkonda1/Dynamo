@@ -1,10 +1,22 @@
 # Dynamo
 
-macOS notch widget dock — a better-architected, better-designed alternative to NotchDock and Boring Notch.
+macOS notch widget dock — a better-architected, better-designed alternative to NotchDock and Boring Notch, built on the same "Dynamic Island for the notch" concept and pushed hard toward daily productivity and general usefulness rather than pure visual mimicry.
 
 Dynamo turns the MacBook notch into an interactive widget tray with a plugin architecture so widgets are cheap to add or remove.
 
-**Current version: 0.4.0** (on `main`) — stability, Music/Spotify, Webcam mirror, day-driver UX. See [CHANGELOG.md](CHANGELOG.md) and [PR #5](https://github.com/akshithkonda1/Dynamo/pull/5).
+**This is a personal daily-driver project, not a packaged release.** That shapes several real decisions documented below: prefer free/no-cost data sources and native Apple frameworks where one exists, accept a well-understood trade-off (an undocumented but free feed, a manual permission tap) over adding cost or complexity, and treat notarization/paid-team signing as optional infrastructure to enable later rather than a blocker now.
+
+Originally scoped to a handful of core widgets (Media, Calendar, Clipboard, Checklist), the tray has grown to 11 registered widgets plus several background systems (Focus modes, Meeting Mode, global hotkeys, a `dynamo://` URL scheme). See **Phase 7 onward** below for everything added since Phase 6.1 — Phases 1–6.1 are the original build-out and stability audits; nothing in this file is fictional or aspirational, it's all read from the current `Sources/` tree.
+
+## Widgets (11, currently registered in `AppDelegate.bootstrap()`)
+
+Media · Calendar · Clipboard · Checklist (now a Reminders front-end) ·
+Weather · Battery · Focus · Sports · System Health · Shelf · Webcam.
+
+Plus background systems that aren't tray tabs themselves: Meeting Mode
+(layered on Focus), global hotkeys, the `dynamo://` URL scheme, and the Peek
+Bridge. See **Phase 7** in the status history below for what each new one
+does and why.
 
 ## Status
 
@@ -58,7 +70,7 @@ Dynamo turns the MacBook notch into an interactive widget tray with a plugin arc
 | App icon asset catalog | **Live** (`Assets.xcassets/AppIcon.appiconset` for the Xcode target + `AppIcon.icns` for `package-app.sh`'s ad-hoc build; **placeholder artwork** — a dark rounded-square with a notch silhouette and an accent spark, not a design pass) |
 | MediaRemoteAdapter helper process | **Live** (`DynamoMediaRemoteHelper` — multi-path discovery, live publish, auto-restart; embedded by Xcode postbuild + `package-app.sh`; verified present in packaged `.app`) |
 | Notarization + DMG release pipeline | **Live, needs your Apple Developer credentials** (`scripts/release-local.sh`, `notarize.sh`, `make-dmg.sh`, `.github/workflows/release.yml`) |
-| Reminders peeks | **Live, opt-in** — restored in Phase 6.1 via a dedicated reminders-only `EKEventStore` inside `LocalCalendarDatabaseProvider`, independent of Calendar's own file-based access. Reminders are a separate data store EventKit has no file-based read path for, so this grant is requested only when you tap "Allow Reminders" in the Calendar tab — never at launch, and never bundled with Calendar's own (EventKit-free) access. |
+| Reminders peeks | **Superseded** — restored in Phase 6.1 via a dedicated reminders-only `EKEventStore` inside `LocalCalendarDatabaseProvider`, living in the Calendar tab. Phase 7 moved Reminders out of Calendar entirely and merged it into the Checklist widget instead (see **Phase 7 — Checklist becomes a Reminders front-end** below); `CalendarProvider` no longer has any reminders properties. |
 | Multi-display picker | **Live** (Settings → General → Display for notch) |
 | App icon | **Live** (regenerated notch/island mark for asset catalog + `.icns`) |
 
@@ -93,25 +105,121 @@ remembered permissions) landed and the Messages widget was removed.
 | Full calendar DB copy every 30s (`LocalCalendarDatabaseProvider`) | **Fixed** — `refresh()` unconditionally copied the entire `Calendar.sqlitedb` (+ WAL/SHM) to a temp file every poll tick regardless of whether Calendar had written anything. Now compares an mtime+size fingerprint of the source (including the `-wal` sidecar, since WAL-mode writes land there first) and reuses the existing snapshot when unchanged. A cheap open/close read-check still runs every cycle regardless, so a Full-Disk-Access revocation is still caught within one tick — only the expensive full-file copy is skipped, not the permission check. |
 | Reminders status corrected in this README | **Fixed** — see the Phase 4 entry above; it claimed live EventKit reminders that the current default provider doesn't produce. |
 
-### Phase 6.1 — Reminders due-date peeks (restored)
+### Phase 6.1 — Reminders due-date peeks (restored, then superseded)
 
 `NSRemindersUsageDescription` / `NSRemindersFullAccessUsageDescription` were
 already declared in `Info.plist` from before Phase 6 disconnected reminders —
-this wires the feature back up properly rather than leaving the strings
+this wired the feature back up properly rather than leaving the strings
 orphaned.
+
+**Historical — this table describes Phase 6.1's implementation, not current
+behavior.** Phase 7 replaced this whole approach; see **Phase 7 — Checklist
+becomes a Reminders front-end** below for what's actually live today.
+
+| Area | State (as of Phase 6.1, now superseded) |
+|------|--------|
+| Reminders access | `LocalCalendarDatabaseProvider` gained a second, reminders-only `EKEventStore` (`requestRemindersAccess()`), entirely separate from Calendar's own file-based access. A Calendar-DB read failure no longer cleared already-fetched reminders and vice versa — they were independent `CalendarProvider` properties (`authorizationState` vs `remindersAuthState`) with independent failure/retry paths. |
+| No-launch-prompt guarantee | `refresh()` only ever called the passive `EKEventStore.authorizationStatus(for: .reminder)` (never prompted); the real system dialog fired only from `requestRemindersAccess()`, wired to an explicit "Allow Reminders" button in the Calendar tab's expanded view. |
+| Settings visibility | Added `.reminders` to `PermissionsStore`'s `DynamoPermission` enum. |
+
+### Phase 7 — Focus & Meeting Mode
+
+A background system, not a widget: it changes how the rest of the tray
+behaves rather than adding its own tray tab (the Focus **widget** below is a
+thin front-end onto it).
 
 | Area | State |
 |------|--------|
-| Reminders access | **Live** — `LocalCalendarDatabaseProvider` gains a second, reminders-only `EKEventStore` (`requestRemindersAccess()`), entirely separate from Calendar's own file-based access. A Calendar-DB read failure no longer clears already-fetched reminders and vice versa — they're independent `CalendarProvider` properties (`authorizationState` vs `remindersAuthState`) with independent failure/retry paths. |
-| No-launch-prompt guarantee | **Live** — `refresh()` only ever calls the passive `EKEventStore.authorizationStatus(for: .reminder)` (never prompts); the real system dialog fires only from `requestRemindersAccess()`, wired to an explicit "Allow Reminders" button in the Calendar tab's expanded view, matching the existing no-prompt-at-launch pattern already used for the Webcam tab. |
-| Settings visibility | **Live** — added `.reminders` to `PermissionsStore`'s `DynamoPermission` enum, so it shows up automatically in Settings → Permissions (remembered status, "Open Settings" deep link) with no bespoke UI needed. |
+| `FocusController` | **Live** — a singleton owning one of four modes (`.normal` / `.dynamic` / `.trueFocus` / `.meeting`), persisted via `UserDefaults`. Everything else in this section reads its current mode; nothing about it is AI-driven. |
+| `FocusQuietMonitor` | **Live** — uses `ProcessInfo.isLowPowerModeEnabled` as an honest, documented **proxy** for "Focus is probably on," because macOS does not expose a public API for actual Focus/Do Not Disturb status. Peeks go quieter while the proxy is active. No private APIs, no plist scraping. |
+| `FocusAgendaEngine` ("True Focus" mode) | **Live** — builds a daily agenda purely from Calendar + Reminders + local Checklist items already available to the app, and fires prep/end-of-block peeks roughly 30 minutes before and after each block. No external scheduling service involved. |
+| `DynamicCompanion` ("Dynamic" mode) | **Live** — deterministic, rule-based nudges: a next-event pulse every ~45 minutes, an overdue-reminder peek, and a one-shot "coding tool is frontmost → checklist nudge" using a small bundle-ID allowlist. Zero AI, zero heuristics beyond simple thresholds. |
+| Meeting Mode (`FocusController.meeting` + `MeetingMode` facade) | **Live** — the old standalone `MeetingMode` type is now a thin facade delegating to `FocusController`, kept for call-site compatibility. |
+| `MeetingSpeechCapture` | **Live, opt-in, mic active only while listening** — on-device-preferred `SFSpeechRecognizer` (`requiresOnDeviceRecognition = true` where supported) over an `AVAudioEngine` tap. Nothing is transcribed unless a meeting is actively being captured. |
+| `MeetingNotesStore` | **Live** — meeting notes persist as local-only JSON in Application Support. No network calls anywhere in this path. |
+| `MeetingTalkCoach` | **Live** — local, keyword-based "what to say next" suggestions (standup / 1:1 / interview / demo playbooks). Not a model call — a lookup table. |
+| `MeetingVolumeDucker` | **Live** — saves the current system volume and ducks it to a target level (default 25%) for the duration of a meeting, restoring it afterward. |
+| `CallSessionProbe` | **Live** — polls `NSWorkspace.runningApplications` every ~2s against an allowlist of FaceTime/Zoom/Teams/Skype/Webex bundle IDs to *suggest* Meeting Mode. It never auto-joins a call or changes mode without you confirming. |
+
+### Phase 7 — Sports, System Health & Battery Intelligence
+
+Three new widgets, all read-only with respect to the system (System Health
+and Battery can *suggest* actions — open System Settings, confirm a restart —
+but never act without you clicking through).
+
+**Sports** — `SportsPlugin` / `SportsStore` / `ESPNScoreboardClient`.
+Follows multiple leagues, aggregates live scores, supports category filters.
+Data comes from ESPN's public scoreboard feed
+(`site.api.espn.com/apis/site/v2/sports/{path}/scoreboard`) — an
+**undocumented but free, no-API-key** endpoint. This was a deliberate choice,
+not an oversight: Dynamo is a personal project with a hard preference for
+zero-cost data sources, and **Apple does not publish a developer-facing
+Sports/live-scores API or framework** — the "Apple Sports" app is not backed
+by anything third-party macOS software can call. Given that constraint,
+ESPN's free feed is close to the only zero-cost option, and the UI is upfront
+about it (the subtitle says "free ESPN feed," not something implying an
+official partnership). The one known trade-off worth naming plainly: the
+background poll timer starts at plugin registration (app launch), not gated
+to "Sports tab open" the way Webcam's camera capture is — so it polls in the
+background for as long as Dynamo runs, unlike the on/off pattern used
+elsewhere in the tray. Accepted for now given the endpoint is free either way;
+worth revisiting if ESPN ever rate-limits or the polling cost becomes worth
+gating.
+
+**System Health** — `SystemHealthPlugin` / `MacHealthModel` /
+`SoftwareUpdateProvider` / `MacHealthActions`. A weekly, locally-generated
+report (0–100 composite score) from read-only system metrics: disk free
+(`attributesOfFileSystem`), uptime (`sysctlbyname("kern.boottime")`), thermal
+state (`ProcessInfo.thermalState`), memory pressure (raw
+`host_statistics64`/Mach calls), and pending Apple software updates (shelling
+out to `/usr/sbin/softwareupdate -l`, polled every 12h with a 30-minute
+minimum cooldown between checks). Every remediation is a deep link — System
+Settings, Activity Monitor, a restart-confirmation dialog — never an
+automatic install or forced restart.
+
+**Battery Intelligence** — `BatteryHealthModel` / `BatteryHistoryStore` /
+`BatteryPowerMode`. A composite battery-health score from IOKit hardware
+capacity plus a local drain-rate history (capped at 2,500 samples, sampled no
+more than every 4 minutes), with a linear-fit drain/charge-rate prediction —
+all computed on-device; no data leaves the Mac. `BatteryPowerMode` reads and
+toggles system Low Power Mode via `pmset -b/-a lowpowermode` (no `sudo`
+needed for your own power source) and offers an opt-in-by-default policy to
+auto-enable Low Power Mode at ≤20% battery.
+
+### Phase 7 — Checklist becomes a Reminders front-end
+
+Supersedes Phase 6.1's Calendar-tab Reminders integration above — Reminders
+now lives entirely under Checklist, with full read/write access rather than
+peeks-only.
+
+| Area | State |
+|------|--------|
+| Dual composer (`DraftTarget`) | **Live** — Checklist's compose UI is a segmented control: `.reminders` (default) or `.local`. New items go to whichever is selected. |
+| `RemindersProvider` | **Live** — a full read/write EventKit integration (create, complete, uncomplete, update title, set due date, delete) on its own `EKEventStore`, separate from Calendar's. Polls every 30s and also observes `.EKEventStoreChanged` for near-immediate updates; in-flight fetches are properly cancelled via `cancelFetchRequest` rather than left to race. |
+| Old Calendar-tab reminders path | **Removed** — `CalendarProvider` no longer declares `dueReminders` or `remindersAuthState` at all; that surface moved here wholesale. |
+
+### Phase 7 — Automation & external control
+
+| Area | State |
+|------|--------|
+| Global hotkeys (`GlobalHotKeys`) | **Live** — real Carbon `RegisterEventHotKey`/`InstallEventHandler`, not a global `NSEvent` monitor (consistent with the anti-polling discipline elsewhere in this codebase). Default bindings: ⌃⌥D show, ⌃⌥P play/pause, ⌃⌥M mute, ⌃⌥S focus Shelf, ⌃⌥C focus Calendar. Registration conflicts are reported rather than silently swallowed. |
+| `dynamo://` URL scheme (`DynamoURLRouter`) | **Live** — `dynamo://show`, `mute`, `play`, `shelf`, `calendar`, `peek?title=…&subtitle=…`. Handled in `AppDelegate.application(_:open:)`. |
+| Peek Bridge (`PeekBridge`) | **Live, opt-in, off by default** — lets an external script or Shortcut post a peek via `DistributedNotificationCenter` (`com.akshithkonda.Dynamo.externalPeek`) or the `dynamo://peek` URL. Must be explicitly enabled in Settings → General; nothing listens until you turn it on. |
+
+### Phase 7 — Audio-reactive visuals
+
+| Area | State |
+|------|--------|
+| `MusicAudioSampler` | **Live on macOS 14.2+, gracefully degrades below it** — real-time 36-band FFT spectrum analysis plus beat/BPM onset detection, sourced from the actual playing app's audio (Music, Spotify, browsers, Discord, Slack, etc.) via Core Audio process taps (`CATapDescription`, `AudioHardwareCreateProcessTap`, `AudioHardwareCreateAggregateDevice`) — a macOS 14.2 API. Runs a ~60fps analysis loop on its own `DispatchQueue` with adaptive gain control. On older systems the visualizer falls back to a static state with a plain "Needs macOS 14.2+ for live audio" message rather than a crash or a fake animation. Because process taps share the same TCC gate as microphone recording, this requests mic permission (`AVCaptureDevice.requestAccess(for: .audio)`) even though it never records — worth knowing before you wonder why Dynamo asks for the microphone. |
+| `AudioOutputController` | **Live** — enumerates Core Audio output devices and sets `kAudioHardwarePropertyDefaultOutputDevice`; surfaced as an output-device picker in the Media widget. |
+| Supporting visual layer (`AuroraEqualizerView`, `CoverArtPalette`, `DynamicChrome`, `MediaPeekPulse`, `NotchChrome`) | **Live** — cover-art-derived color palette, chrome/pulse treatments for the now-playing peek and ambient view. |
 
 ## Requirements
 
-- macOS 13+
+- macOS 13+ (macOS 14.2+ additionally unlocks the live audio-reactive equalizer via Core Audio process taps — see *Phase 7 — Audio-reactive visuals*; on older macOS it degrades gracefully to a static state instead of failing)
 - Xcode 15+ (or a recent Xcode beta) with the macOS SDK
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) to generate the app project
-- **A paid Apple Developer membership** for the Weather widget — WeatherKit is not available to Personal Teams. Every other widget still runs ad-hoc / self-signed.
+- **A paid Apple Developer membership, only if you want the Weather widget** — WeatherKit is not available to Personal Teams. This isn't a hard requirement of the project: Dynamo is a personal, unreleased daily driver, so paying for a developer account purely to unlock one widget isn't assumed. If a paid account gets set up anyway (for unrelated reasons), Weather stays on WeatherKit; otherwise the plan is to swap it for a free, key-light alternative (see *Weather setup*). Every other widget runs ad-hoc / self-signed with no paid account at all.
 
 ## Build & run
 
@@ -208,6 +316,17 @@ require the **Xcode app target** and a **paid Apple Developer team** (see
 key-free Apple framework instead of a third-party quote API that needed a
 manually-provisioned Finnhub key.
 
+**Open decision — WeatherKit's future is tied to an unrelated purchase, not
+to this project.** A paid Apple Developer membership is being considered for
+a separate project; if that happens, it covers every app under the same
+membership and Weather keeps WeatherKit at no extra cost. If it doesn't
+happen, Weather is not worth paying $99/year for on its own, and the plan is
+to swap the provider behind `WeatherProvider` for a free alternative —
+candidates being the US National Weather Service (`api.weather.gov`, free,
+no key, official, but US-only) or OpenWeatherMap (free tier, worldwide,
+needs an API key). Nothing about this is decided or implemented; it's called
+out here so it isn't lost.
+
 ## Notarization & DMG releases
 
 Three pieces, none of which carry any credentials — they're tooling that
@@ -267,15 +386,25 @@ export NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_APP_PASSWORD=…
 
 WeatherKit-signed public releases should use the Xcode export path / GitHub Actions workflow with your paid team secrets.
 
-## Next steps (post Phase 6.1)
+## Next steps (post Phase 7)
 
-- Optional: paid-team WeatherKit cold-start verification (left alone by design for now)
+- Open decision: keep WeatherKit (if a paid Developer account materializes for
+  another project) or swap Weather to a free provider like `api.weather.gov` /
+  OpenWeatherMap — see *Weather setup* above. Not urgent; the widget works
+  today.
+- Known, accepted trade-off: Sports polls ESPN's free scoreboard feed on an
+  unconditional background timer from app launch rather than gated to
+  "Sports tab open." Left as-is for now since the feed is free regardless of
+  poll rate; worth revisiting only if that changes.
+- Test coverage is thin relative to the codebase's size (one test file across
+  ~19k lines of source) — the widest gap for anyone treating this as
+  production-ready rather than a personal daily driver.
 - Optional: further icon polish by a designer (the current one is a generated placeholder)
 - Optional: more event sources (e.g. Focus / Screen Time — no stable public API for either as of this writing)
 - Optional: MediaRemoteAdapter helper process verification on a real Mac —
   confirm the `project.yml` postbuild script actually copies and signs the
   binary into `Contents/MacOS/`
-- Optional: multi-display picker for which screen hosts the notch panel
+- Optional: paid-team WeatherKit cold-start verification, if WeatherKit stays (left alone by design for now)
 
 ## License
 
