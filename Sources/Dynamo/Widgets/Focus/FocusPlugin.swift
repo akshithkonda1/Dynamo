@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -12,6 +13,7 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
     var isAmbientActive: Bool {
         let f = FocusController.shared
         if f.isMeetingActive { return true }
+        if f.baseMode == .dynamic, !DynamicPrioritiesStore.shared.priorities.isEmpty { return true }
         if f.baseMode == .trueFocus, FocusAgendaEngine.shared.snapshot.now != nil { return true }
         if f.baseMode == .trueFocus, FocusTimerStore.shared.isRunning { return true }
         return false
@@ -23,19 +25,36 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
            FocusAgendaEngine.shared.snapshot.now != nil { return 70 }
         if FocusController.shared.baseMode == .trueFocus,
            FocusTimerStore.shared.isRunning { return 72 }
+        if FocusController.shared.baseMode == .dynamic { return 35 }
         return 0
     }
 
     func start() {
         FocusController.shared.start()
         FocusTimerStore.shared.onComplete = {
+            let suppressed = FocusController.shared.distractionLog.count
+            let subtitle = suppressed > 0
+                ? "Take a break · \(suppressed) distraction\(suppressed == 1 ? "" : "s") blocked"
+                : "Take a break · you earned it"
             FocusController.shared.emitPeek?(NotchSneakPeek(
                 systemImage: "checkmark.circle.fill",
                 title: "Focus block complete",
-                subtitle: "Take a break · you earned it",
+                subtitle: subtitle,
                 urgency: .high,
                 detail: "True Focus"
             ))
+        }
+        FocusTimerStore.shared.onPomodoroTransition = { phase in
+            let peek: NotchSneakPeek
+            switch phase {
+            case .shortBreak:
+                peek = NotchSneakPeek(systemImage: "cup.and.saucer", title: "Short break", subtitle: "5 minutes · step away", urgency: .normal, detail: "Pomodoro")
+            case .longBreak:
+                peek = NotchSneakPeek(systemImage: "figure.walk", title: "Long break", subtitle: "15 minutes · great work!", urgency: .high, detail: "Pomodoro")
+            case .work:
+                peek = NotchSneakPeek(systemImage: "timer", title: "Back to work", subtitle: "New Pomodoro block starting", urgency: .normal, detail: "Pomodoro")
+            }
+            FocusController.shared.emitPeek?(peek)
         }
     }
 
@@ -58,32 +77,20 @@ private struct AmbientFocusView: View {
     @ObservedObject private var focus = FocusController.shared
     @ObservedObject private var agenda = FocusAgendaEngine.shared
     @ObservedObject private var focusTimer = FocusTimerStore.shared
+    @ObservedObject private var top3 = DynamicPrioritiesStore.shared
+
+    /// Cycles 0…N-1 for Dynamic ambient rotation (increments on a 5-second timer).
+    @State private var cycleIndex: Int = 0
+    private let cycleTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 6) {
             if focus.isMeetingActive {
-                Image(systemName: "video.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchTheme.caution)
-                Text("Meeting")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                if let app = focus.suggestedCallApp {
-                    Text(app)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                        .lineLimit(1)
-                }
+                meetingAmbient
             } else if focusTimer.isRunning {
-                Image(systemName: "timer")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchTheme.positive)
-                Text(focusTimer.formattedRemaining)
-                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(NotchTheme.textPrimary)
-                Text("Focus block")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                timerAmbient
+            } else if focus.baseMode == .dynamic {
+                dynamicAmbient
             } else if let now = agenda.snapshot.now {
                 Image(systemName: "target")
                     .font(.system(size: 10, weight: .semibold))
@@ -97,6 +104,74 @@ private struct AmbientFocusView: View {
         }
         .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(cycleTimer) { _ in
+            let count = top3.priorities.count
+            guard count > 1 else { return }
+            cycleIndex = (cycleIndex + 1) % count
+        }
+    }
+
+    private var meetingAmbient: some View {
+        Group {
+            Image(systemName: "video.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(NotchTheme.caution)
+            Text("Meeting")
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
+            if let end = focus.calendarMeetingEnd(), end > Date() {
+                let left = max(1, Int(end.timeIntervalSince(Date()) / 60))
+                Text("\(left)m left")
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+            } else if let app = focus.suggestedCallApp {
+                Text(app)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var timerAmbient: some View {
+        Group {
+            Image(systemName: focusTimer.isPomodoroMode ? focusTimer.pomodoroPhase.systemImage : "timer")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(NotchTheme.positive)
+            Text(focusTimer.formattedRemaining)
+                .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                .foregroundStyle(NotchTheme.textPrimary)
+            if focusTimer.isPomodoroMode {
+                Text(focusTimer.pomodoroPhase.label)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                if focusTimer.completedCycles > 0 {
+                    Text("×\(focusTimer.completedCycles)")
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+            } else {
+                Text("Focus block")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dynamicAmbient: some View {
+        let items = top3.priorities.filter { !$0.isDone }
+        if let item = items.isEmpty ? nil : items[min(cycleIndex, items.count - 1)] {
+            Image(systemName: "bolt.horizontal.circle")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(NotchTheme.mediaGlow)
+            Text(item.text)
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
+                .lineLimit(1)
+                .transition(.opacity)
+                .id(item.id)
+        }
     }
 }
 
@@ -239,10 +314,18 @@ private struct ExpandedFocusView: View {
                 .foregroundStyle(NotchTheme.caution)
                 .font(.system(size: 11, weight: .semibold))
             VStack(alignment: .leading, spacing: 1) {
-                Text(focus.calendarMeetingTitle() ?? "Meeting companion")
-                    .font(NotchTheme.caption.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(focus.calendarMeetingTitle() ?? "Meeting companion")
+                        .font(NotchTheme.caption.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                    if let end = focus.calendarMeetingEnd(), end > Date() {
+                        let mins = max(1, Int(end.timeIntervalSince(Date()) / 60))
+                        Text("\(mins)m left")
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(mins <= 5 ? NotchTheme.caution : NotchTheme.textTertiary)
+                    }
+                }
                 Text(contextSubtitle)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textTertiary)
@@ -299,18 +382,30 @@ private struct ExpandedFocusView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !attendees.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                        Text(attendees.prefix(4).joined(separator: ", "))
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                            .lineLimit(1)
-                        if attendees.count > 4 {
-                            Text("+\(attendees.count - 4)")
-                                .font(NotchTheme.micro)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2")
+                                .font(.system(size: 8, weight: .semibold))
                                 .foregroundStyle(NotchTheme.textQuaternary)
+                            ForEach(attendees.prefix(6), id: \.self) { name in
+                                Button {
+                                    notes.draft = "@\(name.components(separatedBy: " ").first ?? name): "
+                                } label: {
+                                    Text(name.components(separatedBy: " ").first ?? name)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textSecondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Mention \(name) in notes")
+                            }
+                            if attendees.count > 6 {
+                                Text("+\(attendees.count - 6)")
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
                         }
                     }
                 }
@@ -651,27 +746,86 @@ private struct ExpandedFocusView: View {
             if agenda.snapshot.now == nil && agenda.snapshot.upNext.isEmpty && !focusTimer.isRunning {
                 tipCard("target", "No agenda yet", "Allow Calendar & Reminders to fill True Focus.")
             }
+            distractionLogSection
+        }
+    }
+
+    @ViewBuilder
+    private var distractionLogSection: some View {
+        if !focus.distractionLog.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Blocked")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    Text("\(focus.distractionLog.count)")
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    Spacer(minLength: 0)
+                    Button { focus.clearDistractionLog() } label: {
+                        Text("Clear")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                ForEach(focus.distractionLog.prefix(3)) { entry in
+                    HStack(spacing: 5) {
+                        Image(systemName: "hand.raised")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                        Text(entry.title)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
         }
     }
 
     private var timerProgressCard: some View {
-        HStack(spacing: 8) {
+        let phaseColor: Color = {
+            guard focusTimer.isPomodoroMode else { return NotchTheme.positive }
+            switch focusTimer.pomodoroPhase {
+            case .work: return NotchTheme.positive
+            case .shortBreak: return NotchTheme.mediaGlow
+            case .longBreak: return NotchTheme.caution
+            }
+        }()
+        return HStack(spacing: 8) {
             ZStack {
                 Circle()
                     .stroke(Color.white.opacity(0.08), lineWidth: 2.5)
                 Circle()
                     .trim(from: 0, to: focusTimer.progressFraction)
-                    .stroke(NotchTheme.positive, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .stroke(phaseColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
+                if focusTimer.isPomodoroMode {
+                    Image(systemName: focusTimer.pomodoroPhase.systemImage)
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(phaseColor)
+                }
             }
             .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text(focusTimer.formattedRemaining)
                     .font(NotchTheme.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(NotchTheme.textPrimary)
-                Text("Focus block")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                HStack(spacing: 4) {
+                    Text(focusTimer.isPomodoroMode ? focusTimer.pomodoroPhase.label : "Focus block")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    if focusTimer.isPomodoroMode && focusTimer.completedCycles > 0 {
+                        Text("·")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                        Text("\(focusTimer.completedCycles) done")
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    }
+                }
             }
             Spacer(minLength: 0)
             Button { focusTimer.cancel() } label: {
@@ -687,7 +841,7 @@ private struct ExpandedFocusView: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(NotchTheme.positive.opacity(0.08))
+                .fill(phaseColor.opacity(0.08))
         )
     }
 
@@ -722,36 +876,89 @@ private struct ExpandedFocusView: View {
     // MARK: - Footer
 
     private var focusFooter: some View {
-        HStack(spacing: 8) {
-            if focus.baseMode == .trueFocus {
-                trueFocusTimerButtons
-            } else {
-                chipButton("Refresh", "arrow.clockwise") {
-                    focus.reevaluateMeeting()
-                    FocusAgendaEngine.shared.rebuild()
-                }
-                chipButton("Calendar", "calendar") {
-                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
-                        NSWorkspace.shared.open(url)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                if focus.baseMode == .trueFocus {
+                    trueFocusTimerButtons
+                } else {
+                    chipButton("Refresh", "arrow.clockwise") {
+                        focus.reevaluateMeeting()
+                        FocusAgendaEngine.shared.rebuild()
+                    }
+                    chipButton("Calendar", "calendar") {
+                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    chipButton("Reminders", "checklist") {
+                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
                 }
-                chipButton("Reminders", "checklist") {
-                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+                Spacer()
             }
-            Spacer()
+            if focus.baseMode == .trueFocus || focus.baseMode == .meeting {
+                breakNudgeRow
+            }
+            if focus.baseMode == .trueFocus {
+                dndSyncRow
+            }
+        }
+    }
+
+    private var breakNudgeRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "figure.stand")
+                .font(.system(size: 9))
+                .foregroundStyle(NotchTheme.textQuaternary)
+            Text("Break every")
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textQuaternary)
+            Button { if focus.breakNudgeMinutes > 5 { focus.breakNudgeMinutes -= 5 } } label: {
+                Image(systemName: "minus").font(.system(size: 8, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(NotchTheme.textQuaternary)
+            Text("\(focus.breakNudgeMinutes)m")
+                .font(NotchTheme.micro.monospacedDigit().weight(.semibold))
+                .foregroundStyle(NotchTheme.textTertiary)
+                .frame(minWidth: 28)
+            Button { if focus.breakNudgeMinutes < 90 { focus.breakNudgeMinutes += 5 } } label: {
+                Image(systemName: "plus").font(.system(size: 8, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(NotchTheme.textQuaternary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var dndSyncRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "moon.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(focus.dndSyncEnabled ? NotchTheme.mediaGlow : NotchTheme.textQuaternary)
+            Button {
+                focus.dndSyncEnabled.toggle()
+            } label: {
+                Text(focus.dndSyncEnabled ? "DND → True Focus: on" : "Sync macOS DND")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(focus.dndSyncEnabled ? NotchTheme.mediaGlow : NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.plain)
+            .help("When macOS Do Not Disturb is on, automatically enter True Focus mode")
+            Spacer(minLength: 0)
         }
     }
 
     @ViewBuilder
     private var trueFocusTimerButtons: some View {
         if focusTimer.isRunning {
-            chipButton("Cancel block", "xmark.circle") { focusTimer.cancel() }
+            chipButton("Cancel", "xmark.circle") { focusTimer.cancel() }
         } else {
             chipButton("25 min", "timer") { focusTimer.start(minutes: 25) }
             chipButton("50 min", "timer") { focusTimer.start(minutes: 50) }
+            chipButton("Pomodoro", "cup.and.saucer") { focusTimer.startPomodoro() }
             chipButton("Refresh", "arrow.clockwise") {
                 focus.reevaluateMeeting()
                 FocusAgendaEngine.shared.rebuild()

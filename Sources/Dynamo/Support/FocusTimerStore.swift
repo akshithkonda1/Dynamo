@@ -1,5 +1,25 @@
 import Foundation
 
+enum PomodoroPhase: String {
+    case work, shortBreak, longBreak
+
+    var label: String {
+        switch self {
+        case .work: return "Work"
+        case .shortBreak: return "Short break"
+        case .longBreak: return "Long break"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .work: return "timer"
+        case .shortBreak: return "cup.and.saucer"
+        case .longBreak: return "figure.walk"
+        }
+    }
+}
+
 @MainActor
 final class FocusTimerStore: ObservableObject {
     static let shared = FocusTimerStore()
@@ -8,22 +28,34 @@ final class FocusTimerStore: ObservableObject {
     @Published private(set) var remainingSeconds: Int = 0
     @Published private(set) var totalSeconds: Int = 0
 
-    var onComplete: (() -> Void)?
+    // Pomodoro
+    @Published private(set) var isPomodoroMode = false
+    @Published private(set) var pomodoroPhase: PomodoroPhase = .work
+    @Published private(set) var completedCycles: Int = 0
 
+    var onComplete: (() -> Void)?
+    var onPomodoroTransition: ((PomodoroPhase) -> Void)?
+
+    private var pomodoroWorkMinutes = 25
+    private var pomodoroBreakMinutes = 5
     private var ticker: Timer?
 
     private init() {}
 
     func start(minutes: Int) {
-        cancel()
-        totalSeconds = minutes * 60
-        remainingSeconds = totalSeconds
-        isRunning = true
-        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        ticker = t
+        isPomodoroMode = false
+        completedCycles = 0
+        pomodoroPhase = .work
+        beginCountdown(minutes: minutes)
+    }
+
+    func startPomodoro(workMinutes: Int = 25, breakMinutes: Int = 5) {
+        isPomodoroMode = true
+        pomodoroWorkMinutes = workMinutes
+        pomodoroBreakMinutes = breakMinutes
+        pomodoroPhase = .work
+        completedCycles = 0
+        beginCountdown(minutes: workMinutes)
     }
 
     func cancel() {
@@ -32,6 +64,9 @@ final class FocusTimerStore: ObservableObject {
         isRunning = false
         remainingSeconds = 0
         totalSeconds = 0
+        isPomodoroMode = false
+        completedCycles = 0
+        pomodoroPhase = .work
     }
 
     var progressFraction: Double {
@@ -45,6 +80,18 @@ final class FocusTimerStore: ObservableObject {
         return String(format: "%d:%02d", m, s)
     }
 
+    private func beginCountdown(minutes: Int) {
+        ticker?.invalidate()
+        totalSeconds = minutes * 60
+        remainingSeconds = totalSeconds
+        isRunning = true
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        ticker = t
+    }
+
     private func tick() {
         guard isRunning, remainingSeconds > 0 else { return }
         remainingSeconds -= 1
@@ -52,7 +99,31 @@ final class FocusTimerStore: ObservableObject {
             ticker?.invalidate()
             ticker = nil
             isRunning = false
+            handleCompletion()
+        }
+    }
+
+    private func handleCompletion() {
+        guard isPomodoroMode else {
             onComplete?()
+            return
+        }
+        switch pomodoroPhase {
+        case .work:
+            completedCycles += 1
+            if completedCycles % 4 == 0 {
+                pomodoroPhase = .longBreak
+                onPomodoroTransition?(.longBreak)
+                beginCountdown(minutes: 15)
+            } else {
+                pomodoroPhase = .shortBreak
+                onPomodoroTransition?(.shortBreak)
+                beginCountdown(minutes: pomodoroBreakMinutes)
+            }
+        case .shortBreak, .longBreak:
+            pomodoroPhase = .work
+            onPomodoroTransition?(.work)
+            beginCountdown(minutes: pomodoroWorkMinutes)
         }
     }
 }
