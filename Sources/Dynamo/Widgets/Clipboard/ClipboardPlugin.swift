@@ -8,7 +8,6 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     let systemImage = "doc.on.clipboard"
 
     var expandedContentHeight: CGFloat { 255 }
-    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     let store = ClipboardStore()
 
@@ -109,24 +108,14 @@ private struct ExpandedClipboardView: View {
 
                     NotchSectionHeader(
                         "History",
-                        trailing: AnyView(
-                            HStack(spacing: 8) {
-                                Button {
-                                    plugin.stripFormatting()
-                                } label: {
-                                    NotchChipLabel(title: "Plain", systemImage: "textformat.size.smaller")
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(!plugin.canStripFormatting)
-                                .help("Re-paste current clipboard as plain text, stripping formatting")
-                                if !store.history.isEmpty {
-                                    Button("Clear") { store.clearHistory() }
-                                        .buttonStyle(.plain)
-                                        .font(NotchTheme.micro)
-                                        .foregroundStyle(NotchTheme.textTertiary)
-                                }
-                            }
-                        )
+                        trailing: store.history.isEmpty
+                            ? nil
+                            : AnyView(
+                                Button("Clear") { store.clearHistory() }
+                                    .buttonStyle(.plain)
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textTertiary)
+                            )
                     )
 
                     historySection

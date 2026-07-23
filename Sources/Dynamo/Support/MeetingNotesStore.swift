@@ -65,30 +65,23 @@ final class MeetingNotesStore: ObservableObject {
     private init() {}
 
     func ensureSession(calendarTitle: String? = nil, callApp: String? = nil) {
-        // Ended sessions must not be reused — start a fresh note pad.
-        if let existing = session, existing.endedAt == nil {
+        if session != nil {
             if let calendarTitle { session?.calendarTitle = calendarTitle }
             if let callApp { session?.callApp = callApp }
             persist()
-            objectWillChange.send()
             return
         }
         session = MeetingNoteSession(calendarTitle: calendarTitle, callApp: callApp)
-        draft = ""
         persist()
         objectWillChange.send()
     }
 
     func endSession() {
-        guard var s = session, s.endedAt == nil else {
-            draft = ""
-            return
-        }
+        guard var s = session else { return }
         s.endedAt = Date()
         session = s
         persist()
         draft = ""
-        objectWillChange.send()
     }
 
     @discardableResult
@@ -96,7 +89,6 @@ final class MeetingNotesStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         ensureSession()
-        guard session?.endedAt == nil else { return nil }
         let bullet = MeetingNoteBullet(text: trimmed, source: source)
         session?.bullets.append(bullet)
         persist()
@@ -121,12 +113,10 @@ final class MeetingNotesStore: ObservableObject {
     }
 
     func copyAllToPasteboard() {
-        let allBullets = session?.bullets ?? []
-        let lines = allBullets.map { b in
+        let lines = (session?.bullets ?? []).map { b in
             let t = Self.time.string(from: b.createdAt)
             return "• [\(t)] \(b.text)"
         }
-        let actions = MeetingActionExtractor.extract(from: allBullets)
         var header: [String] = ["# Meeting notes"]
         if let title = session?.calendarTitle { header.append("Event: \(title)") }
         if let app = session?.callApp { header.append("App: \(app)") }
@@ -134,12 +124,7 @@ final class MeetingNotesStore: ObservableObject {
             header.append("Started: \(Self.time.string(from: start))")
         }
         header.append("")
-        var sections = header + lines
-        if !actions.isEmpty {
-            sections += ["", "## Action items"]
-            sections += actions.map { "- [ ] \($0.text)" }
-        }
-        let body = sections.joined(separator: "\n")
+        let body = (header + lines).joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(body, forType: .string)
     }
