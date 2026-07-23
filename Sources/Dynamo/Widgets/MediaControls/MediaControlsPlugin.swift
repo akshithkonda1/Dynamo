@@ -252,25 +252,45 @@ private struct AmbientMediaView: View {
     @ViewBuilder
     private var artThumb: some View {
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
-        if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(1, contentMode: .fill)
-                .frame(width: 18, height: 18)
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-                .contentShape(shape)
-        } else {
-            shape
-                .fill(NotchTheme.chipFill)
-                .frame(width: 18, height: 18)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                )
-                .contentShape(shape)
+        let fraction: Double = {
+            let d = plugin.info.duration, e = plugin.info.elapsed
+            guard d > 1, e >= 0 else { return 0 }
+            return max(0, min(1, e / d))
+        }()
+        let showRing = plugin.info.duration > 1
+        ZStack {
+            if showRing {
+                Circle()
+                    .stroke(NotchTheme.mediaGlow.opacity(0.15), lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(NotchTheme.mediaGlow.opacity(0.75),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .frame(width: 22, height: 22)
+                    .rotationEffect(.degrees(-90))
+            }
+            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: 18, height: 18)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .contentShape(shape)
+            } else {
+                shape
+                    .fill(NotchTheme.chipFill)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                    )
+                    .contentShape(shape)
+            }
         }
+        .frame(width: 22, height: 22)
     }
 }
 

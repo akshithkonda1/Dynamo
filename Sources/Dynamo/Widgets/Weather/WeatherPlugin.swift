@@ -229,6 +229,9 @@ private struct ExpandedWeatherView: View {
             )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)
+            if !snapshot.hourly.isEmpty {
+                hourlyStrip(snapshot.hourly)
+            }
             if !plugin.alerts.isEmpty {
                 alertList
             }
@@ -267,6 +270,39 @@ private struct ExpandedWeatherView: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    private func hourlyStrip(_ hours: [WeatherHourItem]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(hours) { hour in
+                    VStack(spacing: 3) {
+                        Text(hourLabel(hour.hour))
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Image(systemName: hour.symbolName)
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: 12))
+                        Text(TemperatureFormat.short(hour.temperature))
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textSecondary)
+                    }
+                    .frame(minWidth: 36)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func hourLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h a"
+        return f.string(from: date)
     }
 
     private var alertList: some View {

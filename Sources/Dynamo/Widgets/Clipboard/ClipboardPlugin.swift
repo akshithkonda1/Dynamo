@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
+final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
     let id = "clipboard"
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
 
     var expandedContentHeight: CGFloat { 255 }
+    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     let store = ClipboardStore()
 
@@ -17,9 +18,33 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 
     func start() {
         store.start()
+        store.onNewItem = { [weak self] item in
+            guard let self else { return }
+            let peek: NotchSneakPeek
+            switch item.kind {
+            case .text:
+                let preview = String(item.text.prefix(60))
+                peek = NotchSneakPeek(
+                    systemImage: "doc.on.clipboard",
+                    title: "Copied",
+                    subtitle: preview,
+                    urgency: .low
+                )
+            case .image:
+                peek = NotchSneakPeek(
+                    systemImage: "photo.on.rectangle",
+                    title: "Copied",
+                    subtitle: "Image",
+                    urgency: .low
+                )
+            }
+            guard !FocusController.shared.shouldSuppress(peek: peek) else { return }
+            self.onSneakPeek?(peek)
+        }
     }
 
     func stop() {
+        store.onNewItem = nil
         store.stop()
     }
 
@@ -34,6 +59,16 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
         draftTitle = ""
         draftBody = ""
         isAddingSnippet = false
+    }
+
+    func stripFormatting() {
+        guard let text = NSPasteboard.general.string(forType: .string),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        store.copyToPasteboard(text)
+    }
+
+    var canStripFormatting: Bool {
+        NSPasteboard.general.availableType(from: [.string]) != nil
     }
 }
 
@@ -74,14 +109,24 @@ private struct ExpandedClipboardView: View {
 
                     NotchSectionHeader(
                         "History",
-                        trailing: store.history.isEmpty
-                            ? nil
-                            : AnyView(
-                                Button("Clear") { store.clearHistory() }
-                                    .buttonStyle(.plain)
-                                    .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textTertiary)
-                            )
+                        trailing: AnyView(
+                            HStack(spacing: 8) {
+                                Button {
+                                    plugin.stripFormatting()
+                                } label: {
+                                    NotchChipLabel(title: "Plain", systemImage: "textformat.size.smaller")
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!plugin.canStripFormatting)
+                                .help("Re-paste current clipboard as plain text, stripping formatting")
+                                if !store.history.isEmpty {
+                                    Button("Clear") { store.clearHistory() }
+                                        .buttonStyle(.plain)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                }
+                            }
+                        )
                     )
 
                     historySection

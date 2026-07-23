@@ -123,11 +123,21 @@ private struct AmbientBatteryView: View {
                 Text("LPM")
                     .font(NotchTheme.micro.weight(.bold))
                     .foregroundStyle(NotchTheme.caution)
+            } else if let mins = snapshot.timeRemainingMinutes {
+                Text(timeString(mins))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func timeString(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if h > 0 { return "~\(h)h \(m)m" }
+        return "~\(m)m"
     }
 
     private var iconName: String {

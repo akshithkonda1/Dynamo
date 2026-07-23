@@ -11,6 +11,8 @@ final class ClipboardStore: ObservableObject {
     @Published private(set) var history: [ClipboardHistoryItem] = []
     @Published private(set) var snippets: [PinnedSnippet] = []
 
+    var onNewItem: ((ClipboardHistoryItem) -> Void)?
+
     private var lastChangeCount: Int = -1
     private var timer: Timer?
     private var isStarted = false
@@ -164,20 +166,21 @@ final class ClipboardStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
             if history.first?.kind == .text, history.first?.text == text { return }
-            history.insert(ClipboardHistoryItem(kind: .text, text: text), at: 0)
+            let item = ClipboardHistoryItem(kind: .text, text: text)
+            history.insert(item, at: 0)
             trimHistory()
             persist()
+            onNewItem?(item)
             return
         }
 
         // Image (screenshot, copy from Preview, etc.)
         if let image = readImage(from: pb), let fileName = saveImage(image) {
-            history.insert(
-                ClipboardHistoryItem(kind: .image, text: "", imageFileName: fileName),
-                at: 0
-            )
+            let item = ClipboardHistoryItem(kind: .image, text: "", imageFileName: fileName)
+            history.insert(item, at: 0)
             trimHistory()
             persist()
+            onNewItem?(item)
         }
     }
 
