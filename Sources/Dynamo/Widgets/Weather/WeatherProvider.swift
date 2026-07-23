@@ -14,6 +14,14 @@ struct WeatherSnapshot: Equatable {
     var low: Measurement<UnitTemperature>?
     var isDaylight: Bool
     var updatedAt: Date
+    var hourly: [WeatherHourItem] = []
+}
+
+struct WeatherHourItem: Identifiable, Equatable {
+    var id: Date { hour }
+    var hour: Date
+    var symbolName: String
+    var temperature: Measurement<UnitTemperature>
 }
 
 /// A severe-weather alert surfaced in the expanded view.

@@ -11,6 +11,8 @@ final class ClipboardStore: ObservableObject {
     @Published private(set) var history: [ClipboardHistoryItem] = []
     @Published private(set) var snippets: [PinnedSnippet] = []
 
+    var onNewItem: ((ClipboardHistoryItem) -> Void)?
+
     private var lastChangeCount: Int = -1
     private var timer: Timer?
     private var isStarted = false

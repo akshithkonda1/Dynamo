@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
+final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
     let id = "clipboard"
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
@@ -17,9 +17,33 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
 
     func start() {
         store.start()
+        store.onNewItem = { [weak self] item in
+            guard let self else { return }
+            let peek: NotchSneakPeek
+            switch item.kind {
+            case .text:
+                let preview = String(item.text.prefix(60))
+                peek = NotchSneakPeek(
+                    systemImage: "doc.on.clipboard",
+                    title: "Copied",
+                    subtitle: preview,
+                    urgency: .low
+                )
+            case .image:
+                peek = NotchSneakPeek(
+                    systemImage: "photo.on.rectangle",
+                    title: "Copied",
+                    subtitle: "Image",
+                    urgency: .low
+                )
+            }
+            guard !FocusController.shared.shouldSuppress(peek: peek) else { return }
+            self.onSneakPeek?(peek)
+        }
     }
 
     func stop() {
+        store.onNewItem = nil
         store.stop()
     }
 
@@ -34,6 +58,16 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin {
         draftTitle = ""
         draftBody = ""
         isAddingSnippet = false
+    }
+
+    func stripFormatting() {
+        guard let text = NSPasteboard.general.string(forType: .string),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        store.copyToPasteboard(text)
+    }
+
+    var canStripFormatting: Bool {
+        NSPasteboard.general.availableType(from: [.string]) != nil
     }
 }
 

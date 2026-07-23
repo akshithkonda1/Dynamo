@@ -229,6 +229,9 @@ private struct ExpandedWeatherView: View {
             )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)
+            if !snapshot.hourly.isEmpty {
+                hourlyStrip(snapshot.hourly)
+            }
             if !plugin.alerts.isEmpty {
                 alertList
             }
@@ -267,6 +270,16 @@ private struct ExpandedWeatherView: View {
                 Spacer(minLength: 0)
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func hourLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h a"
+        return f.string(from: date)
     }
 
     private var alertList: some View {

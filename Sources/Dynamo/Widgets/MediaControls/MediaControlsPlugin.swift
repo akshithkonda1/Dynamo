@@ -271,6 +271,7 @@ private struct AmbientMediaView: View {
                 )
                 .contentShape(shape)
         }
+        .frame(width: 22, height: 22)
     }
 }
 

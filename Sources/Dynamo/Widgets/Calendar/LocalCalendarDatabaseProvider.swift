@@ -371,7 +371,9 @@ final class LocalCalendarDatabaseProvider: CalendarProvider {
                 calendarColor: Self.parseColor(colorHex),
                 isAllDay: allDay,
                 calendarName: calName,
-                location: location
+                location: location,
+                notes: nil,
+                attendees: []
             ))
         }
     }

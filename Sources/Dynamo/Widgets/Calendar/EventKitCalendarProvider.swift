@@ -116,7 +116,9 @@ final class EventKitCalendarProvider: CalendarProvider {
                     calendarColor: color,
                     isAllDay: event.isAllDay,
                     calendarName: event.calendar.title,
-                    location: (location?.isEmpty == false) ? location : nil
+                    location: (location?.isEmpty == false) ? location : nil,
+                    notes: notes,
+                    attendees: attendees
                 )
             }
         upcoming = Array(events)
