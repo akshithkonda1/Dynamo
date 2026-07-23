@@ -102,8 +102,6 @@ final class EventKitCalendarProvider: CalendarProvider {
                     )
                 }
                 let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let notes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                let attendees = (event.attendees ?? []).compactMap { $0.name }
                 let id: String
                 if let ek = event.eventIdentifier, !ek.isEmpty {
                     id = "\(ek)|\(event.startDate.timeIntervalSinceReferenceDate)"

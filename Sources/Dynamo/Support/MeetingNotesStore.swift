@@ -96,25 +96,19 @@ final class MeetingNotesStore: ObservableObject {
             if let calendarTitle { session?.calendarTitle = calendarTitle }
             if let callApp { session?.callApp = callApp }
             persist()
-            objectWillChange.send()
             return
         }
         session = MeetingNoteSession(calendarTitle: calendarTitle, callApp: callApp)
-        draft = ""
         persist()
         objectWillChange.send()
     }
 
     func endSession() {
-        guard var s = session, s.endedAt == nil else {
-            draft = ""
-            return
-        }
+        guard var s = session else { return }
         s.endedAt = Date()
         session = s
         persist()
         draft = ""
-        objectWillChange.send()
     }
 
     // MARK: - Bullet CRUD

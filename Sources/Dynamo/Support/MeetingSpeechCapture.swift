@@ -26,8 +26,6 @@ final class MeetingSpeechCapture: ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var recognizer: SFSpeechRecognizer?
     private var lastCommitted: String = ""
-    private var restartCount = 0
-    private let maxRestarts = 12
 
     private init() {
         refreshAuth()
@@ -79,32 +77,30 @@ final class MeetingSpeechCapture: ObservableObject {
         }
         guard speechAuth == .authorized, micAuth == .authorized else {
             statusMessage = "Allow Speech & Microphone for Listen"
-            objectWillChange.send()
             return
         }
 
-        stopEngineOnly(commitPartial: false)
+        stopEngineOnly()
 
         let recognizer = SFSpeechRecognizer()
         guard let recognizer, recognizer.isAvailable else {
             statusMessage = "Speech recognition unavailable"
-            objectWillChange.send()
             return
         }
         self.recognizer = recognizer
         prefersOnDevice = recognizer.supportsOnDeviceRecognition
 
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if recognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = true
+        }
+        self.request = request
+
         let engine = AVAudioEngine()
         self.audioEngine = engine
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        // macOS can report 0 channels before hardware is ready.
-        guard format.channelCount > 0, format.sampleRate > 0 else {
-            statusMessage = "No mic input format — try again"
-            objectWillChange.send()
-            return
-        }
-
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.request?.append(buffer)
@@ -115,15 +111,34 @@ final class MeetingSpeechCapture: ObservableObject {
             try engine.start()
         } catch {
             statusMessage = "Mic start failed"
-            stopEngineOnly(commitPartial: false)
-            objectWillChange.send()
+            stop()
             return
         }
 
         lastCommitted = ""
         partialText = ""
-        restartCount = 0
-        beginRecognitionTask()
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let result {
+                    let text = result.bestTranscription.formattedString
+                    self.partialText = text
+                    if result.isFinal {
+                        self.commitSpeech(text)
+                    }
+                }
+                if error != nil {
+                    // End of utterance often; commit partial and keep going if still listening.
+                    if !self.partialText.isEmpty {
+                        self.commitSpeech(self.partialText)
+                    }
+                    if self.isListening {
+                        // Restart recognition task for continuous dictation.
+                        self.restartTask()
+                    }
+                }
+            }
+        }
 
         isListening = true
         statusMessage = prefersOnDevice ? "Listening · on-device" : "Listening"
@@ -131,24 +146,19 @@ final class MeetingSpeechCapture: ObservableObject {
     }
 
     func stop() {
-        let was = isListening
         isListening = false
-        stopEngineOnly(commitPartial: was)
+        if !partialText.isEmpty {
+            commitSpeech(partialText)
+        }
+        stopEngineOnly()
         statusMessage = ""
         partialText = ""
         objectWillChange.send()
     }
 
-    private func beginRecognitionTask() {
-        guard let recognizer else { return }
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
-        self.request = request
-
+    private func restartTask() {
+        guard isListening, let recognizer, let request else { return }
+        task?.cancel()
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
                 guard let self, self.isListening else { return }
@@ -159,53 +169,23 @@ final class MeetingSpeechCapture: ObservableObject {
                         self.commitSpeech(text)
                     }
                 }
-                if let error {
-                    // Common: no-speech / canceled — commit and optionally restart.
-                    if !self.partialText.isEmpty {
-                        self.commitSpeech(self.partialText)
-                    }
-                    let ns = error as NSError
-                    // Don't spin forever on hard failures.
-                    if ns.domain == "kAFAssistantErrorDomain", ns.code == 1110 {
-                        // No speech detected — quiet restart.
-                    }
-                    self.scheduleRestart()
+                if error != nil, !self.partialText.isEmpty {
+                    self.commitSpeech(self.partialText)
+                    self.restartTask()
                 }
             }
-        }
-    }
-
-    private func scheduleRestart() {
-        guard isListening else { return }
-        guard restartCount < maxRestarts else {
-            statusMessage = "Listen paused — tap to resume"
-            isListening = false
-            stopEngineOnly(commitPartial: false)
-            objectWillChange.send()
-            return
-        }
-        restartCount += 1
-        // End current request, keep engine + tap running, new request.
-        task?.cancel()
-        task = nil
-        request?.endAudio()
-        request = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            guard let self, self.isListening, self.audioEngine?.isRunning == true else { return }
-            self.beginRecognitionTask()
         }
     }
 
     private func commitSpeech(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Avoid duplicating the same final string.
         if trimmed == lastCommitted { return }
+        // If this is an extension of last committed, store only the delta when possible.
         var toStore = trimmed
-        if !lastCommitted.isEmpty,
-           trimmed.hasPrefix(lastCommitted),
-           trimmed.count > lastCommitted.count {
-            toStore = String(trimmed.dropFirst(lastCommitted.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(lastCommitted), trimmed.count > lastCommitted.count {
+            toStore = String(trimmed.dropFirst(lastCommitted.count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         lastCommitted = trimmed
         if !toStore.isEmpty {
@@ -214,17 +194,14 @@ final class MeetingSpeechCapture: ObservableObject {
         partialText = ""
     }
 
-    private func stopEngineOnly(commitPartial: Bool) {
-        if commitPartial, !partialText.isEmpty {
-            commitSpeech(partialText)
-        }
+    private func stopEngineOnly() {
         task?.cancel()
         task = nil
         request?.endAudio()
         request = nil
         if let engine = audioEngine {
             engine.inputNode.removeTap(onBus: 0)
-            if engine.isRunning { engine.stop() }
+            engine.stop()
         }
         audioEngine = nil
         recognizer = nil

@@ -1,12 +1,6 @@
 import AppKit
 import Foundation
 
-struct DistractionLogEntry: Identifiable {
-    let id = UUID()
-    let title: String
-    let date: Date
-}
-
 /// User-selectable Focus modes. Meeting is chosen explicitly (Granola-style companion).
 enum FocusBaseMode: String, CaseIterable, Identifiable {
     case normal
@@ -59,78 +53,37 @@ final class FocusController: ObservableObject {
     private static let baseModeKey = "dynamo.focus.baseMode"
     private static let suggestMeetingKey = "dynamo.focus.suggestMeeting"
     private static let duckPercentKey = "dynamo.focus.duckPercent"
-    private static let breakNudgeKey = "dynamo.focus.breakNudgeMinutes"
-    private static let dndSyncKey = "dynamo.focus.dndSync"
 
-    @Published var baseMode: FocusBaseMode = .normal {
+    @Published var baseMode: FocusBaseMode {
         didSet {
-            guard !isConfiguring else { return }
-            guard oldValue != baseMode else { return }
             UserDefaults.standard.set(baseMode.rawValue, forKey: Self.baseModeKey)
             handleModeTransition(from: oldValue, to: baseMode)
+            objectWillChange.send()
         }
     }
 
     /// When true, frontmost call apps can offer “Enter Meeting Mode?” once per session.
-    @Published var suggestMeetingOnCall: Bool = true {
-        didSet {
-            guard !isConfiguring else { return }
-            UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey)
-        }
+    @Published var suggestMeetingOnCall: Bool {
+        didSet { UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey) }
     }
 
-    @Published var breakNudgeMinutes: Int = 25 {
+    @Published var duckPercent: Int {
         didSet {
-            guard !isConfiguring else { return }
-            UserDefaults.standard.set(breakNudgeMinutes, forKey: Self.breakNudgeKey)
-            restartBreakNudge()
-        }
-    }
-
-    @Published var dndSyncEnabled: Bool = false {
-        didSet {
-            guard !isConfiguring else { return }
-            UserDefaults.standard.set(dndSyncEnabled, forKey: Self.dndSyncKey)
-            if dndSyncEnabled {
-                subscribeDND()
-            } else {
-                unsubscribeDND()
-            }
-        }
-    }
-
-    @Published var duckPercent: Int = 25 {
-        didSet {
-            guard !isConfiguring else { return }
             let p = min(40, max(10, duckPercent))
-            if p != duckPercent {
-                // Clamp without re-entering didSet recursion loops.
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.duckPercent != p else { return }
-                    self.duckPercent = p
-                }
-                return
-            }
+            if p != duckPercent { duckPercent = p; return }
             UserDefaults.standard.set(duckPercent, forKey: Self.duckPercentKey)
             ducker.targetPercent = duckPercent
         }
     }
 
-    /// Suppress didSet side effects while loading UserDefaults in init.
-    private var isConfiguring = true
-
     /// Call app currently frontmost / visible (for UI + suggestions only).
     @Published private(set) var suggestedCallApp: String?
     @Published private(set) var meetingEnteredAt: Date?
     @Published private(set) var recentDynamicPeeks: [String] = []
-    @Published private(set) var distractionLog: [DistractionLogEntry] = []
 
     /// Injected by CalendarPlugin for Meeting context strip.
     var isCalendarMeetingNow: () -> Bool = { false }
     var calendarMeetingTitle: () -> String? = { nil }
-    var calendarMeetingNotes: () -> String? = { nil }
-    var calendarMeetingAttendees: () -> [String] = { [] }
-    var calendarMeetingEnd: () -> Date? = { nil }
 
     /// Wired by sneak-peek host so Dynamic/Meeting can emit peeks.
     var emitPeek: ((NotchSneakPeek) -> Void)?
@@ -139,8 +92,6 @@ final class FocusController: ObservableObject {
     private let ducker = MeetingVolumeDucker()
     private var started = false
     private var didSuggestMeetingThisSession = false
-    private var breakNudgeTimer: Timer?
-    private var dndObserver: NSObjectProtocol?
 
     /// Meeting is active only when user selected Meeting mode.
     var isMeetingActive: Bool { baseMode == .meeting }
@@ -162,7 +113,6 @@ final class FocusController: ObservableObject {
     }
 
     private init() {
-        isConfiguring = true
         if let raw = UserDefaults.standard.string(forKey: Self.baseModeKey),
            let mode = FocusBaseMode(rawValue: raw) {
             baseMode = mode
@@ -174,12 +124,9 @@ final class FocusController: ObservableObject {
         } else {
             suggestMeetingOnCall = UserDefaults.standard.bool(forKey: Self.suggestMeetingKey)
         }
-        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int ?? 25
-        duckPercent = min(40, max(10, storedDuck))
+        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int
+        duckPercent = storedDuck ?? 25
         ducker.targetPercent = duckPercent
-        breakNudgeMinutes = UserDefaults.standard.object(forKey: Self.breakNudgeKey) as? Int ?? 25
-        dndSyncEnabled = UserDefaults.standard.bool(forKey: Self.dndSyncKey)
-        isConfiguring = false
     }
 
     func start() {
@@ -194,17 +141,12 @@ final class FocusController: ObservableObject {
             Task { @MainActor in self?.refreshCallContext() }
         }
         refreshCallContext()
-        // If relaunched already in Meeting, re-apply duck + notes session.
+        // If relaunched already in Meeting, re-apply duck.
         if baseMode == .meeting {
             meetingEnteredAt = meetingEnteredAt ?? Date()
             ducker.enter()
-            MeetingNotesStore.shared.ensureSession(
-                calendarTitle: calendarMeetingTitle(),
-                callApp: suggestedCallApp
-            )
+            MeetingNotesStore.shared.ensureSession()
         }
-        restartBreakNudge()
-        if dndSyncEnabled { subscribeDND() }
     }
 
     func stop() {
@@ -213,9 +155,6 @@ final class FocusController: ObservableObject {
             ducker.exit()
             MeetingSpeechCapture.shared.stop()
         }
-        breakNudgeTimer?.invalidate()
-        breakNudgeTimer = nil
-        unsubscribeDND()
         started = false
     }
 
@@ -250,12 +189,8 @@ final class FocusController: ObservableObject {
     private func maybeOfferMeeting() {
         guard suggestMeetingOnCall else { return }
         guard baseMode != .meeting else { return }
-        guard let app = suggestedCallApp else {
-            // Reset so a later call can suggest again after leaving the app.
-            return
-        }
+        guard let app = suggestedCallApp else { return }
         guard !didSuggestMeetingThisSession else { return }
-        guard emitPeek != nil else { return }
         didSuggestMeetingThisSession = true
         emitPeek?(NotchSneakPeek(
             systemImage: "video.fill",
@@ -264,11 +199,6 @@ final class FocusController: ObservableObject {
             urgency: .high,
             detail: "Focus · Meeting companion"
         ))
-    }
-
-    /// Allow another “Enter Meeting?” offer after the user leaves Meeting mode.
-    func resetMeetingSuggestion() {
-        didSuggestMeetingThisSession = false
     }
 
     private func handleModeTransition(from old: FocusBaseMode, to new: FocusBaseMode) {
@@ -286,8 +216,6 @@ final class FocusController: ObservableObject {
             ducker.exit()
             meetingEnteredAt = nil
             MeetingNotesStore.shared.endSession()
-            // Allow a fresh suggest next time a call app is frontmost.
-            resetMeetingSuggestion()
         }
         if new == .trueFocus {
             FocusAgendaEngine.shared.rebuild()
@@ -300,24 +228,12 @@ final class FocusController: ObservableObject {
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
         if peek.style == .media { return false }
         if isMeetingActive, peek.urgency < .high {
+            // Allow our own Meeting offer and high urgency.
             if peek.detail.contains("Meeting companion") { return false }
-            logDistraction(peek.title)
             return true
         }
-        if effective == .trueFocus, peek.urgency == .low {
-            logDistraction(peek.title)
-            return true
-        }
+        if effective == .trueFocus, peek.urgency == .low { return true }
         return false
-    }
-
-    func clearDistractionLog() {
-        distractionLog = []
-    }
-
-    private func logDistraction(_ title: String) {
-        distractionLog.insert(DistractionLogEntry(title: title, date: Date()), at: 0)
-        if distractionLog.count > 20 { distractionLog = Array(distractionLog.prefix(20)) }
     }
 
     func shouldDimMediaAmbient() -> Bool {
@@ -329,71 +245,5 @@ final class FocusController: ObservableObject {
         if recentDynamicPeeks.count > 5 {
             recentDynamicPeeks = Array(recentDynamicPeeks.prefix(5))
         }
-    }
-
-    // MARK: - Break nudge
-
-    private func restartBreakNudge() {
-        breakNudgeTimer?.invalidate()
-        guard breakNudgeMinutes > 0, started else { return }
-        let interval = TimeInterval(breakNudgeMinutes * 60)
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.fireBreakNudge() }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        breakNudgeTimer = t
-    }
-
-    private func fireBreakNudge() {
-        guard effective == .trueFocus || effective == .meeting else { return }
-        emitPeek?(NotchSneakPeek(
-            systemImage: "figure.stand",
-            title: "Break time",
-            subtitle: "You've been focused for \(breakNudgeMinutes)m — stand up & stretch",
-            urgency: .normal,
-            detail: "Focus · Break nudge"
-        ))
-    }
-
-    // MARK: - macOS DND sync
-
-    private func subscribeDND() {
-        guard dndObserver == nil else { return }
-        let nc = DistributedNotificationCenter.default()
-        dndObserver = nc.addObserver(
-            forName: NSNotification.Name("com.apple.donotdisturb.state.changed"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handleDNDChange() }
-        }
-        handleDNDChange()
-    }
-
-    private func unsubscribeDND() {
-        if let obs = dndObserver {
-            DistributedNotificationCenter.default().removeObserver(obs)
-            dndObserver = nil
-        }
-    }
-
-    private func handleDNDChange() {
-        guard dndSyncEnabled else { return }
-        let isDND = isDNDOn()
-        if isDND, baseMode == .normal {
-            baseMode = .trueFocus
-        } else if !isDND, baseMode == .trueFocus {
-            baseMode = .normal
-        }
-    }
-
-    private func isDNDOn() -> Bool {
-        // Read the com.apple.ncprefs plist that DND writes.
-        let path = NSHomeDirectory() + "/Library/Preferences/com.apple.ncprefs.plist"
-        guard let dict = NSDictionary(contentsOfFile: path) as? [String: Any],
-              let dndPrefs = dict["dnd_prefs"] as? [String: Any] else {
-            return false
-        }
-        return (dndPrefs["userPref"] as? [String: Any])?["enabled"] as? Bool ?? false
     }
 }
