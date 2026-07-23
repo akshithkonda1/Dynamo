@@ -11,6 +11,8 @@ struct CalendarEventItem: Identifiable, Equatable {
     /// Name of the EKCalendar this event belongs to (e.g. "Work", "Home").
     let calendarName: String
     let location: String?
+    let notes: String?
+    let attendees: [String]
 }
 
 /// Hex-friendly color stored without importing AppKit into the protocol surface.

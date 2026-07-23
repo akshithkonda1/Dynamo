@@ -160,7 +160,7 @@ final class SportsStore: ObservableObject {
 
     var globalLiveCount: Int {
         let fromCache = eventsByLeague.values.flatMap { $0 }.filter(\.isLive)
-        let merged = Dictionary(uniqueKeysWithValues: (fromCache + liveAllEvents).map { ($0.id, $0) })
+        let merged = Dictionary((fromCache + liveAllEvents).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return merged.count
     }
 

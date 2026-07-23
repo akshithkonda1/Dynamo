@@ -102,6 +102,8 @@ final class EventKitCalendarProvider: CalendarProvider {
                     )
                 }
                 let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let notes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                let attendees = (event.attendees ?? []).compactMap { $0.name }
                 let id: String
                 if let ek = event.eventIdentifier, !ek.isEmpty {
                     id = "\(ek)|\(event.startDate.timeIntervalSinceReferenceDate)"
@@ -116,7 +118,9 @@ final class EventKitCalendarProvider: CalendarProvider {
                     calendarColor: color,
                     isAllDay: event.isAllDay,
                     calendarName: event.calendar.title,
-                    location: (location?.isEmpty == false) ? location : nil
+                    location: (location?.isEmpty == false) ? location : nil,
+                    notes: notes,
+                    attendees: attendees
                 )
             }
         upcoming = Array(events)

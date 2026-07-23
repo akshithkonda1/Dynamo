@@ -99,6 +99,8 @@ final class FocusController: ObservableObject {
     /// Injected by CalendarPlugin for Meeting context strip.
     var isCalendarMeetingNow: () -> Bool = { false }
     var calendarMeetingTitle: () -> String? = { nil }
+    var calendarMeetingNotes: () -> String? = { nil }
+    var calendarMeetingAttendees: () -> [String] = { [] }
 
     /// Wired by sneak-peek host so Dynamic/Meeting can emit peeks.
     var emitPeek: ((NotchSneakPeek) -> Void)?

@@ -121,10 +121,12 @@ final class MeetingNotesStore: ObservableObject {
     }
 
     func copyAllToPasteboard() {
-        let lines = (session?.bullets ?? []).map { b in
+        let allBullets = session?.bullets ?? []
+        let lines = allBullets.map { b in
             let t = Self.time.string(from: b.createdAt)
             return "• [\(t)] \(b.text)"
         }
+        let actions = MeetingActionExtractor.extract(from: allBullets)
         var header: [String] = ["# Meeting notes"]
         if let title = session?.calendarTitle { header.append("Event: \(title)") }
         if let app = session?.callApp { header.append("App: \(app)") }
@@ -132,7 +134,12 @@ final class MeetingNotesStore: ObservableObject {
             header.append("Started: \(Self.time.string(from: start))")
         }
         header.append("")
-        let body = (header + lines).joined(separator: "\n")
+        var sections = header + lines
+        if !actions.isEmpty {
+            sections += ["", "## Action items"]
+            sections += actions.map { "- [ ] \($0.text)" }
+        }
+        let body = sections.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(body, forType: .string)
     }
