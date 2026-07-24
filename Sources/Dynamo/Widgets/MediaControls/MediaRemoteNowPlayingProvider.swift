@@ -56,6 +56,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         loadFramework()
         registerForNotifications()
         startHelperProcess()
+        if #available(macOS 12.0, *) {
+            MusicKitBridge.shared.onEnrichmentAvailable = { [weak self] in
+                Task { @MainActor in self?.publishBest() }
+            }
+        }
         refreshAll()
         // MediaRemote notifications drive most updates; poll is a safety net.
         // 1.5s balances live transport with lower AppleScript / helper cost.
@@ -109,20 +114,26 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     // MARK: - Transport
 
     func togglePlayPause() {
-        // Desired end state (absolute). Dual-firing MediaRemote *and* AppleScript
-        // `playpause` was toggling twice — play then immediately pause.
         let wantPlaying = !current.isPlaying
         var optimistic = current
         optimistic.isPlaying = wantPlaying
-        // Always update the play/pause glyph; metadata may catch up a moment later.
         publish(optimistic)
+
+        // MusicKit transport for Apple Music — most reliable with SystemMusicPlayer.
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            let bridge = MusicKitBridge.shared
+            Task { if wantPlaying { await bridge.play() } else { bridge.pause() } }
+            scheduleRefresh(after: 0.15)
+            scheduleRefresh(after: 0.45)
+            return
+        }
 
         let scripted = AppleScriptMedia.shared
         if scripted.hasScriptablePlayer {
-            // Music / Spotify: one absolute play/pause command only.
             scripted.setPlaying(wantPlaying)
         } else {
-            // Browser / other now-playing: MediaRemote toggle only.
             _ = send(MRCommand.togglePlayPause)
         }
         scheduleRefresh(after: 0.15)
@@ -131,13 +142,22 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     func nextTrack() {
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            Task { await MusicKitBridge.shared.skipToNext() }
+            scheduleRefresh(after: 0.12)
+            scheduleRefresh(after: 0.35)
+            scheduleRefresh(after: 0.7)
+            return
+        }
+
         let scripted = AppleScriptMedia.shared
         if scripted.hasScriptablePlayer {
             scripted.nextTrack()
         } else {
             _ = send(MRCommand.nextTrack)
         }
-        // Dense refreshes so track-change peeks fire promptly after skip.
         scheduleRefresh(after: 0.12)
         scheduleRefresh(after: 0.3)
         scheduleRefresh(after: 0.55)
@@ -146,6 +166,16 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     func previousTrack() {
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            Task { await MusicKitBridge.shared.skipToPrevious() }
+            scheduleRefresh(after: 0.12)
+            scheduleRefresh(after: 0.35)
+            scheduleRefresh(after: 0.7)
+            return
+        }
+
         let scripted = AppleScriptMedia.shared
         if scripted.hasScriptablePlayer {
             scripted.previousTrack()
@@ -374,6 +404,25 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             best.artworkData = prev
         }
         emptyStreak = 0
+
+        // Merge MusicKit enrichment (genre, year, explicit, queue, high-res art).
+        if #available(macOS 12.0, *) {
+            let bridge = MusicKitBridge.shared
+            let key = Self.trackKey(best)
+            if let e = bridge.currentEnrichment, e.trackKey == key {
+                best.genre = e.genre
+                best.releaseYear = e.releaseYear
+                best.isExplicit = e.isExplicit
+                best.musicKitCatalogID = e.catalogID
+                best.upcomingTracks = e.upcomingTracks
+                best.highResArtworkURL = e.highResArtworkURL
+            } else if bridge.isAuthorized, !best.title.isEmpty,
+                      best.title != NowPlayingInfo.empty.title {
+                Task { await bridge.enrich(title: best.title, artist: best.artist,
+                                           album: best.album, trackKey: key) }
+            }
+        }
+
         publish(best)
     }
 

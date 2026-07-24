@@ -14,6 +14,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
     @Published var showPlaylistPicker = false
+    @Published private(set) var isTrackLiked: Bool = false
+    @Published private(set) var isLikeLoading: Bool = false
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: NowPlayingProvider
@@ -40,6 +42,9 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         lastTrackKey = Self.trackKey(info)
         MediaPeekPulse.shared.sync(from: info)
         refreshPlaylists()
+        if #available(macOS 12.0, *) {
+            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
+        }
     }
 
     func stop() {
@@ -71,6 +76,13 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         else { return }
 
         if isNewTrack {
+            // Reset like state; check library async once MusicKit catalog ID arrives.
+            isTrackLiked = false
+            if let catalogID = newValue.musicKitCatalogID, #available(macOS 12.0, *) {
+                Task { @MainActor in
+                    self.isTrackLiked = await MusicKitBridge.shared.isInLibrary(catalogID: catalogID)
+                }
+            }
             // Forward *or* backward skip, auto-advance, playlist jump — always peek.
             presentTrackPeek(newValue)
             return
@@ -185,6 +197,17 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     func toggleShuffle() { provider.toggleShuffle() }
     func toggleRepeat() { provider.toggleRepeat() }
 
+    func toggleLike() {
+        guard let catalogID = info.musicKitCatalogID else { return }
+        guard #available(macOS 12.0, *) else { return }
+        isLikeLoading = true
+        Task { @MainActor in
+            let liked = await MusicKitBridge.shared.toggleLike(catalogID: catalogID)
+            isTrackLiked = liked
+            isLikeLoading = false
+        }
+    }
+
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
@@ -197,6 +220,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
     @ObservedObject private var meeting = MeetingMode.shared
+    @ObservedObject private var pulse = MediaPeekPulse.shared
 
     private var dimmed: Bool { meeting.shouldDimMediaAmbient() }
 
@@ -232,7 +256,7 @@ private struct AmbientMediaView: View {
                     isPlaying: plugin.info.isPlaying,
                     barCount: 6,
                     maxHeight: 16,
-                    color: NotchTheme.mediaGlow.opacity(0.95)
+                    color: pulse.palette.accent.mixed(with: pulse.palette.highlight, t: 0.3).color.opacity(0.9)
                 )
                     .fixedSize()
                 if let dev = AudioOutputController.shared.devices.first(where: { $0.id == AudioOutputController.shared.selectedID }),
@@ -276,12 +300,13 @@ private struct AmbientMediaView: View {
 
         ZStack {
             if showRing {
+                let ringColor = pulse.palette.primary.color
                 Circle()
-                    .stroke(NotchTheme.mediaGlow.opacity(0.15), lineWidth: 1.5)
+                    .stroke(ringColor.opacity(0.18), lineWidth: 1.5)
                     .frame(width: 22, height: 22)
                 Circle()
                     .trim(from: 0, to: fraction)
-                    .stroke(NotchTheme.mediaGlow.opacity(0.75),
+                    .stroke(ringColor.opacity(0.80),
                             style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                     .frame(width: 22, height: 22)
                     .rotationEffect(.degrees(-90))
@@ -378,6 +403,11 @@ private struct ExpandedMediaView: View {
                     playlistRow
                 }
 
+                // Queue strip — hidden when volume section is open to preserve height budget
+                if hasTrack, !plugin.info.upcomingTracks.isEmpty, !showSystemVolume {
+                    QueuePeekView(tracks: plugin.info.upcomingTracks)
+                }
+
                 Spacer(minLength: 2)
                 transportRow
             }
@@ -445,6 +475,32 @@ private struct ExpandedMediaView: View {
                     maxHeight: 16,
                     color: NotchTheme.mediaGlow.opacity(0.95)
                 )
+                    .fixedSize()
+            }
+            // Explicit badge
+            if plugin.info.isExplicit {
+                Text("E")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .frame(width: 14, height: 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(NotchTheme.textQuaternary, lineWidth: 1)
+                    )
+            }
+            // Genre chip
+            if let genre = plugin.info.genre {
+                Text(genre)
+                    .font(NotchTheme.micro.weight(.medium))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            // Release year
+            if let year = plugin.info.releaseYear {
+                Text(String(year))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textQuaternary)
                     .fixedSize()
             }
             Spacer(minLength: 0)
@@ -726,6 +782,33 @@ private struct ExpandedMediaView: View {
             }
             .buttonStyle(.plain)
             .help("Toggle Repeat")
+
+            Spacer(minLength: 0)
+
+            // Like / Add to Library button — only visible when MusicKit has a catalog ID
+            Button {
+                plugin.toggleLike()
+            } label: {
+                Group {
+                    if plugin.isLikeLoading {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                    } else {
+                        Image(systemName: plugin.isTrackLiked ? "heart.fill" : "heart")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(
+                                plugin.isTrackLiked
+                                    ? Color(red: 1, green: 0.22, blue: 0.37)
+                                    : NotchTheme.textQuaternary
+                            )
+                    }
+                }
+                .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(plugin.info.musicKitCatalogID == nil || plugin.isLikeLoading)
+            .opacity(plugin.info.musicKitCatalogID == nil ? 0 : 1)
+            .animation(NotchTheme.quick, value: plugin.isTrackLiked)
+            .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
         }
     }
 
