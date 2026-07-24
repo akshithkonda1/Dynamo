@@ -255,145 +255,21 @@ private struct ExpandedFocusView: View {
     }
 
     private var talkSuggestions: some View {
-        let tips = MeetingTalkCoach.suggestions(
+        TalkCoachView(
             calendarTitle: focus.calendarMeetingTitle() ?? notes.session?.calendarTitle,
             callApp: focus.suggestedCallApp ?? notes.session?.callApp,
-            notes: notes.bullets,
             elapsed: focus.meetingElapsed
         )
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("What to say")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
-            ForEach(tips.prefix(3)) { tip in
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(tip.text, forType: .string)
-                    notes.pinSuggestion(tip.text)
-                } label: {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(NotchTheme.mediaGlow)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(tip.text)
-                                .font(NotchTheme.micro.weight(.medium))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(tip.reason + " · tap to copy & pin")
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundStyle(NotchTheme.textQuaternary)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     private var notesPanel: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("Notes")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                Spacer(minLength: 0)
-                Button {
-                    speech.toggleListen()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: speech.isListening ? "mic.fill" : "mic")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(speech.isListening ? "Listening" : "Listen")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(speech.isListening ? NotchTheme.positive : NotchTheme.textTertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule().fill(
-                            speech.isListening
-                                ? NotchTheme.positive.opacity(0.15)
-                                : Color.white.opacity(0.06)
-                        )
-                    )
-                }
-                .buttonStyle(.plain)
-                .help("Free Apple Speech recognition for meeting notes")
-            }
-
-            if !speech.partialText.isEmpty {
-                Text(speech.partialText)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .lineLimit(2)
-            } else if !speech.statusMessage.isEmpty {
-                Text(speech.statusMessage)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
-            }
-
-            // Recent bullets
-            ForEach(notes.bullets.suffix(4).reversed()) { b in
-                HStack(alignment: .top, spacing: 6) {
-                    Text(Self.timeFormatter.string(from: b.createdAt))
-                        .font(.system(size: 8, weight: .medium).monospacedDigit())
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .frame(width: 36, alignment: .leading)
-                    Text(b.text)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textSecondary)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                    Image(systemName: sourceIcon(b.source))
-                        .font(.system(size: 8))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                }
-            }
-
-            HStack(spacing: 6) {
-                TextField("Add note…", text: $notes.draft)
-                    .textFieldStyle(.plain)
-                    .font(NotchTheme.micro)
-                    .onSubmit { notes.submitDraft() }
-                Button { notes.submitDraft() } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(
-                            notes.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? NotchTheme.textQuaternary
-                                : NotchTheme.textPrimary
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-        }
-    }
-
-    private func sourceIcon(_ s: MeetingNoteBullet.Source) -> String {
-        switch s {
-        case .typed: return "keyboard"
-        case .speech: return "mic.fill"
-        case .suggestion: return "text.bubble"
-        }
+        MeetingNotesPanel()
     }
 
     private var meetingFooter: some View {
         HStack(spacing: 8) {
             chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
+            chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
             chipButton("Clear", "trash") { notes.clearBullets() }
             Spacer(minLength: 0)
             Button {
@@ -563,5 +439,434 @@ private struct ExpandedFocusView: View {
         if mins > 0, mins < 180 { return "in \(mins)m" }
         if mins <= 0, mins > -120 { return "now" }
         return Self.timeFormatter.string(from: date)
+    }
+}
+
+// MARK: - Meeting Notes Panel
+
+private struct MeetingNotesPanel: View {
+    @ObservedObject private var notes = MeetingNotesStore.shared
+    @ObservedObject private var speech = MeetingSpeechCapture.shared
+
+    @State private var editingID: UUID? = nil
+    @State private var editDraft: String = ""
+    @State private var historyVisible: Bool = false
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            panelHeader
+
+            if !speech.partialText.isEmpty {
+                Text(speech.partialText)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(2)
+            } else if !speech.statusMessage.isEmpty {
+                Text(speech.statusMessage)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
+            }
+
+            if notes.bullets.isEmpty {
+                Text("No notes yet — type below or tap Listen")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(notes.bullets.reversed()) { b in
+                        bulletRow(b)
+                    }
+                }
+            }
+
+            draftRow
+
+            if historyVisible {
+                Divider().overlay(NotchTheme.separator).padding(.vertical, 2)
+                MeetingHistoryPanel(onDismiss: { historyVisible = false })
+            }
+        }
+    }
+
+    private var panelHeader: some View {
+        HStack(spacing: 6) {
+            Text("Notes")
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+            Spacer(minLength: 0)
+            Button {
+                historyVisible.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 8, weight: .semibold))
+                    Text("History")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(historyVisible ? NotchTheme.mediaGlow : NotchTheme.textQuaternary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.white.opacity(0.05)))
+            }
+            .buttonStyle(.plain)
+            Button {
+                speech.toggleListen()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: speech.isListening ? "mic.fill" : "mic")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(speech.isListening ? "Listening" : "Listen")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(speech.isListening ? NotchTheme.positive : NotchTheme.textTertiary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill(speech.isListening ? NotchTheme.positive.opacity(0.15) : Color.white.opacity(0.06))
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Free Apple Speech recognition for meeting notes")
+        }
+    }
+
+    private func bulletRow(_ b: MeetingNoteBullet) -> some View {
+        HStack(alignment: .center, spacing: 5) {
+            // Tag chip — cycles on tap
+            Button {
+                let next: BulletTag?
+                if let current = b.tag { next = current.next } else { next = .decision }
+                notes.tagBullet(id: b.id, tag: next)
+            } label: {
+                if let tag = b.tag {
+                    Image(systemName: tag.systemImage)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(tagColor(tag))
+                        .frame(width: 14)
+                } else {
+                    Image(systemName: "circle.dotted")
+                        .font(.system(size: 8))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .frame(width: 14)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Tap to tag: Decision / Action / Risk")
+
+            // Text or inline edit field
+            if editingID == b.id {
+                TextField("", text: $editDraft)
+                    .textFieldStyle(.plain)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .onSubmit { commitEdit(b.id) }
+                    .onExitCommand { editingID = nil }
+            } else {
+                Text(b.text)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(b.tag == nil ? NotchTheme.textSecondary : NotchTheme.textPrimary)
+                    .lineLimit(2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editDraft = b.text
+                        editingID = b.id
+                    }
+            }
+
+            Spacer(minLength: 0)
+
+            // Timestamp
+            Text(Self.timeFmt.string(from: b.createdAt))
+                .font(.system(size: 7.5).monospacedDigit())
+                .foregroundStyle(NotchTheme.textQuaternary)
+
+            // Source icon
+            Image(systemName: sourceIcon(b.source))
+                .font(.system(size: 7.5))
+                .foregroundStyle(NotchTheme.textQuaternary)
+
+            // Delete
+            Button { notes.deleteBullet(id: b.id) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove note")
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(b.tag.map { tagColor($0).opacity(0.07) } ?? Color.white.opacity(0.03))
+        )
+    }
+
+    private var draftRow: some View {
+        HStack(spacing: 6) {
+            TextField("Add note…", text: $notes.draft)
+                .textFieldStyle(.plain)
+                .font(NotchTheme.micro)
+                .onSubmit { notes.submitDraft() }
+            Button { notes.submitDraft() } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        notes.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? NotchTheme.textQuaternary
+                            : NotchTheme.textPrimary
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    private func commitEdit(_ id: UUID) {
+        notes.editBullet(id: id, text: editDraft)
+        editingID = nil
+    }
+
+    private func tagColor(_ tag: BulletTag) -> Color {
+        switch tag {
+        case .decision: return NotchTheme.mediaGlow
+        case .action:   return NotchTheme.positive
+        case .risk:     return NotchTheme.caution
+        }
+    }
+
+    private func sourceIcon(_ s: MeetingNoteBullet.Source) -> String {
+        switch s {
+        case .typed:      return "keyboard"
+        case .speech:     return "mic.fill"
+        case .suggestion: return "text.bubble"
+        }
+    }
+}
+
+// MARK: - Talk Coach View (dismissible suggestions)
+
+private struct TalkCoachView: View {
+    let calendarTitle: String?
+    let callApp: String?
+    let elapsed: TimeInterval
+    @ObservedObject private var notes = MeetingNotesStore.shared
+    @State private var dismissed: Set<String> = []
+    @State private var collapsed = false
+
+    var body: some View {
+        let tips = MeetingTalkCoach.suggestions(
+            calendarTitle: calendarTitle,
+            callApp: callApp,
+            notes: notes.bullets,
+            elapsed: elapsed
+        ).filter { !dismissed.contains($0.id) }
+
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("What to say")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.easeOut(duration: 0.12)) { collapsed.toggle() }
+                } label: {
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !collapsed {
+                if tips.isEmpty {
+                    Text("No suggestions yet — add notes to unlock more.")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                } else {
+                    ForEach(tips.prefix(3)) { tip in
+                        HStack(alignment: .top, spacing: 5) {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(tip.text, forType: .string)
+                                notes.pinSuggestion(tip.text)
+                            } label: {
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: "text.bubble")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.mediaGlow)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(tip.text)
+                                            .font(NotchTheme.micro.weight(.medium))
+                                            .foregroundStyle(NotchTheme.textPrimary)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Text(tip.reason + " · tap to copy & pin")
+                                            .font(.system(size: 8, weight: .medium))
+                                            .foregroundStyle(NotchTheme.textQuaternary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.white.opacity(0.05))
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button { dismissed.insert(tip.id) } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Dismiss suggestion")
+                            .padding(.top, 9)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Meeting History Panel
+
+private struct MeetingHistoryPanel: View {
+    var onDismiss: () -> Void
+    @State private var sessions: [MeetingNoteSession] = []
+    @State private var expanded: UUID? = nil
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; return f
+    }()
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Past sessions")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Spacer(minLength: 0)
+                Button("Done") { onDismiss() }
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .buttonStyle(.plain)
+            }
+
+            if sessions.isEmpty {
+                Text("No past sessions found.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(sessions.prefix(6)) { s in
+                    sessionRow(s)
+                }
+            }
+        }
+        .onAppear {
+            sessions = MeetingNotesStore.shared.loadPastSessions()
+        }
+    }
+
+    private func sessionRow(_ s: MeetingNoteSession) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(s.calendarTitle ?? "Untitled")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                    Text("\(Self.dateFmt.string(from: s.startedAt)) · \(s.bullets.count) note\(s.bullets.count == 1 ? "" : "s")")
+                        .font(.system(size: 8).monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                Spacer(minLength: 0)
+                Button { MeetingNotesStore.shared.copySession(s) } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 9))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy notes")
+                Button { MeetingNotesStore.shared.saveSession(s) } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Save as Markdown")
+                Button {
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        expanded = expanded == s.id ? nil : s.id
+                    }
+                } label: {
+                    Image(systemName: expanded == s.id ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if expanded == s.id {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(s.bullets.prefix(10)) { b in
+                        HStack(spacing: 5) {
+                            if let tag = b.tag {
+                                Image(systemName: tag.systemImage)
+                                    .font(.system(size: 7.5))
+                                    .foregroundStyle(tagColor(tag))
+                            } else {
+                                Image(systemName: "circle.dotted")
+                                    .font(.system(size: 7.5))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
+                            Text(b.text)
+                                .font(.system(size: 9))
+                                .foregroundStyle(NotchTheme.textSecondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(Self.timeFmt.string(from: b.createdAt))
+                                .font(.system(size: 7.5).monospacedDigit())
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                        }
+                    }
+                    if s.bullets.count > 10 {
+                        Text("+ \(s.bullets.count - 10) more")
+                            .font(.system(size: 8))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    }
+                }
+                .padding(.leading, 6)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func tagColor(_ tag: BulletTag) -> Color {
+        switch tag {
+        case .decision: return NotchTheme.mediaGlow
+        case .action:   return NotchTheme.positive
+        case .risk:     return NotchTheme.caution
+        }
     }
 }

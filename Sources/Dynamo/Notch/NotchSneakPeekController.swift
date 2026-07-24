@@ -17,12 +17,15 @@ final class NotchSneakPeekController: ObservableObject {
     private var holdingOverlay = false
 
     private func displayDuration(for urgency: NotchSneakPeekUrgency) -> TimeInterval {
+        let multiplier = UserDefaults.standard.object(forKey: "peekDwellMultiplier") as? Double ?? 1.0
+        let base: TimeInterval
         switch urgency {
-        case .low: return 3.0
-        case .normal: return 3.4
-        case .high: return 5.5
-        case .critical: return 7.5
+        case .low: base = 3.0
+        case .normal: base = 3.4
+        case .high: base = 5.5
+        case .critical: base = 7.5
         }
+        return base * multiplier
     }
 
     func attach(registry: WidgetRegistry, notch: NotchWindowController) {

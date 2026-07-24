@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
+final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, WidgetSettingsProviding {
     let id = "clipboard"
     let displayName = "Clipboard"
     let systemImage = "doc.on.clipboard"
 
     var expandedContentHeight: CGFloat { 255 }
+    var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     let store = ClipboardStore()
 
@@ -51,6 +52,10 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
         AnyView(ExpandedClipboardView(plugin: self))
     }
 
+    func settingsView() -> AnyView {
+        AnyView(ClipboardSettingsView())
+    }
+
     func saveDraftSnippet() {
         let body = draftBody.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
@@ -76,6 +81,15 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 private struct ExpandedClipboardView: View {
     @ObservedObject var plugin: ClipboardPlugin
     @ObservedObject private var store: ClipboardStore
+    @State private var searchQuery = ""
+    @State private var renamingID: UUID?
+    @State private var renameText = ""
+
+    private static let timeFmt: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
 
     init(plugin: ClipboardPlugin) {
         self.plugin = plugin
@@ -118,6 +132,12 @@ private struct ExpandedClipboardView: View {
                             )
                     )
 
+                    if !store.history.isEmpty {
+                        TextField("Search history…", text: $searchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .font(NotchTheme.caption)
+                    }
+
                     historySection
                 }
                 .padding(.bottom, 4)
@@ -144,14 +164,22 @@ private struct ExpandedClipboardView: View {
 
     @ViewBuilder
     private var historySection: some View {
+        let filtered = store.history.filter {
+            searchQuery.isEmpty || $0.text.localizedCaseInsensitiveContains(searchQuery)
+        }
         if store.history.isEmpty {
             Text("Copy text or a screenshot — it shows up here.")
                 .font(NotchTheme.caption)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .padding(.vertical, 2)
+        } else if filtered.isEmpty {
+            Text("No results for \"\(searchQuery)\".")
+                .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .padding(.vertical, 2)
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(store.history) { item in
+                ForEach(filtered) { item in
                     historyRow(item)
                 }
             }
@@ -168,10 +196,25 @@ private struct ExpandedClipboardView: View {
                         thumb(fileName: snippet.imageFileName)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(snippet.title)
-                            .font(NotchTheme.body.weight(.semibold))
-                            .foregroundStyle(NotchTheme.textPrimary)
-                            .lineLimit(1)
+                        if renamingID == snippet.id {
+                            TextField("Title", text: $renameText)
+                                .font(NotchTheme.body.weight(.semibold))
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    let t = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !t.isEmpty { store.renameSnippet(id: snippet.id, title: t) }
+                                    renamingID = nil
+                                }
+                        } else {
+                            Text(snippet.title)
+                                .font(NotchTheme.body.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .lineLimit(1)
+                                .onTapGesture {
+                                    renameText = snippet.title
+                                    renamingID = snippet.id
+                                }
+                        }
                         if snippet.kind == .text {
                             Text(snippet.text)
                                 .font(NotchTheme.micro)
@@ -241,15 +284,20 @@ private struct ExpandedClipboardView: View {
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Pin")
 
-            Button {
-                store.removeHistoryItem(id: item.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
+            VStack(alignment: .trailing, spacing: 2) {
+                Button {
+                    store.removeHistoryItem(id: item.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.notchIcon(diameter: 24))
+                .help("Remove")
+                Text(Self.timeFmt.localizedString(for: item.createdAt, relativeTo: Date()))
+                    .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
-            .buttonStyle(.notchIcon(diameter: 24))
-            .help("Remove")
         }
         .notchRowBackground()
     }
@@ -309,5 +357,34 @@ private struct ExpandedClipboardView: View {
                         .strokeBorder(NotchTheme.hairline, lineWidth: 1)
                 )
         )
+    }
+}
+
+private struct ClipboardSettingsView: View {
+    @AppStorage("clipboardHistoryCap") private var cap: Int = 0
+
+    private var selectedCap: Int {
+        cap > 0 ? cap : 20
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("History limit")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("History limit", selection: Binding(
+                get: { selectedCap },
+                set: { cap = $0 }
+            )) {
+                Text("20 items").tag(20)
+                Text("50 items").tag(50)
+                Text("100 items").tag(100)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("Older items are removed once the limit is reached.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 }

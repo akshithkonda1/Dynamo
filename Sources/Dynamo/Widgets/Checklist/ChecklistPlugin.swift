@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
+final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding {
     let id = "checklist"
     let displayName = "Checklist"
     let systemImage = "checklist"
@@ -66,6 +66,17 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
     func expandedView() -> AnyView {
         AnyView(ExpandedChecklistView(plugin: self))
+    }
+
+    // MARK: - Ambient
+
+    private var overdueCount: Int { reminders.items.filter { $0.isOverdue }.count }
+
+    var isAmbientActive: Bool { overdueCount > 0 }
+    var ambientPriority: Int { 24 }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientChecklistView(count: overdueCount))
     }
 
     func submitDraft() {
@@ -546,6 +557,12 @@ private struct ExpandedChecklistView: View {
                         item.isOverdue ? NotchTheme.caution.opacity(0.95) : NotchTheme.textQuaternary
                     )
                     .lineLimit(1)
+                if let notes = item.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary.opacity(0.7))
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -750,5 +767,23 @@ private struct ExpandedChecklistView: View {
                     .lineLimit(2)
             }
         }
+    }
+}
+
+private struct AmbientChecklistView: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label(
+                count == 1 ? "1 overdue" : "\(count) overdue",
+                systemImage: "exclamationmark.circle.fill"
+            )
+            .font(NotchTheme.micro.weight(.semibold))
+            .foregroundStyle(NotchTheme.caution)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, NotchTheme.ambientInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

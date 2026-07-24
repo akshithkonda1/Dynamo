@@ -99,6 +99,11 @@ private struct ExpandedShelfView: View {
                         }
                     }
                 }
+                if store.items.count > 1, let totalSize = totalSizeFormatted {
+                    Text("Total: \(totalSize)")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -161,6 +166,11 @@ private struct ExpandedShelfView: View {
                                 .font(NotchTheme.micro)
                                 .foregroundStyle(NotchTheme.textQuaternary)
                         }
+                        if let modified = modifiedDate(for: item) {
+                            Text(modified, style: .relative)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,6 +219,22 @@ private struct ExpandedShelfView: View {
               let bytes = values.fileSize
         else { return nil }
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func modifiedDate(for item: ShelfItem) -> Date? {
+        (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    private var totalSizeFormatted: String? {
+        var total: Int64 = 0
+        for item in store.items {
+            if let bytes = (try? item.url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]))
+                .flatMap({ $0.isDirectory == true ? nil : $0.fileSize }) {
+                total += Int64(bytes)
+            }
+        }
+        guard total > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
     }
 
     private func handleProviders(_ providers: [NSItemProvider]) -> Bool {

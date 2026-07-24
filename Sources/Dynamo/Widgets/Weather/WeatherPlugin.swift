@@ -232,6 +232,9 @@ private struct ExpandedWeatherView: View {
             if !snapshot.hourly.isEmpty {
                 hourlyStrip(snapshot.hourly)
             }
+            if !snapshot.daily.isEmpty {
+                dailyStrip(snapshot.daily)
+            }
             if !plugin.alerts.isEmpty {
                 alertList
             }
@@ -266,6 +269,21 @@ private struct ExpandedWeatherView: View {
                             .font(NotchTheme.micro.monospacedDigit())
                             .foregroundStyle(NotchTheme.textTertiary)
                     }
+                    if snapshot.feelsLike != nil || snapshot.windSpeedKph != nil || snapshot.humidityPercent != nil {
+                        HStack(spacing: 8) {
+                            if let fl = snapshot.feelsLike {
+                                Label(TemperatureFormat.short(fl), systemImage: "thermometer.medium")
+                            }
+                            if let w = snapshot.windSpeedKph {
+                                Label("\(Int(w)) km/h", systemImage: "wind")
+                            }
+                            if let h = snapshot.humidityPercent {
+                                Label("\(h)%", systemImage: "humidity")
+                            }
+                        }
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -274,6 +292,71 @@ private struct ExpandedWeatherView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+    }
+
+    private func hourlyStrip(_ hours: [WeatherHourItem]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(hours) { hour in
+                    VStack(spacing: 3) {
+                        Text(hourLabel(hour.hour))
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Image(systemName: hour.symbolName)
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: 12))
+                        Text(TemperatureFormat.short(hour.temperature))
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textSecondary)
+                    }
+                    .frame(minWidth: 36)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func dailyStrip(_ days: [WeatherDayItem]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(days) { day in
+                    VStack(spacing: 3) {
+                        Text(dayLabel(day.day))
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textTertiary)
+                        Image(systemName: day.symbolName)
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: 12))
+                        Text(TemperatureFormat.short(day.high))
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textSecondary)
+                        Text(TemperatureFormat.short(day.low))
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    }
+                    .frame(minWidth: 36)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func dayLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f.string(from: date)
     }
 
     private func hourLabel(_ date: Date) -> String {

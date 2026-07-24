@@ -51,6 +51,7 @@ struct SettingsView: View {
     @ObservedObject private var permissions = PermissionsStore.shared
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
+    @AppStorage("peekDwellMultiplier") private var peekDwellMultiplier: Double = 1.0
 
     var body: some View {
         ScrollView {
@@ -163,6 +164,23 @@ struct SettingsView: View {
                 set: { PeekBridge.shared.isEnabled = $0 }
             ))
             Text("Allow Shortcuts/scripts to show a notch peek via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek. Off by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Text("Notification display")
+                .font(.subheadline.weight(.semibold))
+            Picker("Peek duration", selection: $peekDwellMultiplier) {
+                Text("Shorter").tag(0.5)
+                Text("Normal").tag(1.0)
+                Text("Longer").tag(1.5)
+                Text("Extra long").tag(2.0)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("How long sneak-peek notifications stay visible before auto-dismissing. Normal is 3–7.5s depending on urgency.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

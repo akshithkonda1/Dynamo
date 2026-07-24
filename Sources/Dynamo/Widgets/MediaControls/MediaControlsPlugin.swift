@@ -209,14 +209,20 @@ private struct AmbientMediaView: View {
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                 }
-                if let remainingLabel {
-                    Text(remainingLabel)
-                        .font(NotchTheme.micro.monospacedDigit())
+                if !plugin.info.artist.isEmpty {
+                    Text(plugin.info.artist)
+                        .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .lineLimit(1)
                 }
+                if let remainingLabel {
+                    Text(remainingLabel)
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
-            .frame(maxWidth: 90, alignment: .leading)
+            .frame(maxWidth: 100, alignment: .leading)
             Spacer(minLength: 0)
             if !dimmed {
                 MusicBarsView(
@@ -252,24 +258,42 @@ private struct AmbientMediaView: View {
     @ViewBuilder
     private var artThumb: some View {
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
-        if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(1, contentMode: .fill)
-                .frame(width: 18, height: 18)
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-                .contentShape(shape)
-        } else {
-            shape
-                .fill(NotchTheme.chipFill)
-                .frame(width: 18, height: 18)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                )
-                .contentShape(shape)
+        let duration = plugin.info.duration
+        let elapsed = plugin.info.elapsed
+        let showRing = duration > 1 && elapsed >= 0
+        let fraction = showRing ? min(1, max(0, elapsed / duration)) : 0
+
+        ZStack {
+            if showRing {
+                Circle()
+                    .stroke(NotchTheme.mediaGlow.opacity(0.15), lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(NotchTheme.mediaGlow.opacity(0.75),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .frame(width: 22, height: 22)
+                    .rotationEffect(.degrees(-90))
+            }
+            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: 18, height: 18)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .contentShape(shape)
+            } else {
+                shape
+                    .fill(NotchTheme.chipFill)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                    )
+                    .contentShape(shape)
+            }
         }
         .frame(width: 22, height: 22)
     }

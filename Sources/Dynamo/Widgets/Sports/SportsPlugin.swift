@@ -12,8 +12,8 @@ final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvi
 
     private let store = SportsStore.shared
 
-    var isAmbientActive: Bool { store.liveFollowed != nil }
-    var ambientPriority: Int { store.liveFollowed != nil ? 55 : 0 }
+    var isAmbientActive: Bool { store.liveFollowed != nil || store.nextFollowedScheduled != nil }
+    var ambientPriority: Int { store.liveFollowed != nil ? 55 : 22 }
 
     func start() {
         store.onScorePeek = { [weak self] peek in
@@ -40,12 +40,19 @@ final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvi
 private struct AmbientSportsView: View {
     @ObservedObject var store: SportsStore
 
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
     var body: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(store.liveFollowed != nil ? NotchTheme.positive : NotchTheme.textQuaternary)
-                .frame(width: 6, height: 6)
             if let live = store.liveFollowed {
+                Circle()
+                    .fill(NotchTheme.positive)
+                    .frame(width: 6, height: 6)
                 Text(live.league.shortTitle)
                     .font(.system(size: 9, weight: .bold, design: .rounded))
                     .foregroundStyle(NotchTheme.textTertiary)
@@ -60,10 +67,19 @@ private struct AmbientSportsView: View {
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                 }
-            } else {
-                Text("Sports")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
+            } else if let next = store.nextFollowedScheduled {
+                Image(systemName: "calendar")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                Text("\(next.displayAway) @ \(next.displayHome)")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textSecondary)
+                    .lineLimit(1)
+                if let date = next.startDate {
+                    Text(Self.timeFmt.string(from: date))
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
             }
             Spacer(minLength: 0)
         }
