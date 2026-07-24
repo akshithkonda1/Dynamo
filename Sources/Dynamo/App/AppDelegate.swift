@@ -197,6 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.notchController?.focusPlugin(id: "shelf")
             case .focusCalendar:
                 self.notchController?.focusPlugin(id: "calendar")
+            case .focusToggle:
+                FocusController.shared.cycleMode()
             }
         }
         hotKeys.install()

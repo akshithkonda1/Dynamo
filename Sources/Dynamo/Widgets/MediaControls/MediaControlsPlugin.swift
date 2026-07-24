@@ -182,6 +182,9 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         provider.seek(to: elapsed)
     }
 
+    func toggleShuffle() { provider.toggleShuffle() }
+    func toggleRepeat() { provider.toggleRepeat() }
+
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
@@ -232,6 +235,14 @@ private struct AmbientMediaView: View {
                     color: NotchTheme.mediaGlow.opacity(0.95)
                 )
                     .fixedSize()
+                if let dev = AudioOutputController.shared.devices.first(where: { $0.id == AudioOutputController.shared.selectedID }),
+                   !dev.name.localizedCaseInsensitiveContains("built-in"),
+                   !dev.name.localizedCaseInsensitiveContains("speakers") {
+                    Text(dev.name)
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.horizontal, NotchTheme.ambientInset)
@@ -675,7 +686,17 @@ private struct ExpandedMediaView: View {
     }
 
     private var transportRow: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
+            Button {
+                plugin.toggleShuffle()
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(plugin.info.isShuffling ? NotchTheme.textPrimary : NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Shuffle")
+
             transportButton(
                 "backward.fill",
                 accessibility: "Previous",
@@ -695,6 +716,16 @@ private struct ExpandedMediaView: View {
                 size: 15,
                 diameter: 38
             ) { plugin.nextTrack() }
+
+            Button {
+                plugin.toggleRepeat()
+            } label: {
+                Image(systemName: plugin.info.repeatMode == .one ? "repeat.1" : "repeat")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(plugin.info.repeatMode == .none ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Repeat")
         }
     }
 

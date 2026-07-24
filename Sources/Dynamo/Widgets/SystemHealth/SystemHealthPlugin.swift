@@ -196,7 +196,11 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
     }
 
     func ambientView() -> AnyView {
-        AnyView(AmbientSystemHealthView(updates: updates, report: report))
+        AnyView(AmbientSystemHealthView(
+            updates: updates,
+            report: report,
+            installAction: { [weak self] in self?.openUpdatesOrRestart() }
+        ))
     }
 }
 
@@ -205,9 +209,10 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
 private struct AmbientSystemHealthView: View {
     let updates: SoftwareUpdateSnapshot
     let report: MacHealthReport
+    let installAction: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Image(systemName: iconName)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint)
@@ -215,6 +220,24 @@ private struct AmbientSystemHealthView: View {
                 .font(NotchTheme.micro.weight(.semibold))
                 .foregroundStyle(tint)
                 .lineLimit(1)
+            if report.score > 0 {
+                Text(report.grade)
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(gradeColor)
+            }
+            if updates.hasUpdates, let installAction {
+                Button {
+                    installAction()
+                } label: {
+                    Text("Install \(updates.count)")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NotchTheme.caution)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, NotchTheme.ambientInset)
@@ -231,7 +254,7 @@ private struct AmbientSystemHealthView: View {
         if updates.hasUpdates {
             return updates.count == 1 ? "1 update" : "\(updates.count) updates"
         }
-        if report.warningCount > 0 { return report.grade }
+        if report.warningCount > 0 { return "Health" }
         return "Health"
     }
 
@@ -242,6 +265,13 @@ private struct AmbientSystemHealthView: View {
         }
         if report.warningCount > 0 { return NotchTheme.caution }
         return NotchTheme.textSecondary
+    }
+
+    private var gradeColor: Color {
+        let g = report.grade
+        if g.hasPrefix("A") { return NotchTheme.positive }
+        if g.hasPrefix("B") || g.hasPrefix("C") { return NotchTheme.caution }
+        return NotchTheme.negative
     }
 }
 
@@ -257,7 +287,7 @@ private struct ExpandedSystemHealthView: View {
     private var busy: Bool { plugin.isRefreshing || updateProvider.isChecking }
 
     private var metrics: [MacHealthFinding] {
-        report.findings.filter { ["disk", "uptime", "memory", "thermal"].contains($0.id) }
+        Array(report.findings.prefix(6))
     }
 
     var body: some View {
@@ -357,7 +387,7 @@ private struct ExpandedSystemHealthView: View {
                     ],
                     spacing: 8
                 ) {
-                    ForEach(metrics.prefix(4)) { finding in
+                    ForEach(metrics) { finding in
                         metricCell(finding)
                     }
                 }

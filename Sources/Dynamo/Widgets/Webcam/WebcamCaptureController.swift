@@ -276,8 +276,28 @@ final class WebcamCaptureController: ObservableObject {
     }
 
     func setZoom(_ factor: CGFloat) {
-        zoomFactor = min(2.0, max(1.0, factor))
+        let maxZ = maxZoomFactor
+        zoomFactor = min(maxZ, max(1.0, factor))
     }
+
+    var captureResolution: CGSize? {
+        guard let device = videoInput?.device else { return nil }
+        let format = device.activeFormat
+        let desc = format.formatDescription
+        let dims = CMVideoFormatDescriptionGetDimensions(desc)
+        guard dims.width > 0, dims.height > 0 else { return nil }
+        return CGSize(width: Int(dims.width), height: Int(dims.height))
+    }
+
+    var captureFrameRate: Double? {
+        guard let device = videoInput?.device else { return nil }
+        let fps = device.activeVideoMinFrameDuration
+        guard fps.timescale != 0 else { return nil }
+        let rate = Double(fps.timescale) / Double(fps.value)
+        return rate > 0 ? rate : nil
+    }
+
+    var maxZoomFactor: CGFloat { 2.0 }
 
     func toggleFreeze() {
         if isFrozen {

@@ -10,6 +10,8 @@ private enum MRCommand: UInt32 {
     case stop = 3
     case nextTrack = 4
     case previousTrack = 5
+    case toggleShuffle = 12
+    case toggleRepeat = 13
 }
 
 /// Now-playing source with a layered strategy:
@@ -190,6 +192,30 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         }
         scheduleRefresh(after: 0.2)
         scheduleRefresh(after: 0.6)
+    }
+
+    func toggleShuffle() {
+        var optimistic = current
+        optimistic.isShuffling = !current.isShuffling
+        publish(optimistic)
+        _ = send(MRCommand.toggleShuffle)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.8)
+    }
+
+    func toggleRepeat() {
+        var optimistic = current
+        let next: RepeatMode
+        switch current.repeatMode {
+        case .none: next = .all
+        case .all: next = .one
+        case .one: next = .none
+        }
+        optimistic.repeatMode = next
+        publish(optimistic)
+        _ = send(MRCommand.toggleRepeat)
+        scheduleRefresh(after: 0.3)
+        scheduleRefresh(after: 0.8)
     }
 
     // MARK: - Framework
@@ -433,7 +459,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         ]) ?? 0
         if duration > 10_000 { duration /= 1000 }
         if elapsed > 10_000 { elapsed /= 1000 }
-        return NowPlayingInfo(
+        let shuffleRaw = (dict["kMRMediaRemoteNowPlayingInfoShuffleMode"] as? NSNumber)?.intValue
+            ?? (dict["shuffleMode"] as? Int) ?? 0
+        let repeatRaw = (dict["kMRMediaRemoteNowPlayingInfoRepeatMode"] as? NSNumber)?.intValue
+            ?? (dict["repeatMode"] as? Int) ?? 0
+        var info = NowPlayingInfo(
             title: title.isEmpty ? NowPlayingInfo.empty.title : title,
             artist: artist,
             album: album,
@@ -444,6 +474,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             elapsed: max(0, elapsed),
             duration: max(0, duration)
         )
+        info.isShuffling = shuffleRaw != 0
+        info.repeatMode = RepeatMode(rawValue: repeatRaw) ?? .none
+        return info
     }
 
     private func publish(_ info: NowPlayingInfo) {

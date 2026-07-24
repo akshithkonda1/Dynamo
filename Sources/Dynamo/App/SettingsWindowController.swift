@@ -68,6 +68,7 @@ struct SettingsView: View {
                 generalSection
                 appearanceSection
                 widgetsSection
+                keyboardShortcutsSection
                 permissionsSection
 
                 // Per-widget configuration, discovered generically via
@@ -209,6 +210,38 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var keyboardShortcutsSection: some View {
+        SettingsSection(title: "Keyboard Shortcuts") {
+            Text("All shortcuts use ⌃⌥ (Control + Option) plus the key shown below.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(GlobalHotKeys.Action.allCases, id: \.rawValue) { action in
+                    HStack {
+                        Text(action.actionName)
+                            .font(.body)
+                        Spacer(minLength: 0)
+                        Text(action.label)
+                            .font(.system(.body, design: .monospaced).weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color(nsColor: .controlBackgroundColor))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                                    )
+                            )
+                    }
+                }
+            }
         }
     }
 

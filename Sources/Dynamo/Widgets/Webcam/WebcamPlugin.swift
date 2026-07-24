@@ -148,9 +148,35 @@ private struct ExpandedWebcamView: View {
             }
 
             HStack(spacing: 6) {
-                zoomChip("1×", 1.0)
-                zoomChip("1.5×", 1.5)
-                zoomChip("2×", 2.0)
+                Image(systemName: "minus.magnifyingglass")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Slider(
+                    value: Binding(
+                        get: { controller.zoomFactor },
+                        set: { controller.setZoom($0) }
+                    ),
+                    in: 1.0...max(controller.maxZoomFactor, 1.01)
+                )
+                .controlSize(.mini)
+                Image(systemName: "plus.magnifyingglass")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Text(String(format: "%.1f×", controller.zoomFactor))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .frame(width: 30, alignment: .trailing)
+            }
+
+            if controller.isRunning, let res = controller.captureResolution {
+                HStack(spacing: 4) {
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(NotchTheme.positive)
+                    Text("\(Int(res.height))p\(controller.captureFrameRate.map { " \(Int($0))fps" } ?? "")")
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
             }
 
             HStack(spacing: 6) {
@@ -189,15 +215,6 @@ private struct ExpandedWebcamView: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-
-    private func zoomChip(_ title: String, _ factor: CGFloat) -> some View {
-        Button {
-            controller.setZoom(factor)
-        } label: {
-            NotchChipLabel(title: title, active: abs(controller.zoomFactor - factor) < 0.05)
-        }
-        .buttonStyle(.plain)
     }
 
     private var currentDevice: WebcamDeviceOption? {

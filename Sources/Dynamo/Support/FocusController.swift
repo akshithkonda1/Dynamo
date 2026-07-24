@@ -168,6 +168,16 @@ final class FocusController: ObservableObject {
         }
     }
 
+    /// Cycles Normal → Dynamic → TrueFocus → Normal (skips Meeting — that's user-initiated).
+    func cycleMode() {
+        switch baseMode {
+        case .normal: baseMode = .dynamic
+        case .dynamic: baseMode = .trueFocus
+        case .trueFocus: baseMode = .normal
+        case .meeting: baseMode = .normal
+        }
+    }
+
     /// Kept for CalendarPlugin hooks — no longer forces mode.
     func reevaluateMeeting() {
         refreshCallContext()

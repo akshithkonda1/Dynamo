@@ -85,6 +85,7 @@ private struct ExpandedFocusView: View {
     @ObservedObject private var notes = MeetingNotesStore.shared
     @ObservedObject private var speech = MeetingSpeechCapture.shared
     @ObservedObject private var volume = SystemVolumeController.shared
+    @State private var showAllAgenda = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -317,6 +318,20 @@ private struct ExpandedFocusView: View {
             if let next = agenda.snapshot.upNext.first {
                 miniRow("Up next", next.title, timeLabel(next.when))
             }
+            if !focus.recentDynamicPeeks.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Recent nudges")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    ForEach(focus.recentDynamicPeeks, id: \.self) { item in
+                        Text("· \(item)")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.top, 4)
+            }
         case .trueFocus:
             trueFocusBody
         case .meeting:
@@ -329,11 +344,20 @@ private struct ExpandedFocusView: View {
             if let now = agenda.snapshot.now {
                 agendaRow("Now", now, NotchTheme.positive)
             }
-            ForEach(agenda.snapshot.upNext.prefix(3)) { item in
+            let upNext = agenda.snapshot.upNext
+            ForEach(upNext.prefix(showAllAgenda ? upNext.count : 3)) { item in
                 agendaRow(nil, item, NotchTheme.mediaGlow)
             }
             ForEach(agenda.snapshot.needsAttention.prefix(2)) { item in
                 agendaRow("Due", item, NotchTheme.caution)
+            }
+            if upNext.count > 3 {
+                Button(showAllAgenda ? "Show less" : "Show all \(upNext.count)") {
+                    showAllAgenda.toggle()
+                }
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .buttonStyle(.plain)
             }
             if agenda.snapshot.now == nil && agenda.snapshot.upNext.isEmpty {
                 tipCard("target", "No agenda yet", "Allow Calendar & Reminders to fill True Focus.")
@@ -400,22 +424,34 @@ private struct ExpandedFocusView: View {
     }
 
     private var footerActions: some View {
-        HStack(spacing: 8) {
-            chipButton("Refresh", "arrow.clockwise") {
-                focus.reevaluateMeeting()
-                FocusAgendaEngine.shared.rebuild()
-            }
-            chipButton("Calendar", "calendar") {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
-                    NSWorkspace.shared.open(url)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                chipButton("Refresh", "arrow.clockwise") {
+                    focus.reevaluateMeeting()
+                    FocusAgendaEngine.shared.rebuild()
                 }
-            }
-            chipButton("Reminders", "checklist") {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
-                    NSWorkspace.shared.open(url)
+                chipButton("Calendar", "calendar") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
+                chipButton("Reminders", "checklist") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Spacer()
             }
-            Spacer()
+            Toggle(isOn: Binding(
+                get: { focus.suggestMeetingOnCall },
+                set: { focus.suggestMeetingOnCall = $0 }
+            )) {
+                Text("Suggest Meeting Mode on calls")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
         }
     }
 
