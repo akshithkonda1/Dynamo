@@ -124,6 +124,18 @@ private struct AmbientBatteryView: View {
                     .font(NotchTheme.micro.weight(.bold))
                     .foregroundStyle(NotchTheme.caution)
             }
+            if !snapshot.isCharging, let min = snapshot.timeRemainingMinutes {
+                let h = min / 60
+                let m = min % 60
+                Text(h > 0 ? "~\(h)h \(m)m" : "~\(m)m")
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+            if let temp = snapshot.temperatureC, temp > 45 {
+                Text("\(Int(temp))°")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.caution)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, NotchTheme.ambientInset)

@@ -390,6 +390,19 @@ private struct ExpandedCalendarView: View {
                         .foregroundStyle(NotchTheme.textQuaternary)
                         .lineLimit(1)
                 }
+                if let notes = event.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
+                if !event.attendees.isEmpty {
+                    Text("\(event.attendees.count) people")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(NotchTheme.chipFill, in: Capsule())
+                }
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right")

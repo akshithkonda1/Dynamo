@@ -173,6 +173,14 @@ final class SportsStore: ObservableObject {
         return liveAllEvents.first
     }
 
+    var nextFollowedScheduled: SportsEvent? {
+        guard !follow.teamNames.isEmpty else { return nil }
+        let pool = eventsByLeague.values.flatMap { $0 } + liveAllEvents
+        return pool
+            .filter { ($0.status == .scheduled || $0.status == .delayed) && isFollowed($0) }
+            .min(by: { ($0.startDate ?? Date.distantFuture) < ($1.startDate ?? Date.distantFuture) })
+    }
+
     var chipLeagues: [SportsLeague] {
         categoryFilter.leagues(includingAggregate: true)
     }

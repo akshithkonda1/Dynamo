@@ -4,7 +4,10 @@ import Foundation
 /// Watches the general pasteboard for text + images; pins persist under App Support.
 @MainActor
 final class ClipboardStore: ObservableObject {
-    static let historyLimit = 20
+    static var historyLimit: Int {
+        let cap = UserDefaults.standard.integer(forKey: "clipboardHistoryCap")
+        return cap > 0 ? cap : 20
+    }
     private static let fileName = "clipboard.json"
     private static let imageFolder = "ClipboardImages"
 
@@ -125,6 +128,13 @@ final class ClipboardStore: ObservableObject {
         var updated = snippet
         updated.updatedAt = Date()
         snippets[idx] = updated
+        persist()
+    }
+
+    func renameSnippet(id: UUID, title: String) {
+        guard let i = snippets.firstIndex(where: { $0.id == id }) else { return }
+        snippets[i].title = title
+        snippets[i].updatedAt = Date()
         persist()
     }
 

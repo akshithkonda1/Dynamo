@@ -209,14 +209,20 @@ private struct AmbientMediaView: View {
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                 }
-                if let remainingLabel {
-                    Text(remainingLabel)
-                        .font(NotchTheme.micro.monospacedDigit())
+                if !plugin.info.artist.isEmpty {
+                    Text(plugin.info.artist)
+                        .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .lineLimit(1)
                 }
+                if let remainingLabel {
+                    Text(remainingLabel)
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
-            .frame(maxWidth: 90, alignment: .leading)
+            .frame(maxWidth: 100, alignment: .leading)
             Spacer(minLength: 0)
             if !dimmed {
                 MusicBarsView(
