@@ -1,5 +1,14 @@
 import Foundation
 
+/// A single entry in the upcoming track queue as surfaced by MusicKit.
+struct UpcomingTrackInfo: Equatable, Identifiable {
+    let id: String          // MusicItemID.rawValue (stable across sessions)
+    let title: String
+    let artist: String
+    let artworkURL: URL?    // High-res catalog artwork URL (load on demand)
+    let albumTitle: String
+}
+
 /// Which scriptable player is currently providing now-playing info.
 enum MediaPlayerApp: String, Equatable {
     case music
@@ -30,6 +39,14 @@ struct NowPlayingInfo: Equatable {
     var duration: TimeInterval
     var isShuffling: Bool = false
     var repeatMode: RepeatMode = .none
+
+    // MARK: MusicKit enrichment (nil/default when MusicKit is unauthorized or Spotify is playing)
+    var genre: String? = nil
+    var releaseYear: Int? = nil
+    var isExplicit: Bool = false
+    var musicKitCatalogID: String? = nil
+    var upcomingTracks: [UpcomingTrackInfo] = []
+    var highResArtworkURL: URL? = nil
 
     static let empty = NowPlayingInfo(
         title: "Not Playing",
