@@ -575,10 +575,12 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Amplify control — single glowing green icon (on) / muted icon (off).
+    /// Amplify icon button — **green glow when on**, **red glow when off**.
     private var amplifyIconButton: some View {
         let on = amplify.isEnabled
-        let green = Color(red: 0.22, green: 0.92, blue: 0.48)
+        let green = Color(red: 0.18, green: 0.95, blue: 0.45)
+        let red = Color(red: 1.0, green: 0.28, blue: 0.32)
+        let glow = on ? green : red
         return Menu {
             Button(on ? "Turn Amplify Off" : "Turn Amplify On") {
                 guard !FocusController.shared.isMeetingActive else { return }
@@ -599,13 +601,20 @@ private struct ExpandedMediaView: View {
                 }
             }
         } label: {
-            Image(systemName: on ? "waveform.circle.fill" : "waveform.circle")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(on ? green : NotchTheme.textQuaternary)
-                .shadow(color: on ? green.opacity(0.85) : .clear, radius: on ? 6 : 0)
-                .shadow(color: on ? green.opacity(0.45) : .clear, radius: on ? 12 : 0)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+            ZStack {
+                // Soft outer bloom
+                Circle()
+                    .fill(glow.opacity(on ? 0.28 : 0.22))
+                    .frame(width: 26, height: 26)
+                    .blur(radius: 4)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(glow)
+                    .shadow(color: glow.opacity(0.95), radius: on ? 7 : 5)
+                    .shadow(color: glow.opacity(0.55), radius: on ? 14 : 10)
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -614,8 +623,9 @@ private struct ExpandedMediaView: View {
         .help(
             FocusController.shared.isMeetingActive
                 ? "Amplify pauses in Meeting Mode"
-                : (on ? "Amplify \(amplify.profile.title) · click for options" : "Amplify — louder, crisper sound")
+                : (on ? "Amplify on (green) · \(amplify.profile.title)" : "Amplify off (red) · turn on for fuller sound")
         )
+        .accessibilityLabel(on ? "Amplify on" : "Amplify off")
         .onChange(of: plugin.info.sourceApp) { _ in
             amplify.reapplyForSource()
         }

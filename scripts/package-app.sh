@@ -30,7 +30,8 @@ RESOURCES="${CONTENTS}/Resources"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS}" "${RESOURCES}"
 
-cp "${BIN_DIR}/Dynamo" "${MACOS}/Dynamo"
+# Copy via dd so Finder resource forks / xattrs never poison codesign.
+dd if="${BIN_DIR}/Dynamo" of="${MACOS}/Dynamo" bs=1m status=none
 chmod +x "${MACOS}/Dynamo"
 cp "${ROOT}/Sources/Dynamo/Info.plist" "${CONTENTS}/Info.plist"
 
@@ -38,13 +39,13 @@ cp "${ROOT}/Sources/Dynamo/Info.plist" "${CONTENTS}/Info.plist"
 # no --product flag builds every target, so it's already sitting in BIN_DIR
 # alongside Dynamo). See MediaRemoteHelperProcess.swift for why it exists.
 if [[ -f "${BIN_DIR}/DynamoMediaRemoteHelper" ]]; then
-  cp "${BIN_DIR}/DynamoMediaRemoteHelper" "${MACOS}/DynamoMediaRemoteHelper"
+  dd if="${BIN_DIR}/DynamoMediaRemoteHelper" of="${MACOS}/DynamoMediaRemoteHelper" bs=1m status=none
   chmod +x "${MACOS}/DynamoMediaRemoteHelper"
 fi
 
 # Optional app icon if present.
 if [[ -f "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" ]]; then
-  cp "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
+  dd if="${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" of="${RESOURCES}/AppIcon.icns" bs=1m status=none
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "${CONTENTS}/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "${CONTENTS}/Info.plist"
 fi
