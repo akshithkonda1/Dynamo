@@ -79,7 +79,6 @@ enum MeetingTalkCoach {
 
         // Content-aware triggers from recent notes
         let noteTexts = notes.map { $0.text.lowercased() }
-        let recentNoteTexts = notes.suffix(5).map { $0.text.lowercased() }
 
         if noteTexts.contains(where: { $0.contains("blocked") || $0.contains("waiting on") || $0.contains("dependency") }) {
             out.append(.init(id: "block", text: "Who owns unblocking this — and what's the timeline?", reason: "Blocker"))

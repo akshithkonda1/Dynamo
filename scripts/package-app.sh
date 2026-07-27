@@ -53,20 +53,24 @@ fi
 /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string Dynamo" "${CONTENTS}/Info.plist" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Dynamo" "${CONTENTS}/Info.plist"
 
-# Finder resource forks break codesign — strip extended attributes first.
+# Finder resource forks / quarantine break codesign — strip thoroughly.
 xattr -cr "${APP_DIR}" 2>/dev/null || true
+# Clear detritus on every nested path (xattr -cr alone can miss some edges).
+find "${APP_DIR}" -exec xattr -c {} + 2>/dev/null || true
 
 echo "→ Ad-hoc codesign…"
 # Sign nested binaries first, then the bundle (avoid --deep which can fail
 # with "bundle format unrecognized" on some toolchains).
 if [[ -x "${MACOS}/DynamoMediaRemoteHelper" ]]; then
-  codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
+  codesign --force --sign - --timestamp=none --options runtime "${MACOS}/DynamoMediaRemoteHelper" 2>/dev/null \
+    || codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
   echo "✓ Embedded DynamoMediaRemoteHelper"
 else
   echo "warning: DynamoMediaRemoteHelper not embedded (media falls back to AppleScript)"
 fi
 codesign --force --sign - --timestamp=none "${MACOS}/Dynamo"
 codesign --force --sign - --timestamp=none "${APP_DIR}"
+codesign --verify --verbose=0 "${APP_DIR}"
 
 echo "✓ Packaged: ${APP_DIR}"
 echo "  Open with: open \"${APP_DIR}\""

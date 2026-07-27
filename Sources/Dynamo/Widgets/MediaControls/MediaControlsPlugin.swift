@@ -249,13 +249,13 @@ private struct AmbientMediaView: View {
                         .lineLimit(1)
                 }
             }
-            .frame(maxWidth: 100, alignment: .leading)
+            .frame(maxWidth: 128, alignment: .leading)
             Spacer(minLength: 0)
             if !dimmed {
                 MusicBarsView(
                     isPlaying: plugin.info.isPlaying,
-                    barCount: 6,
-                    maxHeight: 16,
+                    barCount: 5,
+                    maxHeight: 14,
                     color: pulse.palette.accent.mixed(with: pulse.palette.highlight, t: 0.3).color.opacity(0.9)
                 )
                     .fixedSize()
@@ -357,61 +357,65 @@ private struct ExpandedMediaView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-            artwork
+        GeometryReader { geo in
+            let artSize: CGFloat = geo.size.width >= 620 ? 128 : (geo.size.width >= 520 ? 116 : 104)
+            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+                artwork(size: artSize)
 
-            VStack(alignment: .leading, spacing: 6) {
-                header
-                if hasTrack {
-                    MarqueeText(
-                        text: plugin.info.title,
-                        font: .system(size: 16, weight: .semibold),
-                        foreground: NotchTheme.textPrimary,
-                        speed: 32
-                    )
-                    .frame(height: 20)
-                    .onTapGesture { plugin.openConnectedApp() }
-                    MarqueeText(
-                        text: subtitle,
-                        font: NotchTheme.caption,
-                        foreground: NotchTheme.textSecondary,
-                        speed: 28
-                    )
-                    .frame(height: 16)
-                    timelineBar
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Nothing playing")
-                            .font(NotchTheme.body.weight(.semibold))
-                            .foregroundStyle(NotchTheme.textPrimary)
-                        Text("Start Music or Spotify — transport still works.")
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                        Button {
-                            plugin.openConnectedApp()
-                        } label: {
-                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                VStack(alignment: .leading, spacing: 6) {
+                    header
+                    if hasTrack {
+                        MarqueeText(
+                            text: plugin.info.title,
+                            font: .system(size: geo.size.width >= 560 ? 17 : 16, weight: .semibold),
+                            foreground: NotchTheme.textPrimary,
+                            speed: 32
+                        )
+                        .frame(height: 22)
+                        .onTapGesture { plugin.openConnectedApp() }
+                        MarqueeText(
+                            text: subtitle,
+                            font: NotchTheme.caption,
+                            foreground: NotchTheme.textSecondary,
+                            speed: 28
+                        )
+                        .frame(height: 16)
+                        timelineBar
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Nothing playing")
+                                .font(NotchTheme.body.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                            Text("Start Music or Spotify — transport still works.")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                            Button {
+                                plugin.openConnectedApp()
+                            } label: {
+                                NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
+
+                    systemVolumeSection
+
+                    if hasTrack {
+                        playlistRow
+                    }
+
+                    // Queue strip — hidden when volume section is open to preserve height budget
+                    if hasTrack, !plugin.info.upcomingTracks.isEmpty, !showSystemVolume {
+                        QueuePeekView(tracks: plugin.info.upcomingTracks)
+                    }
+
+                    Spacer(minLength: 2)
+                    transportRow
                 }
-
-                systemVolumeSection
-
-                if hasTrack {
-                    playlistRow
-                }
-
-                // Queue strip — hidden when volume section is open to preserve height budget
-                if hasTrack, !plugin.info.upcomingTracks.isEmpty, !showSystemVolume {
-                    QueuePeekView(tracks: plugin.info.upcomingTracks)
-                }
-
-                Spacer(minLength: 2)
-                transportRow
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .onAppear {
@@ -704,9 +708,9 @@ private struct ExpandedMediaView: View {
     }
 
     @ViewBuilder
-    private var artwork: some View {
-        let corner: CGFloat = 16
-        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: 104, cornerRadius: corner) {
+    private func artwork(size: CGFloat) -> some View {
+        let corner: CGFloat = size >= 120 ? 18 : 16
+        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: size, cornerRadius: corner) {
             Group {
                 if let data = plugin.info.artworkData, let image = NSImage(data: data) {
                     Image(nsImage: image)
@@ -720,12 +724,12 @@ private struct ExpandedMediaView: View {
                             endPoint: .bottomTrailing
                         )
                         Image(systemName: "music.note")
-                            .font(.system(size: 28, weight: .medium))
+                            .font(.system(size: size * 0.27, weight: .medium))
                             .foregroundStyle(NotchTheme.textTertiary)
                     }
                 }
             }
-            .frame(width: 104, height: 104)
+            .frame(width: size, height: size)
             .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
             .overlay(alignment: .bottomTrailing) {
                 Image(systemName: "arrow.up.right")

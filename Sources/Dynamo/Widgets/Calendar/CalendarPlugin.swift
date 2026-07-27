@@ -324,15 +324,32 @@ private struct ExpandedCalendarView: View {
                         prominent: true
                     )
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                            ForEach(groupedDays, id: \.dayStart) { group in
-                                Text(dayLabel(group.dayStart))
-                                    .font(NotchTheme.micro.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                                    .padding(.top, 2)
-                                ForEach(group.events) { event in
-                                    eventRow(event)
+                    GeometryReader { geo in
+                        let columns = geo.size.width >= 560 ? 2 : 1
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+                                ForEach(groupedDays, id: \.dayStart) { group in
+                                    Text(dayLabel(group.dayStart))
+                                        .font(NotchTheme.micro.weight(.semibold))
+                                        .foregroundStyle(NotchTheme.textQuaternary)
+                                        .padding(.top, 2)
+                                    if columns == 2 {
+                                        LazyVGrid(
+                                            columns: [
+                                                GridItem(.flexible(), spacing: 8),
+                                                GridItem(.flexible(), spacing: 8)
+                                            ],
+                                            spacing: 6
+                                        ) {
+                                            ForEach(group.events) { event in
+                                                eventRow(event)
+                                            }
+                                        }
+                                    } else {
+                                        ForEach(group.events) { event in
+                                            eventRow(event)
+                                        }
+                                    }
                                 }
                             }
                         }

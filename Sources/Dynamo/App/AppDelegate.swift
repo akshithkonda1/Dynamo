@@ -282,19 +282,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    /// If another Dynamo is already running (Xcode + package-app, two opens),
-    /// bring it forward and tell the new process to exit.
+    /// Single daily-driver rule:
+    /// - `dist/Dynamo.app` wins: terminate stray/debug/Xcode copies, then continue.
+    /// - If the same bundle path is already running, activate it and exit this process.
+    /// - Non-dist launches defer to an already-running dist (or any existing instance).
     private static func activateExistingInstanceIfNeeded() -> Bool {
         let mine = NSRunningApplication.current
+        let myBundle = mine.bundleURL?.resolvingSymlinksInPath().path ?? ""
+        let myExec = mine.executableURL?.resolvingSymlinksInPath().path ?? ""
+        let isDistLaunch = myBundle.contains("/dist/Dynamo.app")
+
         let others = NSWorkspace.shared.runningApplications.filter { app in
             guard app != mine else { return false }
             if app.bundleIdentifier == "com.akshithkonda.Dynamo" { return true }
             // Bare SPM / debug binary may lack a bundle id — match by name.
-            return app.localizedName == "Dynamo"
-                && app.bundleURL?.path.contains("Dynamo") == true
+            let name = app.localizedName ?? ""
+            let path = app.bundleURL?.path ?? app.executableURL?.path ?? ""
+            return name == "Dynamo" && path.localizedCaseInsensitiveContains("Dynamo")
         }
-        guard let existing = others.first else { return false }
-        existing.activate(options: [.activateIgnoringOtherApps])
+        guard !others.isEmpty else { return false }
+
+        if isDistLaunch {
+            var sameBundleRunning = false
+            for app in others {
+                let path = app.bundleURL?.resolvingSymlinksInPath().path
+                    ?? app.executableURL?.resolvingSymlinksInPath().path
+                    ?? ""
+                if !myBundle.isEmpty, path == myBundle {
+                    sameBundleRunning = true
+                    app.activate(options: [.activateIgnoringOtherApps])
+                } else if !myExec.isEmpty, path == myExec {
+                    sameBundleRunning = true
+                    app.activate(options: [.activateIgnoringOtherApps])
+                } else {
+                    // Older / debug / Xcode build — remove so only dist remains.
+                    app.terminate()
+                }
+            }
+            return sameBundleRunning
+        }
+
+        // Prefer promoting dist if it is already the daily driver.
+        if let dist = others.first(where: {
+            ($0.bundleURL?.path ?? "").contains("/dist/Dynamo.app")
+        }) {
+            dist.activate(options: [.activateIgnoringOtherApps])
+            return true
+        }
+        others.first?.activate(options: [.activateIgnoringOtherApps])
         return true
     }
 }
