@@ -133,7 +133,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         AnyView(ExpandedCalendarView(plugin: self))
     }
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     private func checkUpcomingEvents() {
         let liveIDs = Set(events.map(\.id))

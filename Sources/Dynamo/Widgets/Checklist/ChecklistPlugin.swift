@@ -29,7 +29,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     private var notifiedReminderStages: [String: Set<String>] = [:]
     private let leadTime: TimeInterval = 15 * 60
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     func start() {
         store.start()

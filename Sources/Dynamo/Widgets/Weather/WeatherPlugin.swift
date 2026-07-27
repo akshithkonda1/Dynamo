@@ -9,7 +9,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
     let displayName = "Weather"
     let systemImage = "cloud.sun"
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []

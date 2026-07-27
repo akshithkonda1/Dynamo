@@ -9,7 +9,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let displayName = "Media"
     let systemImage = "music.note"
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []

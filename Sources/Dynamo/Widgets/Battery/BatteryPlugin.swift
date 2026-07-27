@@ -54,7 +54,7 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     }
 
     /// Match Media / Calendar / Shelf / Webcam so tab switches don’t drop taller.
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     // MARK: - Snapshot pipeline
 

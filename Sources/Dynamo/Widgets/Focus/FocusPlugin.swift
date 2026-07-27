@@ -104,7 +104,8 @@ private struct ExpandedFocusView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let wide = geo.size.width >= 560
+            // Wider island (min ~540) — dual-column Meeting/Focus at modest widths.
+            let wide = geo.size.width >= 500
             VStack(alignment: .leading, spacing: 0) {
                 header.padding(.bottom, 6)
                 modePicker.padding(.bottom, 6)

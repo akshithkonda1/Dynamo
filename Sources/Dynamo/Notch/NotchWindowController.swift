@@ -61,7 +61,7 @@ final class NotchWindowController: ObservableObject {
     /// island stays proportional on 13″, 16″, ultrawide, and external monitors.
     private var expandedSize: NSSize {
         let screen = preferredScreen()
-        let baseContent = registry?.activePlugin?.expandedContentHeight ?? 255
+        let baseContent = registry?.activePlugin?.expandedContentHeight ?? 268
         let content = NotchGeometry.expandedContentHeight(base: baseContent, for: screen)
         return NSSize(
             width: NotchGeometry.expandedWidth(for: screen),

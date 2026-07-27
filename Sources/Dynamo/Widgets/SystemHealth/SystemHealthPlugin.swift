@@ -10,7 +10,7 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
     let displayName = "Health"
     let systemImage = "heart.text.square"
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     @Published private(set) var report: MacHealthReport = .empty
     @Published private(set) var updates: SoftwareUpdateSnapshot = .empty
