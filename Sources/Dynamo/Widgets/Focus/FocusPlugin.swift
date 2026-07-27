@@ -7,12 +7,20 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
     let displayName = "Focus"
     let systemImage = "scope"
 
-    var expandedContentHeight: CGFloat { 255 }
+    /// Meeting companion needs more vertical room; other modes stay compact.
+    var expandedContentHeight: CGFloat {
+        switch FocusController.shared.baseMode {
+        case .meeting: return 320
+        case .trueFocus: return 280
+        default: return 260
+        }
+    }
 
     var isAmbientActive: Bool {
         let f = FocusController.shared
         if f.isMeetingActive { return true }
         if f.baseMode == .trueFocus, FocusAgendaEngine.shared.snapshot.now != nil { return true }
+        if f.baseMode == .dynamic, FocusAgendaEngine.shared.snapshot.upNext.first != nil { return true }
         return false
     }
 
@@ -95,29 +103,39 @@ private struct ExpandedFocusView: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header.padding(.bottom, 6)
-            modePicker.padding(.bottom, 6)
+        GeometryReader { geo in
+            let wide = geo.size.width >= 560
+            VStack(alignment: .leading, spacing: 0) {
+                header.padding(.bottom, 6)
+                modePicker.padding(.bottom, 6)
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if focus.baseMode == .meeting {
-                        meetingCompanion
-                    } else {
-                        modeBody
+                ScrollView(.vertical, showsIndicators: false) {
+                    Group {
+                        if focus.baseMode == .meeting {
+                            meetingCompanion(wide: wide)
+                        } else {
+                            modeBody
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+
+                if focus.baseMode != .meeting {
+                    footerActions.padding(.top, 6)
                 }
             }
-
-            if focus.baseMode != .meeting {
-                footerActions.padding(.top, 6)
-            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             SystemVolumeController.shared.start()
             FocusController.shared.reevaluateMeeting()
             speech.refreshAuth()
+            // Ensure panel height matches mode.
+            NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
+        }
+        .onChange(of: focus.baseMode) { _ in
+            NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
         }
     }
 
@@ -150,11 +168,18 @@ private struct ExpandedFocusView: View {
     }
 
     private var statusLine: String {
+        // Depend on tick so the timer redraws every second in Meeting.
+        let _ = focus.meetingElapsedTick
         switch focus.baseMode {
         case .meeting:
             let m = Int(focus.meetingElapsed / 60)
             let s = Int(focus.meetingElapsed) % 60
-            return String(format: "Companion · %d:%02d · vol %d%%", m, s, volume.percent)
+            let ducked = volume.percent <= focus.duckPercent + 3
+            return String(
+                format: "Companion · %d:%02d · vol %d%%%@",
+                m, s, volume.percent,
+                ducked ? " · ducked" : ""
+            )
         case .dynamic: return "Next actions & peeks"
         case .trueFocus: return "Agenda from Calendar & Reminders"
         case .normal: return "Default Dynamo"
@@ -196,11 +221,21 @@ private struct ExpandedFocusView: View {
 
     // MARK: Meeting companion
 
-    private var meetingCompanion: some View {
+    @ViewBuilder
+    private func meetingCompanion(wide: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             meetingContextStrip
-            talkSuggestions
-            notesPanel
+            if wide {
+                HStack(alignment: .top, spacing: 10) {
+                    talkSuggestions
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    notesPanel
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            } else {
+                talkSuggestions
+                notesPanel
+            }
             meetingFooter
         }
     }
@@ -259,7 +294,8 @@ private struct ExpandedFocusView: View {
         TalkCoachView(
             calendarTitle: focus.calendarMeetingTitle() ?? notes.session?.calendarTitle,
             callApp: focus.suggestedCallApp ?? notes.session?.callApp,
-            elapsed: focus.meetingElapsed
+            elapsed: focus.meetingElapsed,
+            tick: focus.meetingElapsedTick
         )
     }
 
@@ -272,6 +308,12 @@ private struct ExpandedFocusView: View {
             chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
             chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
             chipButton("Clear", "trash") { notes.clearBullets() }
+            chipButton(
+                volume.isMuted ? "Unmute" : "Mute",
+                volume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+            ) {
+                volume.toggleMute()
+            }
             Spacer(minLength: 0)
             Button {
                 speech.stop()
@@ -285,6 +327,7 @@ private struct ExpandedFocusView: View {
                     .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
             }
             .buttonStyle(.plain)
+            .help("Exit Meeting Mode and restore volume")
         }
     }
 
@@ -297,7 +340,7 @@ private struct ExpandedFocusView: View {
             tipCard(
                 "circle",
                 "Normal",
-                "Default Dynamo. Select Meeting for notes & quiet island when you’re on a call — Dynamo never joins the meeting."
+                "Default Dynamo. Select Meeting for notes & a quiet island — Dynamo never joins the call."
             )
             if let app = focus.suggestedCallApp {
                 Button { focus.enterMeetingMode() } label: {
@@ -306,6 +349,8 @@ private struct ExpandedFocusView: View {
                         Text("\(app) is open — Enter Meeting Mode")
                             .font(NotchTheme.micro.weight(.semibold))
                         Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
                     }
                     .foregroundStyle(NotchTheme.caution)
                     .padding(8)
@@ -313,10 +358,25 @@ private struct ExpandedFocusView: View {
                 }
                 .buttonStyle(.plain)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Modes")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                modeHintRow("Dynamic", "Smart peeks for what’s next")
+                modeHintRow("True Focus", "Agenda from Calendar & Reminders")
+                modeHintRow("Meeting", "Notes, talk tips, duck music")
+            }
+            .padding(.top, 2)
         case .dynamic:
             tipCard("bolt.horizontal.circle", "Dynamic", "Peeks surface what’s next. Media stays first-class.")
             if let next = agenda.snapshot.upNext.first {
                 miniRow("Up next", next.title, timeLabel(next.when))
+            } else if let due = agenda.snapshot.needsAttention.first {
+                miniRow("Overdue", due.title, due.detail)
+            } else {
+                Text("Nothing urgent — enjoy the flow.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
             }
             if !focus.recentDynamicPeeks.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
@@ -420,6 +480,20 @@ private struct ExpandedFocusView: View {
             Text(v).font(NotchTheme.caption.weight(.medium)).foregroundStyle(NotchTheme.textPrimary).lineLimit(1)
             Spacer()
             Text(d).font(NotchTheme.micro).foregroundStyle(NotchTheme.textTertiary)
+        }
+    }
+
+    private func modeHintRow(_ title: String, _ detail: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textSecondary)
+                .frame(width: 72, alignment: .leading)
+            Text(detail)
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
     }
 
@@ -696,11 +770,14 @@ private struct TalkCoachView: View {
     let calendarTitle: String?
     let callApp: String?
     let elapsed: TimeInterval
+    /// Bumps every second in Meeting so mid-call tips refresh.
+    var tick: Int = 0
     @ObservedObject private var notes = MeetingNotesStore.shared
     @State private var dismissed: Set<String> = []
     @State private var collapsed = false
 
     var body: some View {
+        let _ = tick
         let tips = MeetingTalkCoach.suggestions(
             calendarTitle: calendarTitle,
             callApp: callApp,

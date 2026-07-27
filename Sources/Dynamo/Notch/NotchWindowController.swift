@@ -46,25 +46,25 @@ final class NotchWindowController: ObservableObject {
         let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
         return NSSize(width: metrics.width, height: metrics.height)
     }
-    /// Volume / brightness HUD — compact strip under the physical notch.
-    private let hudOverlaySize = NSSize(width: 320, height: 48)
-    /// Track / calendar / reminder peeks — tall enough for aurora EQ + cover art.
-    private let peekOverlaySize = NSSize(width: 420, height: 98)
     /// How many overlay holders want the taller peek silhouette.
     private var peekOverlayHolders = 0
 
     private var overlaySize: NSSize {
-        peekOverlayHolders > 0 ? peekOverlaySize : hudOverlaySize
+        let screen = preferredScreen()
+        return peekOverlayHolders > 0
+            ? NotchGeometry.peekOverlaySize(for: screen)
+            : NotchGeometry.hudOverlaySize(for: screen)
     }
-    private static let expandedWidth: CGFloat = 660
+
     /// Widget content height + shared chrome (tray / clock / divider).
-    /// Chrome is owned by `NotchTheme.expandedChromeHeight` so SwiftUI layout
-    /// and AppKit frame stay in lockstep — mismatched values caused clipping
-    /// and “jumpy” tab switches.
+    /// Width/height adapt to the active display’s size and aspect ratio so the
+    /// island stays proportional on 13″, 16″, ultrawide, and external monitors.
     private var expandedSize: NSSize {
-        let content = registry?.activePlugin?.expandedContentHeight ?? 255
+        let screen = preferredScreen()
+        let baseContent = registry?.activePlugin?.expandedContentHeight ?? 255
+        let content = NotchGeometry.expandedContentHeight(base: baseContent, for: screen)
         return NSSize(
-            width: Self.expandedWidth,
+            width: NotchGeometry.expandedWidth(for: screen),
             height: content + NotchTheme.expandedChromeHeight
         )
     }
@@ -108,6 +108,24 @@ final class NotchWindowController: ObservableObject {
             // active when the panel first opened.
             registry.$activePluginID
                 .sink { [weak self] _ in self?.activeWidgetDidChange() }
+                .store(in: &cancellables)
+
+            // Focus mode switches change preferred content height (Meeting is taller).
+            NotificationCenter.default.publisher(for: .dynamoFocusLayoutDidChange)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.activeWidgetDidChange() }
+                .store(in: &cancellables)
+
+            // Display config / resolution changes — re-fit aspect-adaptive frame.
+            NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.isAnimatingFrame = false
+                    self?.reposition()
+                    if self?.isExpanded == true {
+                        self?.activeWidgetDidChange()
+                    }
+                }
                 .store(in: &cancellables)
 
             NotificationCenter.default.publisher(for: .dynamoHoldCollapse)

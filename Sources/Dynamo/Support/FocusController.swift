@@ -54,25 +54,42 @@ final class FocusController: ObservableObject {
     private static let suggestMeetingKey = "dynamo.focus.suggestMeeting"
     private static let duckPercentKey = "dynamo.focus.duckPercent"
 
-    @Published var baseMode: FocusBaseMode {
+    /// Suppress didSet side effects while loading UserDefaults in init.
+    private var isConfiguring = true
+
+    @Published var baseMode: FocusBaseMode = .normal {
         didSet {
+            guard !isConfiguring else { return }
+            guard oldValue != baseMode else { return }
             UserDefaults.standard.set(baseMode.rawValue, forKey: Self.baseModeKey)
             handleModeTransition(from: oldValue, to: baseMode)
-            objectWillChange.send()
         }
     }
 
     /// When true, frontmost call apps can offer “Enter Meeting Mode?” once per session.
-    @Published var suggestMeetingOnCall: Bool {
-        didSet { UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey) }
+    @Published var suggestMeetingOnCall: Bool = true {
+        didSet {
+            guard !isConfiguring else { return }
+            UserDefaults.standard.set(suggestMeetingOnCall, forKey: Self.suggestMeetingKey)
+        }
     }
 
-    @Published var duckPercent: Int {
+    @Published var duckPercent: Int = 25 {
         didSet {
+            guard !isConfiguring else { return }
             let p = min(40, max(10, duckPercent))
-            if p != duckPercent { duckPercent = p; return }
+            if p != duckPercent {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.duckPercent != p else { return }
+                    self.duckPercent = p
+                }
+                return
+            }
             UserDefaults.standard.set(duckPercent, forKey: Self.duckPercentKey)
             ducker.targetPercent = duckPercent
+            if baseMode == .meeting {
+                ducker.reapplyIfNeeded()
+            }
         }
     }
 
@@ -80,6 +97,8 @@ final class FocusController: ObservableObject {
     @Published private(set) var suggestedCallApp: String?
     @Published private(set) var meetingEnteredAt: Date?
     @Published private(set) var recentDynamicPeeks: [String] = []
+    /// Live elapsed tick so Meeting UI timer updates.
+    @Published private(set) var meetingElapsedTick: Int = 0
 
     /// Injected by CalendarPlugin for Meeting context strip.
     var isCalendarMeetingNow: () -> Bool = { false }
@@ -92,6 +111,9 @@ final class FocusController: ObservableObject {
     private let ducker = MeetingVolumeDucker()
     private var started = false
     private var didSuggestMeetingThisSession = false
+    private var reDuckTimer: Timer?
+    private var elapsedTimer: Timer?
+    private var contextTimer: Timer?
 
     /// Meeting is active only when user selected Meeting mode.
     var isMeetingActive: Bool { baseMode == .meeting }
@@ -113,6 +135,7 @@ final class FocusController: ObservableObject {
     }
 
     private init() {
+        isConfiguring = true
         if let raw = UserDefaults.standard.string(forKey: Self.baseModeKey),
            let mode = FocusBaseMode(rawValue: raw) {
             baseMode = mode
@@ -124,33 +147,41 @@ final class FocusController: ObservableObject {
         } else {
             suggestMeetingOnCall = UserDefaults.standard.bool(forKey: Self.suggestMeetingKey)
         }
-        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int
-        duckPercent = storedDuck ?? 25
+        let storedDuck = UserDefaults.standard.object(forKey: Self.duckPercentKey) as? Int ?? 25
+        duckPercent = min(40, max(10, storedDuck))
         ducker.targetPercent = duckPercent
+        isConfiguring = false
     }
 
     func start() {
         guard !started else { return }
         started = true
-        // Legacy dim flag: enabled when user might use Meeting.
         MeetingMode.shared.isEnabled = true
         callProbe.start { [weak self] in
             self?.refreshCallContext()
         }
-        Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshCallContext() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        contextTimer = t
         refreshCallContext()
-        // If relaunched already in Meeting, re-apply duck.
         if baseMode == .meeting {
             meetingEnteredAt = meetingEnteredAt ?? Date()
             ducker.enter()
-            MeetingNotesStore.shared.ensureSession()
+            startMeetingTimers()
+            MeetingNotesStore.shared.ensureSession(
+                calendarTitle: calendarMeetingTitle(),
+                callApp: suggestedCallApp
+            )
         }
     }
 
     func stop() {
         callProbe.stop()
+        contextTimer?.invalidate()
+        contextTimer = nil
+        stopMeetingTimers()
         if baseMode == .meeting {
             ducker.exit()
             MeetingSpeechCapture.shared.stop()
@@ -168,7 +199,7 @@ final class FocusController: ObservableObject {
         }
     }
 
-    /// Cycles Normal → Dynamic → TrueFocus → Normal (skips Meeting — that's user-initiated).
+    /// Cycles Normal → Dynamic → TrueFocus → Normal (Meeting is explicit only).
     func cycleMode() {
         switch baseMode {
         case .normal: baseMode = .dynamic
@@ -178,20 +209,21 @@ final class FocusController: ObservableObject {
         }
     }
 
-    /// Kept for CalendarPlugin hooks — no longer forces mode.
     func reevaluateMeeting() {
         refreshCallContext()
     }
 
+    func resetMeetingSuggestion() {
+        didSuggestMeetingThisSession = false
+    }
+
     private func refreshCallContext() {
-        // Prefer frontmost confidence for suggestions.
         callProbe.refresh()
         let name = callProbe.suggestedFrontmostCallApp
         if name != suggestedCallApp {
             suggestedCallApp = name
         }
         maybeOfferMeeting()
-        // Keep legacy bridge for ambient dim only when in Meeting mode.
         MeetingMode.shared.syncFromFocus(enabled: true, meetingNow: isMeetingActive)
         objectWillChange.send()
     }
@@ -201,6 +233,7 @@ final class FocusController: ObservableObject {
         guard baseMode != .meeting else { return }
         guard let app = suggestedCallApp else { return }
         guard !didSuggestMeetingThisSession else { return }
+        guard emitPeek != nil else { return }
         didSuggestMeetingThisSession = true
         emitPeek?(NotchSneakPeek(
             systemImage: "video.fill",
@@ -216,21 +249,55 @@ final class FocusController: ObservableObject {
         let isMeeting = new == .meeting
         if isMeeting, !wasMeeting {
             meetingEnteredAt = Date()
+            meetingElapsedTick = 0
             ducker.enter()
+            startMeetingTimers()
             MeetingNotesStore.shared.ensureSession(
                 calendarTitle: calendarMeetingTitle(),
                 callApp: suggestedCallApp
             )
         } else if wasMeeting, !isMeeting {
             MeetingSpeechCapture.shared.stop()
+            stopMeetingTimers()
             ducker.exit()
             meetingEnteredAt = nil
             MeetingNotesStore.shared.endSession()
+            resetMeetingSuggestion()
         }
         if new == .trueFocus {
             FocusAgendaEngine.shared.rebuild()
         }
         MeetingMode.shared.syncFromFocus(enabled: true, meetingNow: isMeeting)
+        NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
+        objectWillChange.send()
+    }
+
+    private func startMeetingTimers() {
+        stopMeetingTimers()
+        let reDuck = Timer(timeInterval: 12, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.baseMode == .meeting else { return }
+                self.ducker.reapplyIfNeeded()
+            }
+        }
+        RunLoop.main.add(reDuck, forMode: .common)
+        reDuckTimer = reDuck
+
+        let elapsed = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.baseMode == .meeting else { return }
+                self.meetingElapsedTick &+= 1
+            }
+        }
+        RunLoop.main.add(elapsed, forMode: .common)
+        elapsedTimer = elapsed
+    }
+
+    private func stopMeetingTimers() {
+        reDuckTimer?.invalidate()
+        reDuckTimer = nil
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
     }
 
     // MARK: - Policy
@@ -238,7 +305,6 @@ final class FocusController: ObservableObject {
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
         if peek.style == .media { return false }
         if isMeetingActive, peek.urgency < .high {
-            // Allow our own Meeting offer and high urgency.
             if peek.detail.contains("Meeting companion") { return false }
             return true
         }

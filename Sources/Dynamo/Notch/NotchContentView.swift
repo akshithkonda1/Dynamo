@@ -271,4 +271,6 @@ private struct TrayIconButton: View {
 
 extension Notification.Name {
     static let dynamoOpenSettings = Notification.Name("dynamoOpenSettings")
+    /// Active Focus mode (or similar) changed preferred content height — resize expanded panel.
+    static let dynamoFocusLayoutDidChange = Notification.Name("dynamoFocusLayoutDidChange")
 }

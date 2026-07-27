@@ -82,90 +82,40 @@ final class MusicKitBridge: ObservableObject {
     // MARK: - Queue
 
     private func fetchUpcomingTracks() async -> [UpcomingTrackInfo] {
-        guard isAuthorized else { return [] }
-
-        return await withTaskGroup(of: [UpcomingTrackInfo].self) { group in
-            group.addTask { await self.collectQueueEntries() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return []
-            }
-            let result = await group.next() ?? []
-            group.cancelAll()
-            return result
-        }
-    }
-
-    private func collectQueueEntries() async -> [UpcomingTrackInfo] {
-        let player = SystemMusicPlayer.shared
-        var result: [UpcomingTrackInfo] = []
-        var pastCurrent = false
-        var count = 0
-
-        guard let currentEntry = player.queue.currentEntry else { return [] }
-
-        for await entry in player.queue.entries {
-            if !pastCurrent {
-                if entry.id == currentEntry.id { pastCurrent = true }
-                continue
-            }
-            if let song = entry.item as? Song {
-                result.append(UpcomingTrackInfo(
-                    id: song.id.rawValue,
-                    title: song.title,
-                    artist: song.artistName,
-                    artworkURL: song.artwork?.url(width: 160, height: 160),
-                    albumTitle: song.albumTitle ?? ""
-                ))
-            }
-            count += 1
-            if count >= 5 { break }
-        }
-        return result
+        // SystemMusicPlayer queue APIs are not available on macOS the same way as iOS.
+        return []
     }
 
     // MARK: - Library (Like / Add)
 
-    /// Adds the track to the Apple Music library. Returns true if already in library or
-    /// successfully added. Returns false when unauthorized or catalog lookup fails.
+    /// Library mutation APIs are iOS-first; on macOS we report false and rely on
+    /// AppleScript / Music app UI for likes.
     func toggleLike(catalogID: String) async -> Bool {
-        guard isAuthorized else { return false }
-        let itemID = MusicItemID(catalogID)
-        var lookup = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: itemID)
-        lookup.limit = 1
-        guard let response = try? await lookup.response(),
-              let song = response.items.first else { return false }
-
-        if await isInLibrary(catalogID: catalogID) { return true }
-        try? await MusicLibrary.shared.add(song)
-        return true
+        _ = catalogID
+        return false
     }
 
     func isInLibrary(catalogID: String) async -> Bool {
-        guard isAuthorized else { return false }
-        var request = MusicLibraryRequest<Song>()
-        request.filter(matching: \.id, equalTo: MusicItemID(catalogID))
-        request.limit = 1
-        let response = try? await request.response()
-        return response?.items.isEmpty == false
+        _ = catalogID
+        return false
     }
 
-    // MARK: - Transport (Apple Music only)
+    // MARK: - Transport (Apple Music only — best-effort; macOS lacks SystemMusicPlayer)
 
     func play() async {
-        try? await SystemMusicPlayer.shared.play()
+        // Prefer existing MediaRemote / AppleScript path; no-op here on macOS.
     }
 
     func pause() {
-        SystemMusicPlayer.shared.pause()
+        // no-op on macOS
     }
 
     func skipToNext() async {
-        try? await SystemMusicPlayer.shared.skipToNextEntry()
+        // no-op on macOS
     }
 
     func skipToPrevious() async {
-        try? await SystemMusicPlayer.shared.skipToPreviousEntry()
+        // no-op on macOS
     }
 }
 
