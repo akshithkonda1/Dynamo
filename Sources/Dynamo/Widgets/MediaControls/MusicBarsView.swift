@@ -23,7 +23,7 @@ struct MusicBarsView: View {
 
         TimelineView(
             .animation(
-                minimumInterval: isPlaying ? 1.0 / 60.0 : 60,
+                minimumInterval: isPlaying ? 1.0 / 30.0 : 60,
                 paused: !isPlaying
             )
         ) { context in

@@ -92,7 +92,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
             switch self {
             case .inOneHour: return "1h"
             case .today: return "Today"
-            case .tomorrow: return "Tmrw"
+            case .tomorrow: return "Tomorrow"
             case .undated: return "None"
             }
         }

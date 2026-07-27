@@ -114,6 +114,57 @@ final class AppleScriptMedia {
         }
     }
 
+    func toggleShuffle() {
+        switch preferredPlayer() ?? fallbackPlayer() {
+        case .music:
+            run("""
+            tell application id "\(Self.musicBundle)"
+                try
+                    set shuffle enabled to not shuffle enabled
+                end try
+            end tell
+            """)
+        case .spotify:
+            // Spotify AppleScript has limited shuffle support on some versions.
+            run("""
+            tell application id "\(Self.spotifyBundle)"
+                try
+                    set shuffling to not shuffling
+                end try
+            end tell
+            """)
+        case .none: break
+        }
+    }
+
+    func toggleRepeat() {
+        switch preferredPlayer() ?? fallbackPlayer() {
+        case .music:
+            run("""
+            tell application id "\(Self.musicBundle)"
+                try
+                    if song repeat is off then
+                        set song repeat to all
+                    else if song repeat is all then
+                        set song repeat to one
+                    else
+                        set song repeat to off
+                    end if
+                end try
+            end tell
+            """)
+        case .spotify:
+            run("""
+            tell application id "\(Self.spotifyBundle)"
+                try
+                    set repeating to not repeating
+                end try
+            end tell
+            """)
+        case .none: break
+        }
+    }
+
     // MARK: - Open app / reveal track
 
     /// Activate Music or Spotify and reveal the current track (and its playlist context in Music).

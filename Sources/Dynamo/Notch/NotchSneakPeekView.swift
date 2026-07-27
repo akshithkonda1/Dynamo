@@ -22,7 +22,7 @@ struct NotchSneakPeekView: View {
         ZStack {
             if isMedia {
                 // Subtle full-bleed EQ under the track row (doesn’t compete with text).
-                AuroraEqualizerView(isActive: true, barCount: 32, fps: 48)
+                AuroraEqualizerView(isActive: true, barCount: 28, fps: 30)
                     .allowsHitTesting(false)
             }
 

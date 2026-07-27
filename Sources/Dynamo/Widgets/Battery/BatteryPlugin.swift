@@ -82,6 +82,10 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
             (15, "p15", .high),
             (20, "p20", .high)
         ]
+        // Clear stages once charge recovers above their threshold (re-arm alerts).
+        for (threshold, key, _) in stages where p > threshold {
+            notifiedBatteryStages.remove(key)
+        }
         for (threshold, key, urgency) in stages {
             guard p <= threshold, !notifiedBatteryStages.contains(key) else { continue }
             notifiedBatteryStages.insert(key)
@@ -90,7 +94,7 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
                 subtitle: "\(p)% remaining" + (power.isLowPowerModeEnabled ? " · Low Power on" : ""),
                 systemImage: "battery.0",
                 urgency: urgency,
-                detail: power.isLowPowerModeEnabled ? "Power" : "Enable Low Power in Battery",
+                detail: power.isLowPowerModeEnabled ? "Power" : "Try Low Power mode",
                 category: "battery",
                 id: "battery|\(key)"
             )
@@ -198,9 +202,8 @@ private struct AmbientBatteryView: View {
 }
 
 // MARK: - Expanded
-// Compact, peer-height layout. Metrics are read-only from IOKit / ProcessInfo
-// (charge %, cycles, design/max capacity, OS time remaining). Local drain
-// history is secondary; nothing here invents battery capacity.
+// Compact peer-height layout. Metrics from this Mac’s battery firmware +
+// ProcessInfo. Local drain history is secondary; nothing invents capacity.
 
 private struct ExpandedBatteryView: View {
     @ObservedObject var plugin: BatteryPlugin
@@ -212,7 +215,7 @@ private struct ExpandedBatteryView: View {
         BatteryHealthModel.insight(snapshot: snapshot, samples: history.samples)
     }
 
-    /// Prefer firmware max/design capacity when IOKit reports it.
+    /// Prefer firmware max/design capacity when the Mac reports it.
     private var hardwareHealth: Int? { snapshot.hardwareHealthPercent }
 
     var body: some View {
@@ -236,7 +239,7 @@ private struct ExpandedBatteryView: View {
                     prominent: true
                 )
             } else {
-                // Charge + status — system IOKit values only
+                // Charge + status — live battery values from this Mac
                 NotchCard(compact: true) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: NotchTheme.spaceSM) {
@@ -385,7 +388,7 @@ private struct ExpandedBatteryView: View {
         }
     }
 
-    /// Prefer macOS IOKit time remaining; fall back to local rate estimate.
+    /// Prefer macOS time remaining; fall back to local rate estimate.
     private var displayMinutes: Int? {
         if let os = snapshot.timeRemainingMinutes { return os }
         if snapshot.isCharging {
@@ -426,7 +429,7 @@ private struct ExpandedBatteryView: View {
 
     private var footerNote: String {
         if let tip = compactTip { return tip }
-        return "Charge from IOKit · Power modes via pmset (may need Battery settings)."
+        return "Power modes update this Mac’s energy profile. Settings open if a change is blocked."
     }
 
     private var compactTip: String? {

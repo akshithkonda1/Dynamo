@@ -208,7 +208,7 @@ final class FocusController: ObservableObject {
         callProbe.start { [weak self] in
             self?.refreshCallContext()
         }
-        let t = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshCallContext() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -356,7 +356,7 @@ final class FocusController: ObservableObject {
             systemImage: "checkmark.circle",
             title: "Leave Meeting Mode?",
             subtitle: "Call ended · restore volume",
-            urgency: .normal,
+            urgency: .high,
             detail: "Focus · Smart leave"
         ))
     }

@@ -256,7 +256,8 @@ private struct AmbientMediaView: View {
                     isPlaying: plugin.info.isPlaying,
                     barCount: 5,
                     maxHeight: 14,
-                    color: pulse.palette.accent.mixed(with: pulse.palette.highlight, t: 0.3).color.opacity(0.9)
+                    color: pulse.palette.primary.mixed(with: pulse.palette.accent, t: 0.45)
+                        .boosted(saturation: 1.4).color.opacity(0.95)
                 )
                     .fixedSize()
                 if let dev = AudioOutputController.shared.devices.first(where: { $0.id == AudioOutputController.shared.selectedID }),
@@ -399,8 +400,6 @@ private struct ExpandedMediaView: View {
                         }
                         .padding(.vertical, 4)
                     }
-
-                    amplifySection
 
                     systemVolumeSection
 
@@ -576,76 +575,53 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Louder / crisper / more visceral — system volume boost + Music EQ when available.
-    private var amplifySection: some View {
-        NotchCard(padding: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Button {
-                        // Don't amplify while Meeting is ducking music.
-                        if FocusController.shared.isMeetingActive {
-                            return
-                        }
-                        amplify.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: amplify.isEnabled ? "waveform.circle.fill" : "waveform.circle")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(amplify.isEnabled ? NotchTheme.mediaGlow : NotchTheme.textTertiary)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(amplify.isEnabled ? "Amplify On" : "Amplify")
-                                    .font(NotchTheme.micro.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textPrimary)
-                                Text(amplify.isEnabled ? amplify.statusLine : "Crisper · louder · more visceral")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .contentShape(Rectangle())
+    /// Amplify control — single glowing green icon (on) / muted icon (off).
+    private var amplifyIconButton: some View {
+        let on = amplify.isEnabled
+        let green = Color(red: 0.22, green: 0.92, blue: 0.48)
+        return Menu {
+            Button(on ? "Turn Amplify Off" : "Turn Amplify On") {
+                guard !FocusController.shared.isMeetingActive else { return }
+                amplify.toggle()
+            }
+            Divider()
+            ForEach(MediaAmplifyProfile.allCases) { profile in
+                Button {
+                    amplify.profile = profile
+                    if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                        amplify.isEnabled = true
                     }
-                    .buttonStyle(.plain)
-                    .help(FocusController.shared.isMeetingActive
-                          ? "Unavailable in Meeting Mode"
-                          : "Boost system volume + Music EQ for a fuller sound")
-
-                    Spacer(minLength: 0)
-
-                    if amplify.isEnabled {
-                        Text("\(SystemVolumeController.shared.percent)%")
-                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(NotchTheme.mediaGlow)
+                } label: {
+                    HStack {
+                        Text(profile.title)
+                        if amplify.profile == profile { Image(systemName: "checkmark") }
                     }
-                }
-
-                if amplify.isEnabled {
-                    HStack(spacing: 5) {
-                        ForEach(MediaAmplifyProfile.allCases) { profile in
-                            Button {
-                                amplify.profile = profile
-                            } label: {
-                                NotchChipLabel(
-                                    title: profile.title,
-                                    systemImage: profile.systemImage,
-                                    active: amplify.profile == profile
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .help(profile.subtitle)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+        } label: {
+            Image(systemName: on ? "waveform.circle.fill" : "waveform.circle")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(on ? green : NotchTheme.textQuaternary)
+                .shadow(color: on ? green.opacity(0.85) : .clear, radius: on ? 6 : 0)
+                .shadow(color: on ? green.opacity(0.45) : .clear, radius: on ? 12 : 0)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
-        .padding(.top, 2)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(FocusController.shared.isMeetingActive)
+        .opacity(FocusController.shared.isMeetingActive ? 0.35 : 1)
+        .help(
+            FocusController.shared.isMeetingActive
+                ? "Amplify pauses in Meeting Mode"
+                : (on ? "Amplify \(amplify.profile.title) · click for options" : "Amplify — louder, crisper sound")
+        )
         .onChange(of: plugin.info.sourceApp) { _ in
             amplify.reapplyForSource()
         }
     }
 
-    /// Collapsible subsection under Media — system output volume (AppleScript UI %).
+    /// Collapsible subsection under Media — system output volume.
     private var systemVolumeSection: some View {
         NotchCard(padding: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -818,50 +794,52 @@ private struct ExpandedMediaView: View {
     }
 
     private var transportRow: some View {
-        HStack(spacing: 10) {
-            Button {
-                plugin.toggleShuffle()
-            } label: {
-                Image(systemName: "shuffle")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(plugin.info.isShuffling ? NotchTheme.textPrimary : NotchTheme.textQuaternary)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle Shuffle")
+        HStack(spacing: 8) {
+            transportButton(
+                "shuffle",
+                accessibility: "Shuffle",
+                size: 12,
+                diameter: 34,
+                prominent: plugin.info.isShuffling,
+                activeTint: plugin.info.isShuffling
+            ) { plugin.toggleShuffle() }
 
             transportButton(
                 "backward.fill",
                 accessibility: "Previous",
                 size: 15,
-                diameter: 38
+                diameter: 40
             ) { plugin.previousTrack() }
+
             transportButton(
                 plugin.info.isPlaying ? "pause.fill" : "play.fill",
                 accessibility: plugin.info.isPlaying ? "Pause" : "Play",
-                size: 17,
-                diameter: 46,
+                size: 18,
+                diameter: 48,
                 prominent: true
             ) { plugin.togglePlayPause() }
+
             transportButton(
                 "forward.fill",
                 accessibility: "Next",
                 size: 15,
-                diameter: 38
+                diameter: 40
             ) { plugin.nextTrack() }
 
-            Button {
-                plugin.toggleRepeat()
-            } label: {
-                Image(systemName: plugin.info.repeatMode == .one ? "repeat.1" : "repeat")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(plugin.info.repeatMode == .none ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle Repeat")
+            transportButton(
+                plugin.info.repeatMode == .one ? "repeat.1" : "repeat",
+                accessibility: "Repeat",
+                size: 12,
+                diameter: 34,
+                prominent: plugin.info.repeatMode != .none,
+                activeTint: plugin.info.repeatMode != .none
+            ) { plugin.toggleRepeat() }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
 
-            // Like / Add to Library button — only visible when MusicKit has a catalog ID
+            amplifyIconButton
+
+            // Like / Add to Library — only when MusicKit has a catalog ID
             Button {
                 plugin.toggleLike()
             } label: {
@@ -870,7 +848,7 @@ private struct ExpandedMediaView: View {
                         ProgressView().controlSize(.mini).scaleEffect(0.7)
                     } else {
                         Image(systemName: plugin.isTrackLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(
                                 plugin.isTrackLiked
                                     ? Color(red: 1, green: 0.22, blue: 0.37)
@@ -878,12 +856,12 @@ private struct ExpandedMediaView: View {
                             )
                     }
                 }
-                .frame(width: 20, height: 20)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(plugin.info.musicKitCatalogID == nil || plugin.isLikeLoading)
             .opacity(plugin.info.musicKitCatalogID == nil ? 0 : 1)
-            .animation(NotchTheme.quick, value: plugin.isTrackLiked)
             .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
         }
     }
@@ -894,6 +872,7 @@ private struct ExpandedMediaView: View {
         size: CGFloat,
         diameter: CGFloat,
         prominent: Bool = false,
+        activeTint: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         // Real `Button` + shared style so first-clicks fire on the nonactivating
@@ -901,9 +880,12 @@ private struct ExpandedMediaView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
+                .foregroundStyle(activeTint || prominent ? NotchTheme.textPrimary : NotchTheme.textSecondary)
+                .symbolRenderingMode(.hierarchical)
         }
         .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
+        // Zero animation lag on press so transport feels instant.
+        .transaction { $0.animation = nil }
         .help(accessibility)
         .accessibilityLabel(accessibility)
     }
