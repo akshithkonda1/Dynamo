@@ -24,8 +24,10 @@ final class PeekBridge: ObservableObject {
     private weak var registry: WidgetRegistry?
 
     private init() {
+        // On by default — Peek is Dynamo’s notification surface; external
+        // Shortcuts/scripts should land there without a hidden toggle.
         if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
-            isEnabled = false
+            isEnabled = true
         } else {
             isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         }
@@ -65,13 +67,18 @@ final class PeekBridge: ObservableObject {
         } else {
             critical = true
         }
-        registry?.sneakPeekPublisher.send(
+        // Route through PeekNotificationCenter so external peeks share the
+        // same queue / haptics / history as first-party Dynamo alerts.
+        PeekNotificationCenter.shared.deliver(
             NotchSneakPeek(
                 systemImage: critical ? "bell.badge.fill" : "bell",
                 title: title,
                 subtitle: subtitle,
-                urgency: critical ? .critical : .normal
-            )
+                urgency: critical ? .critical : .normal,
+                detail: "External"
+            ),
+            id: "external|\(title)",
+            category: "external"
         )
     }
 

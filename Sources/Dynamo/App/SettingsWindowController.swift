@@ -160,18 +160,50 @@ struct SettingsView: View {
 
             Divider()
 
-            Toggle("Critical Peek bridge (external)", isOn: Binding(
+            Text("Notifications → Peek")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Deliver Dynamo alerts as Peeks", isOn: Binding(
+                get: { PeekNotificationCenter.shared.isPrimaryDelivery },
+                set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
+            ))
+            Toggle("Peek haptics", isOn: Binding(
+                get: { PeekNotificationCenter.shared.hapticsEnabled },
+                set: { PeekNotificationCenter.shared.hapticsEnabled = $0 }
+            ))
+            Toggle("Critical alert sound", isOn: Binding(
+                get: { PeekNotificationCenter.shared.criticalSoundEnabled },
+                set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
+            ))
+            Text("Dynamo uses the notch Peek as its notification center — calendar, reminders, focus, battery, media, and external alerts queue here instead of system banners.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if PeekNotificationCenter.shared.pendingCount > 0 {
+                Text("\(PeekNotificationCenter.shared.pendingCount) queued")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if let last = PeekNotificationCenter.shared.lastDelivered {
+                Text("Last: \(last.title)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Divider()
+
+            Toggle("External Peek bridge", isOn: Binding(
                 get: { PeekBridge.shared.isEnabled },
                 set: { PeekBridge.shared.isEnabled = $0 }
             ))
-            Text("Allow Shortcuts/scripts to show a notch peek via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek. Off by default.")
+            Text("Allow Shortcuts/scripts via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
-            Text("Notification display")
+            Text("Peek duration")
                 .font(.subheadline.weight(.semibold))
             Picker("Peek duration", selection: $peekDwellMultiplier) {
                 Text("Shorter").tag(0.5)
@@ -181,7 +213,7 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text("How long sneak-peek notifications stay visible before auto-dismissing. Normal is 3–7.5s depending on urgency.")
+            Text("How long each Peek stays up. Normal is 3–7.5s depending on urgency.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

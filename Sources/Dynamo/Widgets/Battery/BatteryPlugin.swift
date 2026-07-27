@@ -58,12 +58,44 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
 
     // MARK: - Snapshot pipeline
 
+    /// Stages already announced (e.g. "p20", "p10", "p5") so we don't spam.
+    private var notifiedBatteryStages: Set<String> = []
+
     private func handleSnapshot(_ value: BatterySnapshot) {
         snapshot = value
         power.refresh()
         history.record(snapshot: value, isLowPowerMode: power.isLowPowerModeEnabled)
         power.considerAutoEnable(snapshot: value)
         recomputeInsight()
+        announceBatteryIfNeeded()
+    }
+
+    private func announceBatteryIfNeeded() {
+        guard snapshot.isPresent, !snapshot.isCharging else {
+            if snapshot.isCharging { notifiedBatteryStages.removeAll() }
+            return
+        }
+        let p = snapshot.percent
+        let stages: [(Int, String, NotchSneakPeekUrgency)] = [
+            (5, "p5", .critical),
+            (10, "p10", .critical),
+            (15, "p15", .high),
+            (20, "p20", .high)
+        ]
+        for (threshold, key, urgency) in stages {
+            guard p <= threshold, !notifiedBatteryStages.contains(key) else { continue }
+            notifiedBatteryStages.insert(key)
+            PeekNotificationCenter.shared.notify(
+                title: p <= 10 ? "Battery critically low" : "Battery low",
+                subtitle: "\(p)% remaining" + (power.isLowPowerModeEnabled ? " · Low Power on" : ""),
+                systemImage: "battery.0",
+                urgency: urgency,
+                detail: power.isLowPowerModeEnabled ? "Power" : "Enable Low Power in Battery",
+                category: "battery",
+                id: "battery|\(key)"
+            )
+            break
+        }
     }
 
     private func recomputeInsight() {

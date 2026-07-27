@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             hotKeys.uninstall()
+            PeekNotificationCenter.shared.teardown()
             PeekBridge.shared.teardown()
             registry?.stopAll()
             hudController?.teardown()
@@ -83,15 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
+        // Peek is Dynamo’s primary notification surface (queue + haptics + history).
+        PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
         PeekBridge.shared.attach(registry: registry)
-        FocusController.shared.emitPeek = { [weak sneakPeekController] peek in
-            // Route through registry publisher if available; else direct.
-            NotificationCenter.default.post(
-                name: Notification.Name("dynamo.internalFocusPeek"),
-                object: nil,
-                userInfo: ["title": peek.title, "subtitle": peek.subtitle, "detail": peek.detail]
+        FocusController.shared.emitPeek = { peek in
+            PeekNotificationCenter.shared.deliver(
+                peek,
+                id: "focus|\(peek.title)|\(peek.subtitle)",
+                category: "focus"
             )
-            sneakPeekController?.showForFocus(peek)
         }
         FocusController.shared.start()
         FocusQuietMonitor.shared.start()
