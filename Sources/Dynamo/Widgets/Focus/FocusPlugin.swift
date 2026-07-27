@@ -285,7 +285,8 @@ private struct ExpandedFocusView: View {
     }
 
     private var contextSubtitle: String {
-        if let app = focus.suggestedCallApp {
+        if let hint = focus.meetingSmartHint { return hint }
+        if let app = focus.suggestedCallApp ?? focus.activeCallApp {
             return "\(app) open · notes stay on this Mac"
         }
         return "Notetaker + talk tips · never joins the call"
@@ -305,30 +306,59 @@ private struct ExpandedFocusView: View {
     }
 
     private var meetingFooter: some View {
-        HStack(spacing: 8) {
-            chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
-            chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
-            chipButton("Clear", "trash") { notes.clearBullets() }
-            chipButton(
-                volume.isMuted ? "Unmute" : "Mute",
-                volume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
-            ) {
-                volume.toggleMute()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Toggle(isOn: $focus.smartAutoEnterMeeting) {
+                    Text("Smart enter")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Auto-enter when Calendar meeting is live and a call app is open")
+
+                Toggle(isOn: $focus.autoListenOnEnter) {
+                    Text("Auto Listen")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Start speech notes when entering Meeting (if already authorized)")
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
-            Button {
-                speech.stop()
-                focus.leaveMeetingMode()
-            } label: {
-                Text("Leave Meeting")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.caution)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
+
+            HStack(spacing: 8) {
+                chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
+                chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
+                chipButton("Clear", "trash") { notes.clearBullets() }
+                chipButton(
+                    speech.isListening ? "Stop" : "Listen",
+                    speech.isListening ? "waveform.badge.mic" : "mic.fill"
+                ) {
+                    speech.toggleListen()
+                }
+                chipButton(
+                    volume.isMuted ? "Unmute" : "Mute",
+                    volume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                ) {
+                    volume.toggleMute()
+                }
+                Spacer(minLength: 0)
+                Button {
+                    speech.stop()
+                    focus.leaveMeetingMode()
+                } label: {
+                    Text("Leave Meeting")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.caution)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .help("Exit Meeting Mode and restore volume")
             }
-            .buttonStyle(.plain)
-            .help("Exit Meeting Mode and restore volume")
         }
     }
 

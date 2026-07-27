@@ -9,9 +9,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>Dynamo</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.1</string>
+	<string>0.5.0</string>
 	<key>CFBundleExecutable</key>
 	<string>Dynamo</string>
 	<key>CFBundlePackageType</key>

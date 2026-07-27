@@ -169,6 +169,14 @@ final class EventKitCalendarProvider: CalendarProvider {
         CalendarNewEventOpener.open()
     }
 
+    func createEvent(_ draft: CalendarEventComposer.Draft) -> CalendarEventComposer.Result {
+        let result = CalendarEventComposer.create(draft, store: store)
+        if case .created = result {
+            refresh()
+        }
+        return result
+    }
+
     func openToday() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
@@ -185,7 +193,8 @@ final class EventKitCalendarProvider: CalendarProvider {
             case .fullAccess, .authorized:
                 authorizationState = .authorized
             case .writeOnly:
-                authorizationState = .denied
+                // Write-only still allows create; reads may be empty.
+                authorizationState = .authorized
             case .notDetermined:
                 authorizationState = .notDetermined
             default:

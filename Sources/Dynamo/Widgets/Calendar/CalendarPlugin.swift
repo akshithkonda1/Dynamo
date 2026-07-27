@@ -129,6 +129,33 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         provider.openToday()
     }
 
+    @Published var showComposer = false
+    @Published var eventDraft = CalendarEventComposer.Draft()
+    @Published var createError: String?
+    @Published var createSuccess: String?
+
+    @discardableResult
+    func createEventFromDraft() -> Bool {
+        createError = nil
+        createSuccess = nil
+        let result = provider.createEvent(eventDraft)
+        switch result {
+        case .created:
+            createSuccess = "Event created"
+            showComposer = false
+            eventDraft = CalendarEventComposer.Draft()
+            refresh()
+            return true
+        case .failed(let msg):
+            createError = msg
+            return false
+        case .denied:
+            createError = "Calendar access required"
+            requestAccess()
+            return false
+        }
+    }
+
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
     }
@@ -261,12 +288,30 @@ private struct ExpandedCalendarView: View {
                     .help("Open today in Calendar")
 
                     Button {
-                        plugin.openNewEvent()
+                        withAnimation(NotchTheme.snappy) {
+                            plugin.showComposer.toggle()
+                            plugin.createError = nil
+                            plugin.createSuccess = nil
+                        }
                     } label: {
-                        NotchChipLabel(title: "New", systemImage: "plus")
+                        NotchChipLabel(
+                            title: plugin.showComposer ? "Close" : "New",
+                            systemImage: plugin.showComposer ? "xmark" : "plus",
+                            active: plugin.showComposer
+                        )
                     }
                     .buttonStyle(.plain)
-                    .help("Create event in Calendar")
+                    .help("Create event in Dynamo")
+
+                    Button {
+                        plugin.openNewEvent()
+                    } label: {
+                        Image(systemName: "macwindow")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
+                    .buttonStyle(.notchIcon(diameter: 22))
+                    .help("Open new event in Calendar.app")
 
                     Button {
                         plugin.openCalendarApp()
@@ -278,6 +323,22 @@ private struct ExpandedCalendarView: View {
                     .buttonStyle(.notchIcon(diameter: 22))
                     .help("Open Calendar app")
                 }
+            }
+
+            if plugin.showComposer, plugin.authState == .authorized {
+                calendarComposer
+            }
+
+            if let ok = plugin.createSuccess {
+                Text(ok)
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.positive)
+            }
+            if let err = plugin.createError {
+                Text(err)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.negative)
+                    .lineLimit(2)
             }
 
             switch plugin.authState {
@@ -358,6 +419,112 @@ private struct ExpandedCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var calendarComposer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField(
+                    "Event title",
+                    text: Binding(
+                        get: { plugin.eventDraft.title },
+                        set: { plugin.eventDraft.title = $0 }
+                    )
+                )
+                .textFieldStyle(.plain)
+                .font(NotchTheme.body.weight(.semibold))
+                .foregroundStyle(NotchTheme.textPrimary)
+                .onSubmit { _ = plugin.createEventFromDraft() }
+
+                Button {
+                    _ = plugin.createEventFromDraft()
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            plugin.eventDraft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? NotchTheme.textQuaternary
+                                : NotchTheme.positive
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(plugin.eventDraft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Create event")
+            }
+
+            HStack(spacing: 6) {
+                durationChip(15)
+                durationChip(30)
+                durationChip(60)
+                durationChip(90)
+                Button {
+                    plugin.eventDraft.allDay.toggle()
+                } label: {
+                    NotchChipLabel(title: "All day", systemImage: "sun.max", active: plugin.eventDraft.allDay)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                startChip("In 15m") {
+                    plugin.eventDraft.start = Date().addingTimeInterval(15 * 60)
+                }
+                startChip("In 1h") {
+                    plugin.eventDraft.start = Date().addingTimeInterval(3600)
+                }
+                startChip("Tomorrow 9am") {
+                    let cal = Calendar.current
+                    let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    var comps = cal.dateComponents([.year, .month, .day], from: tomorrow)
+                    comps.hour = 9
+                    comps.minute = 0
+                    plugin.eventDraft.start = cal.date(from: comps) ?? tomorrow
+                }
+                Spacer(minLength: 0)
+            }
+
+            TextField(
+                "Location (optional)",
+                text: Binding(
+                    get: { plugin.eventDraft.location },
+                    set: { plugin.eventDraft.location = $0 }
+                )
+            )
+            .textFieldStyle(.plain)
+            .font(NotchTheme.micro)
+            .foregroundStyle(NotchTheme.textSecondary)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                )
+        )
+    }
+
+    private func durationChip(_ minutes: Int) -> some View {
+        Button {
+            plugin.eventDraft.durationMinutes = minutes
+            plugin.eventDraft.allDay = false
+        } label: {
+            NotchChipLabel(
+                title: minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m",
+                active: !plugin.eventDraft.allDay && plugin.eventDraft.durationMinutes == minutes
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func startChip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            NotchChipLabel(title: title, systemImage: "clock")
+        }
+        .buttonStyle(.plain)
     }
 
     private struct DayGroup {

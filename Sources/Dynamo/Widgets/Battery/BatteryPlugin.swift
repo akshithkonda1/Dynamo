@@ -76,6 +76,11 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
         recomputeInsight()
     }
 
+    func setPowerMode(_ mode: DynamoPowerMode) {
+        _ = power.setMode(mode)
+        recomputeInsight()
+    }
+
     func setAutoLowPower(_ enabled: Bool) {
         power.autoEnableEnabled = enabled
     }
@@ -83,6 +88,7 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     var isLowPowerModeEnabled: Bool { power.isLowPowerModeEnabled }
     var autoLowPowerEnabled: Bool { power.autoEnableEnabled }
     var autoLowPowerThreshold: Int { power.autoEnableAtPercent }
+    var activePowerMode: DynamoPowerMode { power.activeMode }
 
     // MARK: Ambient
 
@@ -259,35 +265,62 @@ private struct ExpandedBatteryView: View {
                     }
                 }
 
-                // Low Power Mode (writes only on explicit user toggle)
-                HStack(spacing: 8) {
-                    Button {
-                        plugin.toggleLowPowerMode()
-                    } label: {
-                        NotchChipLabel(
-                            title: power.isLowPowerModeEnabled ? "Low Power On" : "Low Power",
-                            systemImage: "leaf.fill",
-                            active: power.isLowPowerModeEnabled
-                        )
+                // Power modes — Low / Auto / High (writes on explicit tap)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Power Mode")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    HStack(spacing: 6) {
+                        ForEach(availableModes) { mode in
+                            Button {
+                                plugin.setPowerMode(mode)
+                            } label: {
+                                NotchChipLabel(
+                                    title: mode.title,
+                                    systemImage: mode.systemImage,
+                                    active: power.activeMode == mode
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help(mode.help)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
-                    .help("Toggle macOS Low Power Mode")
 
-                    Button {
-                        plugin.setAutoLowPower(!power.autoEnableEnabled)
-                    } label: {
-                        NotchChipLabel(
-                            title: power.autoEnableEnabled
-                                ? "Auto ≤\(power.autoEnableAtPercent)%"
-                                : "Auto off",
-                            systemImage: "bolt.badge.automatic",
-                            active: power.autoEnableEnabled
-                        )
+                    HStack(spacing: 8) {
+                        Button {
+                            plugin.setAutoLowPower(!power.autoEnableEnabled)
+                        } label: {
+                            NotchChipLabel(
+                                title: power.autoEnableEnabled
+                                    ? "Auto Low ≤\(power.autoEnableAtPercent)%"
+                                    : "Auto Low off",
+                                systemImage: "bolt.badge.automatic",
+                                active: power.autoEnableEnabled
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Automatically enable Low Power Mode when battery is low and unplugged")
+
+                        Button {
+                            power.openBatterySettings()
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .frame(width: 26, height: 26)
+                                .background(Circle().fill(NotchTheme.chipFill))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open Battery settings")
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
-                    .help("Automatically enable Low Power Mode when battery is low and unplugged")
-
-                    Spacer(minLength: 0)
+                    if let err = power.lastError {
+                        Text(err)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.caution)
+                            .lineLimit(2)
+                    }
                 }
 
                 Text(footerNote)
@@ -300,6 +333,13 @@ private struct ExpandedBatteryView: View {
         .onAppear {
             power.refresh()
         }
+    }
+
+    private var availableModes: [DynamoPowerMode] {
+        if power.supportsHighPowerMode || power.activeMode == .high {
+            return DynamoPowerMode.allCases
+        }
+        return [.low, .automatic]
     }
 
     private func metricChip(_ title: String, _ value: String) -> some View {
@@ -323,10 +363,14 @@ private struct ExpandedBatteryView: View {
     }
 
     private var statusLabel: String {
-        if power.isLowPowerModeEnabled { return "Low Power Mode" }
-        if snapshot.isCharging { return "Charging" }
-        if snapshot.isPluggedIn { return "Plugged in" }
-        return "On battery"
+        switch power.activeMode {
+        case .low: return "Low Power Mode"
+        case .high: return "High Power Mode"
+        case .automatic:
+            if snapshot.isCharging { return "Charging" }
+            if snapshot.isPluggedIn { return "Plugged in" }
+            return "On battery"
+        }
     }
 
     private func timeLabel(_ minutes: Int) -> String {
@@ -350,7 +394,7 @@ private struct ExpandedBatteryView: View {
 
     private var footerNote: String {
         if let tip = compactTip { return tip }
-        return "Read-only from this Mac’s battery (IOKit)."
+        return "Charge from IOKit · Power modes via pmset (may need Battery settings)."
     }
 
     private var compactTip: String? {

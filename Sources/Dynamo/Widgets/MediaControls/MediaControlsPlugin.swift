@@ -340,6 +340,7 @@ private struct AmbientMediaView: View {
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
     @ObservedObject private var volume = SystemVolumeController.shared
+    @ObservedObject private var amplify = MediaAmplifyController.shared
     /// Local scrub value while the user is dragging the timeline.
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
@@ -398,6 +399,8 @@ private struct ExpandedMediaView: View {
                         }
                         .padding(.vertical, 4)
                     }
+
+                    amplifySection
 
                     systemVolumeSection
 
@@ -571,6 +574,75 @@ private struct ExpandedMediaView: View {
         let m = total / 60
         let s = total % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    /// Louder / crisper / more visceral — system volume boost + Music EQ when available.
+    private var amplifySection: some View {
+        NotchCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Button {
+                        // Don't amplify while Meeting is ducking music.
+                        if FocusController.shared.isMeetingActive {
+                            return
+                        }
+                        amplify.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: amplify.isEnabled ? "waveform.circle.fill" : "waveform.circle")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(amplify.isEnabled ? NotchTheme.mediaGlow : NotchTheme.textTertiary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(amplify.isEnabled ? "Amplify On" : "Amplify")
+                                    .font(NotchTheme.micro.weight(.semibold))
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                Text(amplify.isEnabled ? amplify.statusLine : "Crisper · louder · more visceral")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(FocusController.shared.isMeetingActive
+                          ? "Unavailable in Meeting Mode"
+                          : "Boost system volume + Music EQ for a fuller sound")
+
+                    Spacer(minLength: 0)
+
+                    if amplify.isEnabled {
+                        Text("\(SystemVolumeController.shared.percent)%")
+                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NotchTheme.mediaGlow)
+                    }
+                }
+
+                if amplify.isEnabled {
+                    HStack(spacing: 5) {
+                        ForEach(MediaAmplifyProfile.allCases) { profile in
+                            Button {
+                                amplify.profile = profile
+                            } label: {
+                                NotchChipLabel(
+                                    title: profile.title,
+                                    systemImage: profile.systemImage,
+                                    active: amplify.profile == profile
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help(profile.subtitle)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+        .padding(.top, 2)
+        .onChange(of: plugin.info.sourceApp) { _ in
+            amplify.reapplyForSource()
+        }
     }
 
     /// Collapsible subsection under Media — system output volume (AppleScript UI %).

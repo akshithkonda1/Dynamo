@@ -11,7 +11,10 @@ final class CallSessionProbe {
         "com.microsoft.teams2": "Teams",
         "com.microsoft.SkypeForBusiness": "Skype",
         "com.webex.meetingmanager": "Webex",
-        "com.cisco.webexmeetingsapp": "Webex"
+        "com.cisco.webexmeetingsapp": "Webex",
+        "com.hnc.Discord": "Discord",
+        "com.tinyspeck.slackmacgap": "Slack",
+        "com.loom.desktop": "Loom"
     ]
 
     private(set) var activeCallAppName: String?
