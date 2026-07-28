@@ -48,13 +48,15 @@ All Dynamo-originated alerts go through **`PeekNotificationCenter`**:
 - External: `dynamo://peek?title=…&subtitle=…` or distributed notification `com.akshithkonda.Dynamo.externalPeek`
 - Meeting Mode quiets low/normal peeks; Dynamo does **not** hijack other apps’ Notification Center
 
-### Media Amplify
+### Media Amplify (Dolby-style intents, no volume fader)
 Transport-row icon button (same first-click path as play/pause):
 
 - **Green glow** = Amplify on · **Red glow** = off  
-- Profiles: Crisp / Balanced / Visceral (right-click)  
-- System volume boost + Apple Music EQ when Music is running  
-- Disabled while Meeting Mode is ducking volume  
+- **Presence** — dialogue/air clarity (Vocal Booster / Treble)  
+- **Cinema** — perceived loudness contour (Loudness)  
+- **Impact** — bass body & punch (Bass Booster / Electronic / Rock)  
+- **EQ only** — never raises system volume; re-applies on track/source change  
+- Right-click for profile; disabled while Meeting Mode is ducking volume  
 
 ### Adaptive island
 Expanded width scales with display aspect ratio (min ~540pt, max ~940pt). Active tray tab shows a short label; primary widgets sit left of Focus / tools.
@@ -244,7 +246,7 @@ Older phase detail lives in git history and [CHANGELOG.md](CHANGELOG.md).
 - **WeatherKit** needs paid team + Xcode-signed app  
 - **Power modes** may open Battery Settings if `pmset` is blocked  
 - **Sports** uses an undocumented free ESPN feed; polls while Dynamo runs  
-- **Amplify** is perceptual (volume + Music EQ), not a system-wide DSP driver  
+- **Amplify** is Dolby-like *intent* via Music EQ only (presence/cinema/impact) — not system volume, not a licensed Dolby stack. Spotify has no scriptable EQ.  
 - **Peek** delivers Dynamo’s alerts only — not other apps’ Notification Center  
 - Automated UI tests remain thin relative to surface area  
 
