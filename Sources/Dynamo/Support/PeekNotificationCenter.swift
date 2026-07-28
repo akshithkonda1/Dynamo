@@ -2,9 +2,9 @@ import AppKit
 import Combine
 import Foundation
 
-/// Dynamo’s **primary notification surface** — the notch Peek replaces system
-/// banners for everything Dynamo originates (calendar, reminders, focus,
-/// battery, media, external Shortcuts).
+/// Dynamo’s **primary notification surface** — the notch Peek is the delivery
+/// UI for Dynamo-originated alerts and (via `SystemNotificationMirror`) other
+/// apps’ Notification Center deliveries.
 ///
 /// Design goals:
 /// - Single funnel (no lost alerts when peeks overlap)
@@ -12,7 +12,7 @@ import Foundation
 /// - Urgency / media preemption rules
 /// - Light haptics on deliver
 /// - Recent history for Settings / debugging
-/// - Never posts `UNUserNotification` banners while Peek delivery is on
+/// - Dynamo does not post competing system banners for its own alerts
 @MainActor
 final class PeekNotificationCenter: ObservableObject {
     static let shared = PeekNotificationCenter()

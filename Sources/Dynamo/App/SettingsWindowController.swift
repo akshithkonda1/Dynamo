@@ -162,9 +162,20 @@ struct SettingsView: View {
 
             Text("Notifications → Peek")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Deliver Dynamo alerts as Peeks", isOn: Binding(
+            Toggle("Deliver all alerts as Peeks", isOn: Binding(
                 get: { PeekNotificationCenter.shared.isPrimaryDelivery },
-                set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
+                set: { newValue in
+                    PeekNotificationCenter.shared.isPrimaryDelivery = newValue
+                    if newValue {
+                        SystemNotificationMirror.shared.start()
+                    } else {
+                        SystemNotificationMirror.shared.stop()
+                    }
+                }
+            ))
+            Toggle("Mirror other apps’ notifications", isOn: Binding(
+                get: { SystemNotificationMirror.shared.isEnabled },
+                set: { SystemNotificationMirror.shared.isEnabled = $0 }
             ))
             Toggle("Peek haptics", isOn: Binding(
                 get: { PeekNotificationCenter.shared.hapticsEnabled },
@@ -174,10 +185,26 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Dynamo uses the notch Peek as its notification center — calendar, reminders, focus, battery, media, and external alerts queue here instead of system banners.")
+            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, weather, sports, health — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS still may show system banners unless you quiet them in Focus / Notifications settings.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(SystemNotificationMirror.shared.lastStatus)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(
+                    SystemNotificationMirror.shared.accessDenied
+                        ? Color.orange
+                        : Color.secondary
+                )
+                .lineLimit(2)
+            if SystemNotificationMirror.shared.accessDenied {
+                Button("Open Privacy → Full Disk Access") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
             if PeekNotificationCenter.shared.pendingCount > 0 {
                 Text("\(PeekNotificationCenter.shared.pendingCount) queued")
                     .font(.caption.monospacedDigit())
@@ -192,11 +219,11 @@ struct SettingsView: View {
 
             Divider()
 
-            Toggle("External Peek bridge", isOn: Binding(
+            Toggle("External Peek bridge (Shortcuts)", isOn: Binding(
                 get: { PeekBridge.shared.isEnabled },
                 set: { PeekBridge.shared.isEnabled = $0 }
             ))
-            Text("Allow Shortcuts/scripts via dynamo://peek?title=… or distributed notification com.akshithkonda.Dynamo.externalPeek.")
+            Text("Also accepts dynamo://peek?title=… and distributed notification com.akshithkonda.Dynamo.externalPeek for Shortcuts automations.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
