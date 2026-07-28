@@ -89,12 +89,11 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
         for (threshold, key, urgency) in stages {
             guard p <= threshold, !notifiedBatteryStages.contains(key) else { continue }
             notifiedBatteryStages.insert(key)
-            PeekNotificationCenter.shared.notify(
+            DynamoNotificationAPI.post(
                 title: p <= 10 ? "Battery critically low" : "Battery low",
                 subtitle: "\(p)% remaining" + (power.isLowPowerModeEnabled ? " · Low Power on" : ""),
                 systemImage: "battery.0",
                 urgency: urgency,
-                detail: power.isLowPowerModeEnabled ? "Power" : "Try Low Power mode",
                 category: "battery",
                 id: "battery|\(key)"
             )

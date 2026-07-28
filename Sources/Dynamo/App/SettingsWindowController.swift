@@ -223,10 +223,22 @@ struct SettingsView: View {
                 get: { PeekBridge.shared.isEnabled },
                 set: { PeekBridge.shared.isEnabled = $0 }
             ))
-            Text("Also accepts dynamo://peek?title=… and distributed notification com.akshithkonda.Dynamo.externalPeek for Shortcuts automations.")
+            Text("Notification API: dynamo://notify?title=…&subtitle=…&urgency=high · distributed com.akshithkonda.Dynamo.notify (legacy: …externalPeek / dynamo://peek).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Button("Send test Peek") {
+                DynamoNotificationAPI.post(
+                    title: "Dynamo",
+                    subtitle: "Notification API is working",
+                    detail: "Test",
+                    systemImage: "checkmark.seal.fill",
+                    urgency: .high,
+                    category: "test",
+                    id: "test|\(Date().timeIntervalSince1970)"
+                )
+            }
+            .controlSize(.small)
 
             Divider()
 
@@ -342,43 +354,80 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         SettingsSection(title: "Permissions") {
-            Text("Dynamo remembers the last status it saw and re-checks when you open Settings or return to the app. Grants are still stored by macOS — Dynamo never re-prompts once authorized.")
+            Text("Everything Dynamo may need from macOS. Core features work best when Calendar, Reminders, and Music control are granted. Optional items unlock Weather, Webcam, Meeting Listen, Amplify EQ, and system notification mirroring.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            ForEach(DynamoPermission.allCases, id: \.rawValue) { permission in
-                HStack(alignment: .top, spacing: 10) {
-                    Circle()
-                        .fill(statusColor(permissions.status(for: permission)))
-                        .frame(width: 8, height: 8)
-                        .padding(.top, 5)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(permission.displayName)
-                            .font(.body.weight(.medium))
-                        Text(permission.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(statusLabel(permissions.status(for: permission)))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    if permissions.status(for: permission) != .granted {
-                        Button("Open") {
-                            permissions.openSystemSettings(for: permission)
-                        }
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.vertical, 2)
+            Text("Core")
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 4)
+            ForEach(DynamoPermission.allCases.filter(\.isRequiredForCore)) { permission in
+                permissionRow(permission)
             }
 
-            Button("Refresh permissions") {
-                permissions.refreshFromSystem()
+            Text("Optional")
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 8)
+            ForEach(DynamoPermission.allCases.filter { !$0.isRequiredForCore }) { permission in
+                permissionRow(permission)
             }
-            .controlSize(.small)
+
+            HStack {
+                Button("Refresh permissions") {
+                    permissions.refreshFromSystem()
+                }
+                .controlSize(.small)
+                Spacer()
+                Text("\(DynamoPermission.allCases.filter { permissions.isGranted($0) }.count)/\(DynamoPermission.allCases.count) granted")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 6)
         }
+    }
+
+    private func permissionRow(_ permission: DynamoPermission) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: permission.systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(statusColor(permissions.status(for: permission)))
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(permission.displayName)
+                        .font(.body.weight(.medium))
+                    if permission.isRequiredForCore {
+                        Text("Core")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    }
+                }
+                Text(permission.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(statusLabel(permissions.status(for: permission)))
+                    .font(.caption2)
+                    .foregroundStyle(statusColor(permissions.status(for: permission)).opacity(0.9))
+            }
+            Spacer(minLength: 0)
+            if permissions.status(for: permission) != .granted {
+                Button("Open Settings") {
+                    permissions.openSystemSettings(for: permission)
+                }
+                .controlSize(.small)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 14))
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func statusColor(_ status: PermissionMemoryStatus) -> Color {
@@ -392,10 +441,10 @@ struct SettingsView: View {
 
     private func statusLabel(_ status: PermissionMemoryStatus) -> String {
         switch status {
-        case .granted: return "Granted (remembered)"
+        case .granted: return "Granted"
         case .denied: return "Denied — open System Settings to change"
-        case .notDetermined: return "Not asked yet"
-        case .unknown: return "Unknown (app may be closed)"
+        case .notDetermined: return "Not asked yet — use the feature once to prompt"
+        case .unknown: return "Unknown (app may be closed / not installed)"
         }
     }
 

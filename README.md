@@ -46,7 +46,7 @@ Alerts surface in the notch via **`PeekNotificationCenter`**:
 - **Other apps:** `SystemNotificationMirror` reads the local Notification Center store and mirrors new deliveries as Peeks (best-effort; may need **Full Disk Access**)
 - Queue + coalesce by id; media / critical peeks preempt
 - Haptics (optional critical sound)
-- External: `dynamo://peek?title=…` or `com.akshithkonda.Dynamo.externalPeek` (Shortcuts)
+- **Notification API:** `DynamoNotificationAPI.post(...)` · `dynamo://notify?title=…&urgency=high` · distributed `com.akshithkonda.Dynamo.notify` (legacy: `externalPeek` / `dynamo://peek`)
 - Meeting Mode quiets low/normal peeks
 - macOS may still show system banners unless you quiet them in Focus / Notifications settings — Dynamo **adds** Peek delivery; it cannot fully delete Apple’s banner UI without private APIs
 

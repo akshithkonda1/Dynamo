@@ -1,18 +1,19 @@
 import Combine
 import Foundation
 
-/// Opt-in critical peek channel for external tools (Shortcuts, scripts).
+/// Thin facade over `DynamoNotificationAPI` for external tools (Shortcuts, scripts).
 ///
-/// Post a distributed notification:
+/// Preferred:
 /// ```
-/// name: com.akshithkonda.Dynamo.externalPeek
-/// userInfo: title, subtitle (optional), critical (Bool, default true)
+/// name: com.akshithkonda.Dynamo.notify
+/// userInfo: title, subtitle, urgency, category, image
 /// ```
-/// Or open `dynamo://peek?title=...&subtitle=...`
+/// Legacy: `com.akshithkonda.Dynamo.externalPeek`  
+/// URL: `dynamo://notify?title=…` or `dynamo://peek?title=…`
 @MainActor
 final class PeekBridge: ObservableObject {
     static let shared = PeekBridge()
-    static let notificationName = Notification.Name("com.akshithkonda.Dynamo.externalPeek")
+    static let notificationName = DynamoNotificationAPI.legacyDistributedName
 
     private static let enabledKey = "dynamo.peekBridge.enabled"
 
@@ -20,12 +21,9 @@ final class PeekBridge: ObservableObject {
         didSet { UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey) }
     }
 
-    private var observer: NSObjectProtocol?
     private weak var registry: WidgetRegistry?
 
     private init() {
-        // On by default — Peek is Dynamo’s notification surface; external
-        // Shortcuts/scripts should land there without a hidden toggle.
         if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
             isEnabled = true
         } else {
@@ -35,64 +33,21 @@ final class PeekBridge: ObservableObject {
 
     func attach(registry: WidgetRegistry) {
         self.registry = registry
-        observer = DistributedNotificationCenter.default().addObserver(
-            forName: Self.notificationName,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            Task { @MainActor in
-                self?.handle(userInfo: note.userInfo as? [String: Any])
-            }
-        }
+        // Shared listener covers both modern + legacy distributed names.
+        DynamoNotificationAPI.installExternalListeners()
     }
 
     func teardown() {
-        if let observer {
-            DistributedNotificationCenter.default().removeObserver(observer)
-            self.observer = nil
-        }
+        DynamoNotificationAPI.removeExternalListeners()
     }
 
     func handle(userInfo: [String: Any]?) {
         guard isEnabled else { return }
-        let title = (userInfo?["title"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !title.isEmpty else { return }
-        let subtitle = (userInfo?["subtitle"] as? String) ?? ""
-        let critical: Bool
-        if let b = userInfo?["critical"] as? Bool {
-            critical = b
-        } else if let s = userInfo?["critical"] as? String {
-            critical = (s as NSString).boolValue
-        } else {
-            critical = true
-        }
-        // Route through PeekNotificationCenter so external peeks share the
-        // same queue / haptics / history as first-party Dynamo alerts.
-        PeekNotificationCenter.shared.deliver(
-            NotchSneakPeek(
-                systemImage: critical ? "bell.badge.fill" : "bell",
-                title: title,
-                subtitle: subtitle,
-                urgency: critical ? .critical : .normal,
-                detail: "External"
-            ),
-            id: "external|\(title)",
-            category: "external"
-        )
+        _ = DynamoNotificationAPI.postFromUserInfo(userInfo, defaultCategory: "external")
     }
 
     func handleURL(_ url: URL) {
-        guard url.scheme?.lowercased() == "dynamo" else { return }
-        guard url.host?.lowercased() == "peek" else { return }
-        var info: [String: Any] = [:]
-        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
-            for item in items {
-                if let v = item.value {
-                    info[item.name] = v
-                }
-            }
-        }
-        handle(userInfo: info)
+        guard isEnabled else { return }
+        _ = DynamoNotificationAPI.postFromURL(url)
     }
 }

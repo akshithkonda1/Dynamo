@@ -4,37 +4,87 @@ import AVFoundation
 import CoreLocation
 import EventKit
 import Foundation
+import Speech
 
-/// High-level permission Dynamo cares about. OS TCC still owns the real grant;
-/// this store **remembers** last-known status so UI doesn't reset every launch,
-/// and re-probes the system when the app becomes active.
-enum DynamoPermission: String, CaseIterable, Codable {
+/// Every macOS permission Dynamo may need. OS TCC still owns the real grant;
+/// this store remembers last-known status and re-probes without re-prompting.
+enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
+    case calendar
+    case reminders
     case camera
+    case microphone
+    case speech
     case location
     case fullDiskAccess
-    case reminders
+    case notificationMirror
     case automationMusic
     case automationSpotify
 
+    var id: String { rawValue }
+
     var displayName: String {
         switch self {
+        case .calendar: return "Calendar"
+        case .reminders: return "Reminders"
         case .camera: return "Camera"
+        case .microphone: return "Microphone"
+        case .speech: return "Speech Recognition"
         case .location: return "Location"
         case .fullDiskAccess: return "Full Disk Access"
-        case .reminders: return "Reminders"
+        case .notificationMirror: return "Notification Center (mirror)"
         case .automationMusic: return "Control Music"
         case .automationSpotify: return "Control Spotify"
         }
     }
 
+    /// Short “used for” line in Settings.
     var detail: String {
         switch self {
-        case .camera: return "Webcam mirror"
-        case .location: return "Weather (automatic)"
-        case .fullDiskAccess: return "Calendar local database"
-        case .reminders: return "Due reminders peek in Calendar"
-        case .automationMusic: return "Play/pause, skip, cover art, playlists"
-        case .automationSpotify: return "Play/pause, skip, cover art"
+        case .calendar:
+            return "Show events, create events, Meeting context, True Focus agenda"
+        case .reminders:
+            return "Checklist: list, create, complete, delete, due peeks"
+        case .camera:
+            return "Webcam mirror (only while the Webcam tab is open)"
+        case .microphone:
+            return "Meeting Listen (speech notes) and live music equalizer analysis"
+        case .speech:
+            return "Meeting Mode notetaker (on-device preferred)"
+        case .location:
+            return "Weather automatic place (or set a city in Settings instead)"
+        case .fullDiskAccess:
+            return "Optional Calendar local DB fallback + broader file access"
+        case .notificationMirror:
+            return "Mirror other apps’ Notification Center alerts into Peek"
+        case .automationMusic:
+            return "Play/pause, skip, cover art, playlists, Amplify EQ"
+        case .automationSpotify:
+            return "Play/pause, skip, cover art"
+        }
+    }
+
+    /// Whether the feature is core vs optional.
+    var isRequiredForCore: Bool {
+        switch self {
+        case .calendar, .reminders, .automationMusic:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .calendar: return "calendar"
+        case .reminders: return "checklist"
+        case .camera: return "web.camera"
+        case .microphone: return "mic.fill"
+        case .speech: return "waveform.badge.mic"
+        case .location: return "location.fill"
+        case .fullDiskAccess: return "internaldrive"
+        case .notificationMirror: return "bell.badge"
+        case .automationMusic: return "music.note"
+        case .automationSpotify: return "music.note.list"
         }
     }
 }
@@ -53,7 +103,7 @@ final class PermissionsStore: ObservableObject {
 
     @Published private(set) var statuses: [DynamoPermission: PermissionMemoryStatus] = [:]
 
-    private static let defaultsKey = "dynamo.permissions.memory.v1"
+    private static let defaultsKey = "dynamo.permissions.memory.v2"
     private var didLoad = false
 
     private init() {
@@ -71,13 +121,11 @@ final class PermissionsStore: ObservableObject {
         status(for: permission) == .granted
     }
 
-    /// Call after a successful privileged operation so we remember it immediately.
     func recordGranted(_ permission: DynamoPermission) {
         update(permission, to: .granted)
         persist()
     }
 
-    /// Call after an explicit denial / failed privileged operation.
     func recordDenied(_ permission: DynamoPermission) {
         update(permission, to: .denied)
         persist()
@@ -85,37 +133,58 @@ final class PermissionsStore: ObservableObject {
 
     /// Re-read OS state. Safe to call often (launch, become active, Settings open).
     func refreshFromSystem() {
+        update(.calendar, to: Self.probeCalendar())
+        update(.reminders, to: Self.probeReminders())
         update(.camera, to: Self.probeCamera())
+        update(.microphone, to: Self.probeMicrophone())
+        update(.speech, to: Self.probeSpeech())
         update(.location, to: Self.probeLocation())
         update(.fullDiskAccess, to: Self.probeFullDiskAccess())
-        update(.reminders, to: Self.probeReminders())
+        update(.notificationMirror, to: Self.probeNotificationMirror())
         update(.automationMusic, to: Self.probeAutomation(bundleID: "com.apple.Music"))
         update(.automationSpotify, to: Self.probeAutomation(bundleID: "com.spotify.client"))
         persist()
+        NotificationCenter.default.post(name: .dynamoPermissionsDidRefresh, object: nil)
     }
 
     func openSystemSettings(for permission: DynamoPermission) {
         let urls: [String]
         switch permission {
+        case .calendar:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars"
+            ]
+        case .reminders:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Reminders"
+            ]
         case .camera:
             urls = [
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Camera"
+            ]
+        case .microphone:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone"
+            ]
+        case .speech:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_SpeechRecognition"
             ]
         case .location:
             urls = [
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocationServices"
             ]
-        case .fullDiskAccess:
+        case .fullDiskAccess, .notificationMirror:
+            // Notification mirror needs the same Group Containers / FDA-class access.
             urls = [
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-            ]
-        case .reminders:
-            urls = [
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders",
-                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Reminders"
             ]
         case .automationMusic, .automationSpotify:
             urls = [
@@ -128,10 +197,66 @@ final class PermissionsStore: ObservableObject {
         }
     }
 
-    // MARK: - Probes
+    // MARK: - Probes (never prompt)
+
+    private static func probeCalendar() -> PermissionMemoryStatus {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(macOS 14.0, *) {
+            switch status {
+            case .fullAccess, .authorized, .writeOnly: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted: return .denied
+            @unknown default: return .unknown
+            }
+        } else {
+            switch status {
+            case .authorized: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted: return .denied
+            default: return .unknown
+            }
+        }
+    }
+
+    private static func probeReminders() -> PermissionMemoryStatus {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if #available(macOS 14.0, *) {
+            switch status {
+            case .fullAccess, .authorized, .writeOnly: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted: return .denied
+            @unknown default: return .unknown
+            }
+        } else {
+            switch status {
+            case .authorized: return .granted
+            case .notDetermined: return .notDetermined
+            case .denied, .restricted: return .denied
+            default: return .unknown
+            }
+        }
+    }
 
     private static func probeCamera() -> PermissionMemoryStatus {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .unknown
+        }
+    }
+
+    private static func probeMicrophone() -> PermissionMemoryStatus {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .unknown
+        }
+    }
+
+    private static func probeSpeech() -> PermissionMemoryStatus {
+        switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized: return .granted
         case .denied, .restricted: return .denied
         case .notDetermined: return .notDetermined
@@ -148,7 +273,6 @@ final class PermissionsStore: ObservableObject {
         case .notDetermined:
             return .notDetermined
         default:
-            // authorizedWhenInUse / legacy .authorized on some SDKs
             let raw = CLLocationManager().authorizationStatus.rawValue
             return raw >= 3 ? .granted : .unknown
         }
@@ -158,39 +282,37 @@ final class PermissionsStore: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let calendarDB = home
             .appendingPathComponent("Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb")
-
         let calOK = isEffectivelyReadable(calendarDB)
         let calExists = FileManager.default.fileExists(atPath: calendarDB.path)
-
         if calOK { return .granted }
+        // Usernoted readable often implies FDA-class access too.
+        if probeNotificationMirror() == .granted { return .granted }
         if calExists { return .denied }
         return .unknown
     }
 
-    /// Passive status read only — `EKEventStore.authorizationStatus(for:)`
-    /// never prompts; only `requestFullAccessToReminders()` /
-    /// `requestAccess(to:)` do, and those are only ever called from
-    /// `RemindersProvider.requestAccess()` (Checklist tab) in response
-    /// to explicit user action.
-    private static func probeReminders() -> PermissionMemoryStatus {
-        let status = EKEventStore.authorizationStatus(for: .reminder)
-        // Exhaustive for current SDKs (includes .fullAccess / .writeOnly on macOS 14+).
-        switch status {
-        case .fullAccess, .authorized:
-            return .granted
-        case .notDetermined:
-            return .notDetermined
-        case .denied, .restricted, .writeOnly:
-            return .denied
-        @unknown default:
-            return .unknown
+    private static func probeNotificationMirror() -> PermissionMemoryStatus {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let paths = [
+            home.appendingPathComponent(
+                "Library/Group Containers/group.com.apple.usernoted/db2/db"
+            ),
+            home.appendingPathComponent(
+                "Library/Group Containers/group.com.apple.usernoted/Library/Application Support/db2/db"
+            )
+        ]
+        var anyExists = false
+        for url in paths {
+            if FileManager.default.fileExists(atPath: url.path) {
+                anyExists = true
+                if isEffectivelyReadable(url) { return .granted }
+            }
         }
+        return anyExists ? .denied : .unknown
     }
 
-    /// True if we can open the file for reading (stronger than `isReadableFile`).
     private static func isEffectivelyReadable(_ url: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
-        // Try a real open — FDA denials fail here even when isReadableFile is true/false inconsistently.
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             return FileManager.default.isReadableFile(atPath: url.path)
         }
@@ -198,7 +320,6 @@ final class PermissionsStore: ObservableObject {
         return true
     }
 
-    /// Automation permission for controlling another app via Apple Events.
     private static func probeAutomation(bundleID: String) -> PermissionMemoryStatus {
         var address = AEAddressDesc()
         let createStatus = bundleID.withCString { cstr -> OSErr in
@@ -207,32 +328,23 @@ final class PermissionsStore: ObservableObject {
         guard createStatus == noErr else { return .unknown }
         defer { AEDisposeDesc(&address) }
 
-        // askUserIfNeeded: false — never pop a prompt during a background probe.
         let err = AEDeterminePermissionToAutomateTarget(
             &address,
             typeWildCard,
             typeWildCard,
             false
         )
-        // errAEEventNotPermitted = -1743, errAEEventWouldRequireUserConsent = -1744
         switch Int(err) {
-        case 0:
-            return .granted
-        case -1743:
-            return .denied
-        case -1744:
-            return .notDetermined
-        default:
-            // App not running / not installed often returns a generic error —
-            // keep last known rather than forcing denied if we never asked.
-            return .unknown
+        case 0: return .granted
+        case -1743: return .denied
+        case -1744: return .notDetermined
+        default: return .unknown
         }
     }
 
     // MARK: - Persistence
 
     private func update(_ permission: DynamoPermission, to status: PermissionMemoryStatus) {
-        // Don't clobber a remembered .granted with .unknown (e.g. Spotify not installed).
         if status == .unknown, statuses[permission] == .granted {
             return
         }
@@ -248,14 +360,19 @@ final class PermissionsStore: ObservableObject {
     private func load() {
         guard !didLoad else { return }
         didLoad = true
-        guard let data = UserDefaults.standard.data(forKey: Self.defaultsKey),
-              let snap = try? JSONDecoder().decode(Snapshot.self, from: data)
-        else { return }
-        for (key, raw) in snap.values {
-            guard let perm = DynamoPermission(rawValue: key),
-                  let status = PermissionMemoryStatus(rawValue: raw)
+        // Prefer v2; fall back to v1 keys that still match.
+        let keys = ["dynamo.permissions.memory.v2", "dynamo.permissions.memory.v1"]
+        for key in keys {
+            guard let data = UserDefaults.standard.data(forKey: key),
+                  let snap = try? JSONDecoder().decode(Snapshot.self, from: data)
             else { continue }
-            statuses[perm] = status
+            for (rawKey, raw) in snap.values {
+                guard let perm = DynamoPermission(rawValue: rawKey),
+                      let status = PermissionMemoryStatus(rawValue: raw)
+                else { continue }
+                statuses[perm] = status
+            }
+            break
         }
     }
 

@@ -148,16 +148,14 @@ final class SystemNotificationMirror: ObservableObject {
                 : (title.isEmpty ? body : body)
             let detail = title.isEmpty ? "Notification" : appName
 
-            PeekNotificationCenter.shared.deliver(
-                NotchSneakPeek(
-                    systemImage: Self.symbol(for: note.appIdentifier),
-                    title: peekTitle,
-                    subtitle: peekSubtitle,
-                    urgency: Self.urgency(for: note.appIdentifier),
-                    detail: detail
-                ),
-                id: "system|\(uuidKey)",
-                category: "system"
+            DynamoNotificationAPI.post(
+                title: peekTitle,
+                subtitle: peekSubtitle,
+                detail: detail,
+                systemImage: Self.symbol(for: note.appIdentifier),
+                urgency: Self.urgency(for: note.appIdentifier),
+                category: "system",
+                id: "system|\(uuidKey)"
             )
             mirroredCount &+= 1
         }
