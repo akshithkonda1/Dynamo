@@ -40,13 +40,15 @@ Registered in `AppDelegate.bootstrap()`:
 ## Highlights (0.5.x)
 
 ### Peek as notification center
-All Dynamo-originated alerts go through **`PeekNotificationCenter`**:
+Alerts surface in the notch via **`PeekNotificationCenter`**:
 
+- **Dynamo sources:** calendar, reminders, battery, focus/meeting, media, weather, sports, health, clipboard
+- **Other apps:** `SystemNotificationMirror` reads the local Notification Center store and mirrors new deliveries as Peeks (best-effort; may need **Full Disk Access**)
 - Queue + coalesce by id; media / critical peeks preempt
 - Haptics (optional critical sound)
-- Calendar lead times, reminder due, battery low, Focus/Meeting offers, media track changes
-- External: `dynamo://peek?title=…&subtitle=…` or distributed notification `com.akshithkonda.Dynamo.externalPeek`
-- Meeting Mode quiets low/normal peeks; Dynamo does **not** hijack other apps’ Notification Center
+- External: `dynamo://peek?title=…` or `com.akshithkonda.Dynamo.externalPeek` (Shortcuts)
+- Meeting Mode quiets low/normal peeks
+- macOS may still show system banners unless you quiet them in Focus / Notifications settings — Dynamo **adds** Peek delivery; it cannot fully delete Apple’s banner UI without private APIs
 
 ### Media Amplify (Dolby-style intents, no volume fader)
 Transport-row icon button (same first-click path as play/pause):
