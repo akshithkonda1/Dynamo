@@ -609,8 +609,8 @@ private struct ExpandedMediaView: View {
             inMeeting
                 ? "Amplify pauses in Meeting Mode"
                 : (on
-                   ? "Amplify on · \(amplify.profile.title) (click to turn off)"
-                   : "Amplify off · click to turn on")
+                   ? "Amplify on · \(amplify.profile.title) (EQ only, volume unchanged)"
+                   : "Amplify off · click for EQ punch without raising volume")
         )
         .accessibilityLabel(on ? "Amplify on" : "Amplify off")
         .accessibilityAddTraits(.isButton)

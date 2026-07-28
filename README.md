@@ -53,7 +53,7 @@ Transport-row icon button (same first-click path as play/pause):
 
 - **Green glow** = Amplify on · **Red glow** = off  
 - Profiles: Crisp / Balanced / Visceral (right-click)  
-- System volume boost + Apple Music EQ when Music is running  
+- **EQ only** — never raises system volume; uses Music EQ presets (Loudness / Treble Booster / Rock)  
 - Disabled while Meeting Mode is ducking volume  
 
 ### Adaptive island
@@ -244,7 +244,7 @@ Older phase detail lives in git history and [CHANGELOG.md](CHANGELOG.md).
 - **WeatherKit** needs paid team + Xcode-signed app  
 - **Power modes** may open Battery Settings if `pmset` is blocked  
 - **Sports** uses an undocumented free ESPN feed; polls while Dynamo runs  
-- **Amplify** is perceptual (volume + Music EQ), not a system-wide DSP driver  
+- **Amplify** is EQ-only (Music presets); it does not move the volume keys. Spotify has no scriptable EQ.  
 - **Peek** delivers Dynamo’s alerts only — not other apps’ Notification Center  
 - Automated UI tests remain thin relative to surface area  
 

@@ -15,7 +15,7 @@ Not yet general App Store / wide beta without the HOLD items below.
 | Single-instance daily driver | ✅ | `dist/Dynamo.app` wins; strays terminated |
 | Notch expand/collapse + tray | ✅ | Adaptive width, labeled active tab |
 | Media transport + ambient EQ | ✅ | Process tap + peek aurora |
-| Media Amplify | ✅ | Volume boost + Music EQ profiles |
+| Media Amplify | ✅ | EQ-only (no system volume change); Music presets |
 | Calendar read + create | ✅ | EventKit full access + in-notch composer |
 | Reminders R/W | ✅ | Create / complete / delete + due peeks |
 | Battery metrics + power modes | ✅ | IOKit + pmset Low/Auto/High |
@@ -48,7 +48,7 @@ Not yet general App Store / wide beta without the HOLD items below.
 1. Launch only `dist/Dynamo.app` — one process.
 2. Expand notch — tray labels + width OK.
 3. Media play → ambient + skip peek (aurora).
-4. Amplify On → volume lifts; Off restores.
+4. Amplify On → Music EQ applies; system volume % unchanged; Off restores prior EQ.
 5. Calendar **New** → create event → appears in list.
 6. Checklist add reminder with due 1h → complete works.
 7. Battery Low/Auto chips change mode (or open Settings).
