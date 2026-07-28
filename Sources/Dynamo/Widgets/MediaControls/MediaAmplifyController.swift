@@ -1,57 +1,85 @@
 import AppKit
 import Foundation
 
-/// Amplify profile — perceived punch via **tone / EQ only** (never system volume).
+/// Dolby-like **intent** profiles — reshape how music *hits*, not the volume fader.
+///
+/// Maps to perceptual stages similar to consumer Dolby “enhancement” modes:
+/// presence (dialogue/air), cinema (perceived loudness contour), impact (body/bass).
+/// Implementation is EQ-only on Apple Music (no system volume, no virtual driver).
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
-    case crisp
-    case balanced
-    case visceral
+    /// Dialogue / air / vocal presence (clarity without louder fader).
+    case presence
+    /// Cinema-style perceived loudness contour (lows + highs; soft mid scoop).
+    case cinema
+    /// Bass weight + physical impact (energy without maxing volume keys).
+    case impact
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .crisp: return "Crisp"
-        case .balanced: return "Balanced"
-        case .visceral: return "Visceral"
+        case .presence: return "Presence"
+        case .cinema: return "Cinema"
+        case .impact: return "Impact"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .crisp: return "Treble clarity — no volume change"
-        case .balanced: return "Loudness curve — no volume change"
-        case .visceral: return "Body & impact — no volume change"
+        case .presence: return "Dialogue clarity & air — Dolby-like presence"
+        case .cinema: return "Perceived loudness contour — not the volume keys"
+        case .impact: return "Bass body & punch — dynamics feel, not fader"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .crisp: return "waveform.path"
-        case .balanced: return "hifispeaker.fill"
-        case .visceral: return "speaker.wave.3.fill"
+        case .presence: return "ear"
+        case .cinema: return "film"
+        case .impact: return "waveform.path.ecg"
         }
     }
 
-    /// Apple Music built-in EQ preset (shapes tone without moving the volume keys).
-    var musicEQPreset: String {
+    /// Preferred Music EQ presets in order (first available wins).
+    /// Built-in names only — no custom band API on Music.
+    var musicEQPresetCandidates: [String] {
         switch self {
-        case .crisp: return "Treble Booster"
-        case .balanced: return "Loudness"
-        case .visceral: return "Rock"
+        case .presence:
+            // Vocal/dialogue forward + treble air (clarity stage).
+            return ["Vocal Booster", "Treble Booster", "Pop"]
+        case .cinema:
+            // Equal-loudness style contour — classic “feels louder” without gain.
+            return ["Loudness", "Classical", "Flat"]
+        case .impact:
+            // Low-end weight + energy — physical “hit.”
+            return ["Bass Booster", "Electronic", "Rock", "Hip-Hop"]
+        }
+    }
+
+    /// Migrate pre-Dolby profile raw values.
+    static func resolved(fromStored raw: String?) -> MediaAmplifyProfile {
+        guard let raw else { return .cinema }
+        if let p = MediaAmplifyProfile(rawValue: raw) { return p }
+        switch raw {
+        case "crisp": return .presence
+        case "balanced": return .cinema
+        case "visceral": return .impact
+        default: return .cinema
         }
     }
 }
 
-/// Makes playback feel fuller / crisper **without raising system volume**.
+/// Dolby-inspired Amplify: **tone + perceived impact via EQ only**.
 ///
-/// Strategy (on-device, no DSP driver):
-/// 1. Never call `SystemVolumeController` setPercent / mute for Amplify.
-/// 2. When **Music** is running, enable a built-in EQ preset for the profile
-///    (Loudness / Treble Booster / Rock) — perceived impact without UI volume.
-/// 3. Restore the previous Music EQ state on disable.
-/// 4. Spotify / other players have no scriptable EQ; Amplify stays “armed” and
-///    re-applies as soon as Music is active.
+/// Never touches system volume. Pipeline concept:
+/// 1. Capture prior Music EQ baseline once per enable session.
+/// 2. Apply intent-matched built-in Music EQ preset (with fallbacks).
+/// 3. Re-apply on source / track changes so skips stay consistent.
+/// 4. Restore baseline on disable.
+///
+/// Spotify and other apps have no scriptable EQ — Amplify stays armed and
+/// re-applies when Music is available. True multiband dynamics would need a
+/// virtual audio device; this is the honest on-device path without drivers.
 @MainActor
 final class MediaAmplifyController: ObservableObject {
     static let shared = MediaAmplifyController()
@@ -60,8 +88,8 @@ final class MediaAmplifyController: ObservableObject {
     private static let profileKey = "dynamo.media.amplify.profile"
     private static let savedEQKey = "dynamo.media.amplify.savedEQ"
     private static let savedPresetKey = "dynamo.media.amplify.savedPreset"
-    /// Legacy key from volume-boost Amplify — cleared so we never re-apply old volume.
     private static let legacySavedVolumeKey = "dynamo.media.amplify.savedVolume"
+    private static let activePresetKey = "dynamo.media.amplify.activePreset"
 
     @Published var isEnabled: Bool {
         didSet {
@@ -85,36 +113,55 @@ final class MediaAmplifyController: ObservableObject {
 
     @Published private(set) var statusLine: String = "Off"
     @Published private(set) var lastError: String?
+    @Published private(set) var activePresetName: String?
 
     private var didCaptureBaseline = false
+    private var lastAppliedTrackKey: String = ""
 
     private init() {
-        // Drop any leftover volume baseline from older Amplify builds.
+        // Never re-apply old volume-boost state.
         UserDefaults.standard.removeObject(forKey: Self.legacySavedVolumeKey)
 
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
-        if let raw = UserDefaults.standard.string(forKey: Self.profileKey),
-           let p = MediaAmplifyProfile(rawValue: raw) {
-            profile = p
-        } else {
-            profile = .visceral
-        }
-        statusLine = isEnabled ? "\(profile.title) · EQ" : "Off"
+        profile = MediaAmplifyProfile.resolved(
+            fromStored: UserDefaults.standard.string(forKey: Self.profileKey)
+        )
+        activePresetName = UserDefaults.standard.string(forKey: Self.activePresetKey)
+        statusLine = isEnabled ? statusForEnabled() : "Off"
         if isEnabled {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
                 self?.apply(reason: "launch")
             }
         }
     }
 
-    /// Call when now-playing source changes so Music EQ can re-attach.
+    /// Source app changed (Music ↔ Spotify).
     func reapplyForSource() {
         guard isEnabled else { return }
+        lastAppliedTrackKey = ""
         apply(reason: "source")
+    }
+
+    /// Track changed — re-assert EQ so skips don’t drop the contour.
+    func reapplyForTrack(title: String, artist: String) {
+        guard isEnabled else { return }
+        let key = "\(title)\u{1}\(artist)"
+        guard key != lastAppliedTrackKey else { return }
+        lastAppliedTrackKey = key
+        apply(reason: "track")
     }
 
     func toggle() {
         isEnabled.toggle()
+    }
+
+    func cycleProfile() {
+        let all = MediaAmplifyProfile.allCases
+        guard let idx = all.firstIndex(of: profile) else {
+            profile = .cinema
+            return
+        }
+        profile = all[(idx + 1) % all.count]
     }
 
     // MARK: - Apply / Restore
@@ -123,24 +170,28 @@ final class MediaAmplifyController: ObservableObject {
         lastError = nil
         captureBaselineIfNeeded()
 
-        let musicRunning = Self.isMusicRunning()
-        if musicRunning {
-            let ok = applyMusicEQ(enabled: true, preset: profile.musicEQPreset)
-            if ok {
-                statusLine = "\(profile.title) · EQ"
-                lastError = nil
-            } else {
-                statusLine = "\(profile.title) · EQ pending"
-                lastError = "Couldn’t set Music EQ — open Music once"
-            }
-        } else {
-            // Armed without touching volume; EQ applies when Music is the player.
+        guard Self.isMusicRunning() else {
+            activePresetName = nil
             statusLine = "\(profile.title) · open Music for EQ"
+            #if DEBUG
+            print("[MediaAmplify] \(reason): armed, Music not running")
+            #endif
+            return
+        }
+
+        if let preset = applyMusicEQWithFallbacks(profile.musicEQPresetCandidates) {
+            activePresetName = preset
+            UserDefaults.standard.set(preset, forKey: Self.activePresetKey)
+            statusLine = "\(profile.title) · \(preset)"
             lastError = nil
+        } else {
+            activePresetName = nil
+            statusLine = "\(profile.title) · EQ pending"
+            lastError = "Couldn’t set Music EQ — allow Automation for Music"
         }
 
         #if DEBUG
-        print("[MediaAmplify] apply \(reason) → \(statusLine) (volume untouched)")
+        print("[MediaAmplify] \(reason) → \(statusLine) (volume untouched)")
         #endif
     }
 
@@ -154,10 +205,18 @@ final class MediaAmplifyController: ObservableObject {
                 _ = applyMusicEQ(enabled: false, preset: nil)
             }
         }
-
         clearBaseline()
+        activePresetName = nil
+        lastAppliedTrackKey = ""
         statusLine = "Off"
         lastError = nil
+    }
+
+    private func statusForEnabled() -> String {
+        if let activePresetName {
+            return "\(profile.title) · \(activePresetName)"
+        }
+        return "\(profile.title) · EQ"
     }
 
     private func captureBaselineIfNeeded() {
@@ -174,9 +233,10 @@ final class MediaAmplifyController: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.savedEQKey)
         UserDefaults.standard.removeObject(forKey: Self.savedPresetKey)
         UserDefaults.standard.removeObject(forKey: Self.legacySavedVolumeKey)
+        UserDefaults.standard.removeObject(forKey: Self.activePresetKey)
     }
 
-    // MARK: - Music EQ (AppleScript only — no volume)
+    // MARK: - Music EQ
 
     private struct MusicEQState {
         var enabled: Bool
@@ -211,6 +271,29 @@ final class MediaAmplifyController: ObservableObject {
         return MusicEQState(enabled: enabled, preset: preset)
     }
 
+    /// Try each candidate preset; return the one that stuck (or first that returned ok).
+    private func applyMusicEQWithFallbacks(_ candidates: [String]) -> String? {
+        for name in candidates {
+            if applyMusicEQ(enabled: true, preset: name) {
+                // Verify when possible.
+                if let state = Self.readMusicEQState(), state.enabled {
+                    if state.preset.isEmpty || state.preset.localizedCaseInsensitiveContains(name)
+                        || name.localizedCaseInsensitiveContains(state.preset) {
+                        return state.preset.isEmpty ? name : state.preset
+                    }
+                    // EQ on but different name reported — still count as success.
+                    if !state.preset.isEmpty { return state.preset }
+                }
+                return name
+            }
+        }
+        // Last resort: enable EQ without preset change.
+        if applyMusicEQ(enabled: true, preset: nil) {
+            return Self.readMusicEQState()?.preset.nilIfEmpty ?? "EQ on"
+        }
+        return nil
+    }
+
     @discardableResult
     private func applyMusicEQ(enabled: Bool, preset: String?) -> Bool {
         guard Self.isMusicRunning() else { return false }
@@ -220,8 +303,10 @@ final class MediaAmplifyController: ObservableObject {
             presetLine = """
             try
                 set current EQ preset to EQ preset "\(preset.appleScriptEscaped)"
+                set eq enabled to true
+            on error
+                set eq enabled to true
             end try
-            set eq enabled to true
             """
         } else if enabled {
             presetLine = "set eq enabled to true"
@@ -258,4 +343,6 @@ private extension String {
         replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
+
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

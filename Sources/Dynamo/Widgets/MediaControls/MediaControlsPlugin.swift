@@ -609,10 +609,10 @@ private struct ExpandedMediaView: View {
             inMeeting
                 ? "Amplify pauses in Meeting Mode"
                 : (on
-                   ? "Amplify on · \(amplify.profile.title) (EQ only, volume unchanged)"
-                   : "Amplify off · click for EQ punch without raising volume")
+                   ? "Amplify \(amplify.profile.title) — shapes tone, not volume\(amplify.activePresetName.map { " · \($0)" } ?? "")"
+                   : "Amplify off — Dolby-style presence/cinema/impact via EQ only")
         )
-        .accessibilityLabel(on ? "Amplify on" : "Amplify off")
+        .accessibilityLabel(on ? "Amplify \(amplify.profile.title) on" : "Amplify off")
         .accessibilityAddTraits(.isButton)
         .contextMenu {
             ForEach(MediaAmplifyProfile.allCases) { profile in
@@ -623,15 +623,25 @@ private struct ExpandedMediaView: View {
                     }
                 } label: {
                     if amplify.profile == profile {
-                        Label(profile.title, systemImage: "checkmark")
+                        Label("\(profile.title) — \(profile.subtitle)", systemImage: "checkmark")
                     } else {
-                        Text(profile.title)
+                        Text("\(profile.title) — \(profile.subtitle)")
                     }
+                }
+            }
+            Divider()
+            Button("Cycle profile") {
+                amplify.cycleProfile()
+                if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                    amplify.isEnabled = true
                 }
             }
         }
         .onChange(of: plugin.info.sourceApp) { _ in
             amplify.reapplyForSource()
+        }
+        .onChange(of: plugin.info.title) { _ in
+            amplify.reapplyForTrack(title: plugin.info.title, artist: plugin.info.artist)
         }
     }
 
