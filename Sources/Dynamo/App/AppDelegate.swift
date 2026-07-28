@@ -88,10 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Peek is Dynamo’s primary notification surface (queue + haptics + history).
         PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
         PeekBridge.shared.attach(registry: registry)
+        DynamoNotificationAPI.installExternalListeners()
         // Mirror other apps’ Notification Center deliveries into Peeks (best-effort).
         if PeekNotificationCenter.shared.isPrimaryDelivery {
             SystemNotificationMirror.shared.start()
         }
+        PermissionsStore.shared.refreshFromSystem()
         FocusController.shared.emitPeek = { peek in
             PeekNotificationCenter.shared.deliver(
                 peek,
