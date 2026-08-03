@@ -361,8 +361,13 @@ private struct ExpandedMediaView: View {
     var body: some View {
         GeometryReader { geo in
             let artSize: CGFloat = geo.size.width >= 620 ? 128 : (geo.size.width >= 520 ? 116 : 104)
-            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+            // Dynamic transport chrome — scales with island width.
+            let playD: CGFloat = geo.size.width >= 600 ? 52 : (geo.size.width >= 520 ? 48 : 44)
+            let sideD: CGFloat = geo.size.width >= 600 ? 40 : 36
+            let auxD: CGFloat = geo.size.width >= 600 ? 34 : 32
+            HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
                 artwork(size: artSize)
+                    .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 6) {
                     header
@@ -401,6 +406,10 @@ private struct ExpandedMediaView: View {
                         .padding(.vertical, 4)
                     }
 
+                    // Transport sits under scrubber (not bottom of column).
+                    transportRow(playDiameter: playD, sideDiameter: sideD, auxDiameter: auxD)
+                        .padding(.top, 6)
+
                     systemVolumeSection
 
                     if hasTrack {
@@ -412,12 +421,11 @@ private struct ExpandedMediaView: View {
                         QueuePeekView(tracks: plugin.info.upcomingTracks)
                     }
 
-                    Spacer(minLength: 2)
-                    transportRow
+                    Spacer(minLength: 0)
                 }
                 Spacer(minLength: 0)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .onAppear {
@@ -576,8 +584,7 @@ private struct ExpandedMediaView: View {
     }
 
     /// Amplify icon button — **green glow when on**, **red glow when off**.
-    /// Real `Button` + notch hit target (Menu labels eat first-click on the
-    /// nonactivating notch panel).
+    /// Plain Button + always-visible circle (no Menu — first-click reliable).
     private var amplifyIconButton: some View {
         let on = amplify.isEnabled
         let inMeeting = FocusController.shared.isMeetingActive
@@ -589,20 +596,19 @@ private struct ExpandedMediaView: View {
             amplify.toggle()
         } label: {
             Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(glow)
                 .shadow(color: glow.opacity(0.95), radius: on ? 7 : 5)
-                .shadow(color: glow.opacity(0.5), radius: on ? 12 : 8)
-                .frame(width: 34, height: 34)
+                .shadow(color: glow.opacity(0.45), radius: on ? 12 : 8)
+                .frame(width: 36, height: 36)
                 .background(
                     Circle()
-                        .fill(glow.opacity(on ? 0.22 : 0.16))
-                        .frame(width: 34, height: 34)
+                        .fill(glow.opacity(on ? 0.20 : 0.14))
+                        .overlay(Circle().strokeBorder(glow.opacity(0.35), lineWidth: 0.6))
                 )
                 .contentShape(Circle())
         }
-        // Same press path as play/pause — first click always fires.
-        .buttonStyle(.notchIcon(diameter: 34, prominent: on))
+        .buttonStyle(.plain)
         .disabled(inMeeting)
         .opacity(inMeeting ? 0.4 : 1)
         .help(
@@ -817,77 +823,102 @@ private struct ExpandedMediaView: View {
         .onTapGesture { plugin.openConnectedApp() }
     }
 
-    private var transportRow: some View {
-        HStack(spacing: 8) {
-            transportButton(
-                "shuffle",
-                accessibility: "Shuffle",
-                size: 12,
-                diameter: 34,
-                prominent: plugin.info.isShuffling,
-                activeTint: plugin.info.isShuffling
-            ) { plugin.toggleShuffle() }
+    private func transportRow(
+        playDiameter: CGFloat,
+        sideDiameter: CGFloat,
+        auxDiameter: CGFloat
+    ) -> some View {
+        let playIcon: CGFloat = playDiameter * 0.38
+        let sideIcon: CGFloat = sideDiameter * 0.38
+        let auxIcon: CGFloat = auxDiameter * 0.36
+        return HStack(spacing: 0) {
+            // Centered primary cluster
+            HStack(spacing: 8) {
+                transportButton(
+                    "shuffle",
+                    accessibility: "Shuffle",
+                    size: auxIcon,
+                    diameter: auxDiameter,
+                    role: plugin.info.isShuffling ? .active : .secondary
+                ) { plugin.toggleShuffle() }
 
-            transportButton(
-                "backward.fill",
-                accessibility: "Previous",
-                size: 15,
-                diameter: 40
-            ) { plugin.previousTrack() }
+                transportButton(
+                    "backward.fill",
+                    accessibility: "Previous",
+                    size: sideIcon,
+                    diameter: sideDiameter,
+                    role: .secondary
+                ) { plugin.previousTrack() }
 
-            transportButton(
-                plugin.info.isPlaying ? "pause.fill" : "play.fill",
-                accessibility: plugin.info.isPlaying ? "Pause" : "Play",
-                size: 18,
-                diameter: 48,
-                prominent: true
-            ) { plugin.togglePlayPause() }
+                transportButton(
+                    plugin.info.isPlaying ? "pause.fill" : "play.fill",
+                    accessibility: plugin.info.isPlaying ? "Pause" : "Play",
+                    size: playIcon,
+                    diameter: playDiameter,
+                    role: .play
+                ) { plugin.togglePlayPause() }
 
-            transportButton(
-                "forward.fill",
-                accessibility: "Next",
-                size: 15,
-                diameter: 40
-            ) { plugin.nextTrack() }
+                transportButton(
+                    "forward.fill",
+                    accessibility: "Next",
+                    size: sideIcon,
+                    diameter: sideDiameter,
+                    role: .secondary
+                ) { plugin.nextTrack() }
 
-            transportButton(
-                plugin.info.repeatMode == .one ? "repeat.1" : "repeat",
-                accessibility: "Repeat",
-                size: 12,
-                diameter: 34,
-                prominent: plugin.info.repeatMode != .none,
-                activeTint: plugin.info.repeatMode != .none
-            ) { plugin.toggleRepeat() }
-
-            Spacer(minLength: 4)
-
-            amplifyIconButton
-
-            // Like / Add to Library — only when MusicKit has a catalog ID
-            Button {
-                plugin.toggleLike()
-            } label: {
-                Group {
-                    if plugin.isLikeLoading {
-                        ProgressView().controlSize(.mini).scaleEffect(0.7)
-                    } else {
-                        Image(systemName: plugin.isTrackLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(
-                                plugin.isTrackLiked
-                                    ? Color(red: 1, green: 0.22, blue: 0.37)
-                                    : NotchTheme.textQuaternary
-                            )
-                    }
-                }
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+                transportButton(
+                    plugin.info.repeatMode == .one ? "repeat.1" : "repeat",
+                    accessibility: "Repeat",
+                    size: auxIcon,
+                    diameter: auxDiameter,
+                    role: plugin.info.repeatMode != .none ? .active : .secondary
+                ) { plugin.toggleRepeat() }
             }
-            .buttonStyle(.plain)
-            .disabled(plugin.info.musicKitCatalogID == nil || plugin.isLikeLoading)
-            .opacity(plugin.info.musicKitCatalogID == nil ? 0 : 1)
-            .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: 6) {
+                amplifyIconButton
+
+                // Like / Add to Library — only when MusicKit has a catalog ID
+                Button {
+                    plugin.toggleLike()
+                } label: {
+                    Group {
+                        if plugin.isLikeLoading {
+                            ProgressView().controlSize(.mini).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: plugin.isTrackLiked ? "heart.fill" : "heart")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(
+                                    plugin.isTrackLiked
+                                        ? Color(red: 1, green: 0.28, blue: 0.42)
+                                        : NotchTheme.textSecondary
+                                )
+                        }
+                    }
+                    .frame(width: auxDiameter, height: auxDiameter)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(plugin.isTrackLiked ? 0.12 : 0.06))
+                    )
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(plugin.info.musicKitCatalogID == nil || plugin.isLikeLoading)
+                .opacity(plugin.info.musicKitCatalogID == nil ? 0 : 1)
+                .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
+            }
         }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+                )
+        )
     }
 
     private func transportButton(
@@ -895,23 +926,84 @@ private struct ExpandedMediaView: View {
         accessibility: String,
         size: CGFloat,
         diameter: CGFloat,
-        prominent: Bool = false,
-        activeTint: Bool = false,
+        role: MediaTransportRole = .secondary,
         action: @escaping () -> Void
     ) -> some View {
-        // Real `Button` + shared style so first-clicks fire on the nonactivating
-        // notch panel (plain Image + onTapGesture often eats the first press).
+        // Real `Button` + transport style so first-clicks fire on the nonactivating panel.
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(activeTint || prominent ? NotchTheme.textPrimary : NotchTheme.textSecondary)
+                .font(.system(size: size, weight: role == .play ? .bold : .semibold))
+                .foregroundStyle(role.foreground)
                 .symbolRenderingMode(.hierarchical)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
         }
-        .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
-        // Zero animation lag on press so transport feels instant.
-        .transaction { $0.animation = nil }
+        .buttonStyle(MediaTransportButtonStyle(diameter: diameter, role: role))
         .help(accessibility)
         .accessibilityLabel(accessibility)
+    }
+}
+
+// MARK: - Transport button chrome
+
+private enum MediaTransportRole {
+    case play
+    case active
+    case secondary
+
+    var foreground: Color {
+        switch self {
+        case .play: return Color.black.opacity(0.88)
+        case .active: return NotchTheme.textPrimary
+        case .secondary: return NotchTheme.textSecondary
+        }
+    }
+}
+
+/// Media-only control chrome: always-visible fill, stronger play, snappy press.
+private struct MediaTransportButtonStyle: ButtonStyle {
+    var diameter: CGFloat
+    var role: MediaTransportRole
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Circle()
+                    .fill(fillColor(pressed: configuration.isPressed))
+                    .overlay(
+                        Circle()
+                            .strokeBorder(strokeColor, lineWidth: role == .play ? 0 : 0.6)
+                    )
+                    .shadow(
+                        color: role == .play
+                            ? Color.white.opacity(0.28)
+                            : (role == .active ? Color.white.opacity(0.12) : .clear),
+                        radius: role == .play ? 8 : 3,
+                        y: role == .play ? 2 : 1
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
+            .animation(.spring(response: 0.18, dampingFraction: 0.78), value: configuration.isPressed)
+            .contentShape(Circle())
+    }
+
+    private func fillColor(pressed: Bool) -> Color {
+        switch role {
+        case .play:
+            return pressed ? Color.white.opacity(0.78) : Color.white.opacity(0.94)
+        case .active:
+            return pressed ? NotchTheme.chipFillActive : Color.white.opacity(0.16)
+        case .secondary:
+            return pressed ? Color.white.opacity(0.14) : Color.white.opacity(0.08)
+        }
+    }
+
+    private var strokeColor: Color {
+        switch role {
+        case .play: return Color.clear
+        case .active: return Color.white.opacity(0.22)
+        case .secondary: return Color.white.opacity(0.10)
+        }
     }
 }
 
