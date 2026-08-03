@@ -6,7 +6,7 @@ Dynamo turns the notch into an interactive tray with a plugin architecture (widg
 
 | | |
 |---|---|
-| **Version** | 0.5.2 |
+| **Version** | **1.0.0** (production, Weather disabled) |
 | **Platform** | macOS 13+ (14.2+ for live process-tap equalizer) |
 | **Daily driver** | `dist/Dynamo.app` only (single-instance) |
 | **License** | MIT |
@@ -25,7 +25,6 @@ Registered in `AppDelegate.bootstrap()`:
 | **Calendar** | Upcoming events (EventKit), in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist |
 | **Clipboard** | Recent snippets |
-| **Weather** | WeatherKit forecast (needs paid team + Xcode-signed app for live data) |
 | **Battery** | Charge, health, drain estimate; **Low / Auto / High** power modes (`pmset`) |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
 | **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
@@ -34,6 +33,8 @@ Registered in `AppDelegate.bootstrap()`:
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
 **Background systems (not tray tabs):** Peek notification center, Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts.
+
+> **Production note:** The **Weather** widget is **not shipped** in `dist/Dynamo.app` (WeatherKit needs a paid Apple Developer team). Source remains under `Widgets/Weather/` for a future opt-in build.
 
 ---
 
@@ -94,7 +95,7 @@ Permissions (as needed): Calendar, Reminders, Microphone (EQ sample + Meeting Li
 
 Two paths by design:
 
-### 1. Daily driver — packaged app (recommended)
+### 1. Daily driver — packaged app (recommended / production)
 
 ```bash
 ./scripts/package-app.sh          # release → dist/Dynamo.app
@@ -104,7 +105,7 @@ open dist/Dynamo.app
 
 - Ad-hoc signed; good for Launch at Login  
 - **Only run this `.app`** — Dynamo terminates stray debug/Xcode copies when `dist` launches  
-- WeatherKit is **not** available on ad-hoc builds (needs the Xcode target + paid team)
+- **Production tray does not include Weather** (no WeatherKit entitlement on ad-hoc builds)
 
 ### 2. Swift Package (fast compile / CI)
 

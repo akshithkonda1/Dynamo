@@ -228,7 +228,6 @@ struct NotchContentView: View {
     /// Compact tray labels — full `displayName` still used for help + a11y.
     private static let shortTrayLabels: [String: String] = [
         "media": "Media",
-        "weather": "Weather",
         "calendar": "Cal",
         "checklist": "Tasks",
         "clipboard": "Clip",
