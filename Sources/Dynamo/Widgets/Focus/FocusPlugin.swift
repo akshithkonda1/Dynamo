@@ -94,6 +94,7 @@ private struct ExpandedFocusView: View {
     @ObservedObject private var speech = MeetingSpeechCapture.shared
     @ObservedObject private var volume = SystemVolumeController.shared
     @State private var showAllAgenda = false
+    @State private var showClearNotesConfirm = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -137,6 +138,16 @@ private struct ExpandedFocusView: View {
         }
         .onChange(of: focus.baseMode) { _ in
             NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
+        }
+        .confirmationDialog(
+            "Clear meeting notes?",
+            isPresented: $showClearNotesConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Notes", role: .destructive) { notes.clearBullets() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every bullet in the current meeting's notes. This can't be undone.")
         }
     }
 
@@ -331,7 +342,7 @@ private struct ExpandedFocusView: View {
             HStack(spacing: 8) {
                 chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
                 chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
-                chipButton("Clear", "trash") { notes.clearBullets() }
+                chipButton("Clear", "trash") { showClearNotesConfirm = true }
                 chipButton(
                     speech.isListening ? "Stop" : "Listen",
                     speech.isListening ? "waveform.badge.mic" : "mic.fill"

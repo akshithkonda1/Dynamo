@@ -84,6 +84,7 @@ private struct ExpandedClipboardView: View {
     @State private var searchQuery = ""
     @State private var renamingID: UUID?
     @State private var renameText = ""
+    @State private var showClearHistoryConfirm = false
 
     private static let timeFmt: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -125,7 +126,7 @@ private struct ExpandedClipboardView: View {
                         trailing: store.history.isEmpty
                             ? nil
                             : AnyView(
-                                Button("Clear") { store.clearHistory() }
+                                Button("Clear") { showClearHistoryConfirm = true }
                                     .buttonStyle(.plain)
                                     .font(NotchTheme.micro)
                                     .foregroundStyle(NotchTheme.textTertiary)
@@ -144,6 +145,16 @@ private struct ExpandedClipboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .confirmationDialog(
+            "Clear clipboard history?",
+            isPresented: $showClearHistoryConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) { store.clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all unpinned clipboard history. Pinned snippets are kept.")
+        }
     }
 
     @ViewBuilder

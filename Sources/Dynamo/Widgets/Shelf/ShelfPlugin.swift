@@ -57,6 +57,7 @@ private struct ExpandedShelfView: View {
     @ObservedObject var plugin: ShelfPlugin
     @ObservedObject private var store: ShelfStore
     @State private var isDropTargeted = false
+    @State private var showClearConfirm = false
 
     init(plugin: ShelfPlugin) {
         self.plugin = plugin
@@ -78,7 +79,7 @@ private struct ExpandedShelfView: View {
                         .help("Add files from Finder")
 
                         if !store.items.isEmpty {
-                            Button("Clear") { store.clear() }
+                            Button("Clear") { showClearConfirm = true }
                                 .buttonStyle(.plain)
                                 .font(NotchTheme.micro)
                                 .foregroundStyle(NotchTheme.textTertiary)
@@ -109,6 +110,16 @@ private struct ExpandedShelfView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleProviders(providers)
+        }
+        .confirmationDialog(
+            "Clear the File Shelf?",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Shelf", role: .destructive) { store.clear() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all stashed items and deletes Dynamo’s stored copies of them. If the original file was moved or deleted since stashing, this copy was the only one left.")
         }
     }
 

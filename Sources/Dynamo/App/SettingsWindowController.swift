@@ -130,7 +130,7 @@ struct SettingsView: View {
 
             Divider()
 
-            Toggle("Hidden mode (peek from the top edge)", isOn: Binding(
+            Toggle("Hidden Mode (peek from the top edge)", isOn: Binding(
                 get: { notch.isHiddenModeEnabled },
                 set: { notch.setHiddenMode($0) }
             ))
@@ -316,18 +316,34 @@ struct SettingsView: View {
         }
     }
 
+    private var appVersionString: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "Version \(short) (\(build))"
+    }
+
     private var aboutSection: some View {
         SettingsSection(title: "About") {
-            Text("Dynamo")
-                .font(.body.weight(.semibold))
+            HStack(spacing: 10) {
+                if let icon = NSApp.applicationIconImage {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 40, height: 40)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dynamo")
+                        .font(.body.weight(.semibold))
+                    Text(appVersionString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
             Text("Notch widget dock for macOS — media, calendar, clipboard, shelf, webcam, and more.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Daily driver build: ~/Documents/Dynamo/dist/Dynamo.app")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
             Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -346,6 +362,12 @@ struct SettingsView: View {
                 .controlSize(.small)
                 Button("Focus Calendar") {
                     notch.focusPlugin(id: "calendar")
+                }
+                .controlSize(.small)
+                Spacer(minLength: 0)
+                Button("About Dynamo…") {
+                    NSApp.orderFrontStandardAboutPanel(options: [:])
+                    NSApp.activate(ignoringOtherApps: true)
                 }
                 .controlSize(.small)
             }
