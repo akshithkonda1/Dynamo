@@ -11,7 +11,10 @@ final class CallSessionProbe {
         "com.microsoft.teams2": "Teams",
         "com.microsoft.SkypeForBusiness": "Skype",
         "com.webex.meetingmanager": "Webex",
-        "com.cisco.webexmeetingsapp": "Webex"
+        "com.cisco.webexmeetingsapp": "Webex",
+        "com.hnc.Discord": "Discord",
+        "com.tinyspeck.slackmacgap": "Slack",
+        "com.loom.desktop": "Loom"
     ]
 
     private(set) var activeCallAppName: String?
@@ -23,7 +26,7 @@ final class CallSessionProbe {
     func start(onChange: @escaping () -> Void) {
         self.onChange = onChange
         refresh()
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)

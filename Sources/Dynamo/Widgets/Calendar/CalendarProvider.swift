@@ -11,6 +11,8 @@ struct CalendarEventItem: Identifiable, Equatable {
     /// Name of the EKCalendar this event belongs to (e.g. "Work", "Home").
     let calendarName: String
     let location: String?
+    let notes: String?
+    let attendees: [String]
 }
 
 /// Hex-friendly color stored without importing AppKit into the protocol surface.
@@ -45,6 +47,8 @@ protocol CalendarProvider: AnyObject {
     func openNewEvent()
     /// Open Calendar focused on today.
     func openToday()
+    /// Create an event in-process via EventKit when supported.
+    func createEvent(_ draft: CalendarEventComposer.Draft) -> CalendarEventComposer.Result
 }
 
 extension CalendarProvider {
@@ -60,6 +64,9 @@ extension CalendarProvider {
             return
         }
         openCalendarApp()
+    }
+    func createEvent(_ draft: CalendarEventComposer.Draft) -> CalendarEventComposer.Result {
+        CalendarEventComposer.create(draft)
     }
 }
 

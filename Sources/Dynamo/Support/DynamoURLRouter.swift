@@ -10,7 +10,8 @@ import Foundation
 /// | dynamo://play | Play/pause |
 /// | dynamo://shelf | Focus shelf |
 /// | dynamo://calendar | Focus calendar |
-/// | dynamo://peek?title=…&subtitle=… | Critical peek (if bridge enabled) |
+/// | dynamo://notify?title=…&subtitle=…&urgency=high | Peek via Notification API |
+/// | dynamo://peek?title=…&subtitle=… | Same as notify (legacy) |
 @MainActor
 enum DynamoURLRouter {
     static func handle(
@@ -33,8 +34,10 @@ enum DynamoURLRouter {
             notch?.focusPlugin(id: "shelf")
         case "calendar":
             notch?.focusPlugin(id: "calendar")
-        case "peek":
-            PeekBridge.shared.handleURL(url)
+        case "notify", "notification", "peek":
+            if PeekBridge.shared.isEnabled {
+                _ = DynamoNotificationAPI.postFromURL(url)
+            }
         default:
             break
         }

@@ -56,4 +56,50 @@ enum NotchGeometry {
         }
         return fallbackWidth * widthScale
     }
+
+    // MARK: - Aspect-adaptive expanded panel
+
+    /// Expanded island width from screen size + aspect ratio.
+    /// Tuned wide for readable lists / dual columns while still reading as an
+    /// island (not a full menu bar strip). Ultrawide uses a lower fraction so
+    /// it doesn’t stretch edge-to-edge; compact displays get a higher fraction.
+    static func expandedWidth(for screen: NSScreen?) -> CGFloat {
+        guard let screen else { return 720 }
+        let w = screen.frame.width
+        let h = max(screen.frame.height, 1)
+        let aspect = w / h
+        let fraction: CGFloat
+        if aspect >= 2.0 {          // ultrawide
+            fraction = 0.30
+        } else if aspect >= 1.7 {   // 16:9–16:10 laptop
+            fraction = 0.40
+        } else if aspect >= 1.45 {  // 3:2
+            fraction = 0.46
+        } else {                    // nearer square / portrait external
+            fraction = 0.54
+        }
+        let raw = w * fraction
+        // Floor high enough for labeled tray + dual-column Focus/Meeting.
+        return min(940, max(540, raw.rounded()))
+    }
+
+    /// Scale widget content height with display height so tall screens get more room.
+    static func expandedContentHeight(base: CGFloat, for screen: NSScreen?) -> CGFloat {
+        guard let screen else { return base }
+        let h = screen.frame.height
+        // ~900pt tall MBP is baseline 1.0; clamp so small displays don't crush UI.
+        let scale = min(1.34, max(0.94, h / 900))
+        return (base * scale).rounded()
+    }
+
+    /// Peek / HUD overlay width tracks expanded width lightly.
+    static func peekOverlaySize(for screen: NSScreen?) -> NSSize {
+        let w = min(580, max(400, expandedWidth(for: screen) * 0.62))
+        return NSSize(width: w.rounded(), height: 104)
+    }
+
+    static func hudOverlaySize(for screen: NSScreen?) -> NSSize {
+        let w = min(420, max(300, expandedWidth(for: screen) * 0.46))
+        return NSSize(width: w.rounded(), height: 50)
+    }
 }

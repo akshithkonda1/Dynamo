@@ -14,6 +14,26 @@ struct WeatherSnapshot: Equatable {
     var low: Measurement<UnitTemperature>?
     var isDaylight: Bool
     var updatedAt: Date
+    var hourly: [WeatherHourItem] = []
+    var daily: [WeatherDayItem] = []
+    var feelsLike: Measurement<UnitTemperature>? = nil
+    var windSpeedKph: Double? = nil
+    var humidityPercent: Int? = nil
+}
+
+struct WeatherHourItem: Identifiable, Equatable {
+    var id: Date { hour }
+    var hour: Date
+    var symbolName: String
+    var temperature: Measurement<UnitTemperature>
+}
+
+struct WeatherDayItem: Identifiable, Equatable {
+    var id: Date { day }
+    var day: Date
+    var symbolName: String
+    var high: Measurement<UnitTemperature>
+    var low: Measurement<UnitTemperature>
 }
 
 /// A severe-weather alert surfaced in the expanded view.

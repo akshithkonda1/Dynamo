@@ -12,5 +12,12 @@
 	-->
 	<key>com.apple.developer.weatherkit</key>
 	<true/>
+	<!--
+	  MusicKit capability for catalog metadata, queue access, and library operations.
+	  Enable "MusicKit" on the App ID at developer.apple.com, then Xcode's
+	  automatic signing picks it up — same workflow as WeatherKit above.
+	-->
+	<key>com.apple.developer.musickit</key>
+	<true/>
 </dict>
 </plist>

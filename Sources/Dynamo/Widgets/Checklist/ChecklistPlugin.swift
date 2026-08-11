@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding {
+final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding {
     let id = "checklist"
     let displayName = "Checklist"
     let systemImage = "checklist"
@@ -29,7 +29,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     private var notifiedReminderStages: [String: Set<String>] = [:]
     private let leadTime: TimeInterval = 15 * 60
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     func start() {
         store.start()
@@ -68,6 +68,67 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
         AnyView(ExpandedChecklistView(plugin: self))
     }
 
+    // MARK: - Ambient
+
+    private var overdueCount: Int { reminders.items.filter { $0.isOverdue }.count }
+
+    var isAmbientActive: Bool { overdueCount > 0 }
+    var ambientPriority: Int { 24 }
+
+    func ambientView() -> AnyView {
+        AnyView(AmbientChecklistView(count: overdueCount))
+    }
+
+    /// Due preset for new Reminders.
+    enum DuePreset: String, CaseIterable, Identifiable {
+        case inOneHour
+        case today
+        case tomorrow
+        case undated
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .inOneHour: return "1h"
+            case .today: return "Today"
+            case .tomorrow: return "Tomorrow"
+            case .undated: return "None"
+            }
+        }
+
+        func dueDate() -> Date? {
+            let cal = Calendar.current
+            let now = Date()
+            switch self {
+            case .inOneHour:
+                return cal.date(byAdding: .hour, value: 1, to: now)
+            case .today:
+                var comps = cal.dateComponents([.year, .month, .day], from: now)
+                comps.hour = 17
+                comps.minute = 0
+                return cal.date(from: comps) ?? now
+            case .tomorrow:
+                let day = cal.date(byAdding: .day, value: 1, to: now) ?? now
+                var comps = cal.dateComponents([.year, .month, .day], from: day)
+                comps.hour = 9
+                comps.minute = 0
+                return cal.date(from: comps)
+            case .undated:
+                return nil
+            }
+        }
+
+        var allDay: Bool {
+            switch self {
+            case .today, .tomorrow: return false
+            case .inOneHour, .undated: return false
+            }
+        }
+    }
+
+    @Published var duePreset: DuePreset = .inOneHour
+
     func submitDraft() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -78,9 +139,14 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                 return
             }
             Task {
-                // Default: due today end-of-business-ish (next hour rounded) for timed, or today.
-                let due = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
-                let ok = await reminders.create(title: text, due: due, allDay: false)
+                let due = duePreset.dueDate()
+                let ok = await reminders.create(
+                    title: text,
+                    due: due,
+                    allDay: duePreset == .today || duePreset == .tomorrow ? false : false,
+                    notes: nil,
+                    priority: 0
+                )
                 if ok {
                     draft = ""
                     objectWillChange.send()
@@ -546,6 +612,12 @@ private struct ExpandedChecklistView: View {
                         item.isOverdue ? NotchTheme.caution.opacity(0.95) : NotchTheme.textQuaternary
                     )
                     .lineLimit(1)
+                if let notes = item.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary.opacity(0.7))
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -735,6 +807,23 @@ private struct ExpandedChecklistView: View {
                     )
             )
 
+            if plugin.draftTarget == .reminders {
+                HStack(spacing: 5) {
+                    Text("Due")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    ForEach(ChecklistPlugin.DuePreset.allCases) { preset in
+                        Button {
+                            plugin.duePreset = preset
+                        } label: {
+                            NotchChipLabel(title: preset.title, active: plugin.duePreset == preset)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
             if plugin.draftTarget == .reminders, reminders.authState != .authorized {
                 Text(reminders.authState == .denied
                      ? "Reminders access is off — open Settings from the tab above."
@@ -750,5 +839,23 @@ private struct ExpandedChecklistView: View {
                     .lineLimit(2)
             }
         }
+    }
+}
+
+private struct AmbientChecklistView: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label(
+                count == 1 ? "1 overdue" : "\(count) overdue",
+                systemImage: "exclamationmark.circle.fill"
+            )
+            .font(NotchTheme.micro.weight(.semibold))
+            .foregroundStyle(NotchTheme.caution)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, NotchTheme.ambientInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

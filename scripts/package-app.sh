@@ -30,7 +30,8 @@ RESOURCES="${CONTENTS}/Resources"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS}" "${RESOURCES}"
 
-cp "${BIN_DIR}/Dynamo" "${MACOS}/Dynamo"
+# Copy via dd so Finder resource forks / xattrs never poison codesign.
+dd if="${BIN_DIR}/Dynamo" of="${MACOS}/Dynamo" bs=1m status=none
 chmod +x "${MACOS}/Dynamo"
 cp "${ROOT}/Sources/Dynamo/Info.plist" "${CONTENTS}/Info.plist"
 
@@ -38,13 +39,13 @@ cp "${ROOT}/Sources/Dynamo/Info.plist" "${CONTENTS}/Info.plist"
 # no --product flag builds every target, so it's already sitting in BIN_DIR
 # alongside Dynamo). See MediaRemoteHelperProcess.swift for why it exists.
 if [[ -f "${BIN_DIR}/DynamoMediaRemoteHelper" ]]; then
-  cp "${BIN_DIR}/DynamoMediaRemoteHelper" "${MACOS}/DynamoMediaRemoteHelper"
+  dd if="${BIN_DIR}/DynamoMediaRemoteHelper" of="${MACOS}/DynamoMediaRemoteHelper" bs=1m status=none
   chmod +x "${MACOS}/DynamoMediaRemoteHelper"
 fi
 
 # Optional app icon if present.
 if [[ -f "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" ]]; then
-  cp "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
+  dd if="${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" of="${RESOURCES}/AppIcon.icns" bs=1m status=none
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "${CONTENTS}/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "${CONTENTS}/Info.plist"
 fi
@@ -53,20 +54,24 @@ fi
 /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string Dynamo" "${CONTENTS}/Info.plist" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Dynamo" "${CONTENTS}/Info.plist"
 
-# Finder resource forks break codesign — strip extended attributes first.
+# Finder resource forks / quarantine break codesign — strip thoroughly.
 xattr -cr "${APP_DIR}" 2>/dev/null || true
+# Clear detritus on every nested path (xattr -cr alone can miss some edges).
+find "${APP_DIR}" -exec xattr -c {} + 2>/dev/null || true
 
 echo "→ Ad-hoc codesign…"
 # Sign nested binaries first, then the bundle (avoid --deep which can fail
 # with "bundle format unrecognized" on some toolchains).
 if [[ -x "${MACOS}/DynamoMediaRemoteHelper" ]]; then
-  codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
+  codesign --force --sign - --timestamp=none --options runtime "${MACOS}/DynamoMediaRemoteHelper" 2>/dev/null \
+    || codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
   echo "✓ Embedded DynamoMediaRemoteHelper"
 else
   echo "warning: DynamoMediaRemoteHelper not embedded (media falls back to AppleScript)"
 fi
 codesign --force --sign - --timestamp=none "${MACOS}/Dynamo"
 codesign --force --sign - --timestamp=none "${APP_DIR}"
+codesign --verify --verbose=0 "${APP_DIR}"
 
 echo "✓ Packaged: ${APP_DIR}"
 echo "  Open with: open \"${APP_DIR}\""

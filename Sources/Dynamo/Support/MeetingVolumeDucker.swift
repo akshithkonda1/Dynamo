@@ -35,4 +35,16 @@ final class MeetingVolumeDucker {
         savedPercent = nil
         isDucked = false
     }
+
+    /// If the user raised volume above the duck target mid-meeting, ease it back.
+    func reapplyIfNeeded() {
+        guard isDucked else { return }
+        SystemVolumeController.shared.refreshFromSystem()
+        let target = min(100, max(1, targetPercent))
+        let current = SystemVolumeController.shared.percent
+        if current > target + 5 {
+            SystemVolumeController.shared.suppressExternalAnnouncements(for: 0.8)
+            SystemVolumeController.shared.setPercent(target)
+        }
+    }
 }

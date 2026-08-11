@@ -10,6 +10,8 @@ private enum MRCommand: UInt32 {
     case stop = 3
     case nextTrack = 4
     case previousTrack = 5
+    case toggleShuffle = 12
+    case toggleRepeat = 13
 }
 
 /// Now-playing source with a layered strategy:
@@ -54,10 +56,14 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         loadFramework()
         registerForNotifications()
         startHelperProcess()
+        if #available(macOS 12.0, *) {
+            MusicKitBridge.shared.onEnrichmentAvailable = { [weak self] in
+                Task { @MainActor in self?.publishBest() }
+            }
+        }
         refreshAll()
-        // MediaRemote notifications drive most updates; poll is a safety net.
-        // 1.5s balances live transport with lower AppleScript / helper cost.
-        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+        // MediaRemote notifications drive most updates; poll is a safety net only.
+        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
             }
@@ -107,54 +113,58 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     // MARK: - Transport
 
     func togglePlayPause() {
-        // Desired end state (absolute). Dual-firing MediaRemote *and* AppleScript
-        // `playpause` was toggling twice — play then immediately pause.
         let wantPlaying = !current.isPlaying
         var optimistic = current
         optimistic.isPlaying = wantPlaying
-        // Always update the play/pause glyph; metadata may catch up a moment later.
         publish(optimistic)
 
-        let scripted = AppleScriptMedia.shared
-        if scripted.hasScriptablePlayer {
-            // Music / Spotify: one absolute play/pause command only.
-            scripted.setPlaying(wantPlaying)
-        } else {
-            // Browser / other now-playing: MediaRemote toggle only.
-            _ = send(MRCommand.togglePlayPause)
+        // Dual-fire for instant response: MediaRemote + scriptable player + MusicKit.
+        _ = send(wantPlaying ? MRCommand.play : MRCommand.pause)
+        _ = send(MRCommand.togglePlayPause)
+        if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.setPlaying(wantPlaying)
         }
-        scheduleRefresh(after: 0.15)
-        scheduleRefresh(after: 0.45)
-        scheduleRefresh(after: 1.0)
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            let bridge = MusicKitBridge.shared
+            Task { if wantPlaying { await bridge.play() } else { bridge.pause() } }
+        }
+        scheduleRefresh(after: 0.08)
+        scheduleRefresh(after: 0.28)
+        scheduleRefresh(after: 0.7)
     }
 
     func nextTrack() {
-        let scripted = AppleScriptMedia.shared
-        if scripted.hasScriptablePlayer {
-            scripted.nextTrack()
-        } else {
-            _ = send(MRCommand.nextTrack)
+        _ = send(MRCommand.nextTrack)
+        if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.nextTrack()
         }
-        // Dense refreshes so track-change peeks fire promptly after skip.
-        scheduleRefresh(after: 0.12)
-        scheduleRefresh(after: 0.3)
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            Task { await MusicKitBridge.shared.skipToNext() }
+        }
+        scheduleRefresh(after: 0.08)
+        scheduleRefresh(after: 0.25)
         scheduleRefresh(after: 0.55)
         scheduleRefresh(after: 1.0)
-        scheduleRefresh(after: 1.6)
     }
 
     func previousTrack() {
-        let scripted = AppleScriptMedia.shared
-        if scripted.hasScriptablePlayer {
-            scripted.previousTrack()
-        } else {
-            _ = send(MRCommand.previousTrack)
+        _ = send(MRCommand.previousTrack)
+        if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.previousTrack()
         }
-        scheduleRefresh(after: 0.12)
-        scheduleRefresh(after: 0.3)
+        if #available(macOS 12.0, *),
+           current.sourceApp == .music,
+           MusicKitBridge.shared.isAuthorized {
+            Task { await MusicKitBridge.shared.skipToPrevious() }
+        }
+        scheduleRefresh(after: 0.08)
+        scheduleRefresh(after: 0.25)
         scheduleRefresh(after: 0.55)
         scheduleRefresh(after: 1.0)
-        scheduleRefresh(after: 1.6)
     }
 
     func openConnectedApp() {
@@ -190,6 +200,32 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         }
         scheduleRefresh(after: 0.2)
         scheduleRefresh(after: 0.6)
+    }
+
+    func toggleShuffle() {
+        var optimistic = current
+        optimistic.isShuffling = !current.isShuffling
+        publish(optimistic)
+        _ = send(MRCommand.toggleShuffle)
+        AppleScriptMedia.shared.toggleShuffle()
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.4)
+    }
+
+    func toggleRepeat() {
+        var optimistic = current
+        let next: RepeatMode
+        switch current.repeatMode {
+        case .none: next = .all
+        case .all: next = .one
+        case .one: next = .none
+        }
+        optimistic.repeatMode = next
+        publish(optimistic)
+        _ = send(MRCommand.toggleRepeat)
+        AppleScriptMedia.shared.toggleRepeat()
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.4)
     }
 
     // MARK: - Framework
@@ -348,6 +384,25 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             best.artworkData = prev
         }
         emptyStreak = 0
+
+        // Merge MusicKit enrichment (genre, year, explicit, queue, high-res art).
+        if #available(macOS 12.0, *) {
+            let bridge = MusicKitBridge.shared
+            let key = Self.trackKey(best)
+            if let e = bridge.currentEnrichment, e.trackKey == key {
+                best.genre = e.genre
+                best.releaseYear = e.releaseYear
+                best.isExplicit = e.isExplicit
+                best.musicKitCatalogID = e.catalogID
+                best.upcomingTracks = e.upcomingTracks
+                best.highResArtworkURL = e.highResArtworkURL
+            } else if bridge.isAuthorized, !best.title.isEmpty,
+                      best.title != NowPlayingInfo.empty.title {
+                Task { await bridge.enrich(title: best.title, artist: best.artist,
+                                           album: best.album, trackKey: key) }
+            }
+        }
+
         publish(best)
     }
 
@@ -433,7 +488,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         ]) ?? 0
         if duration > 10_000 { duration /= 1000 }
         if elapsed > 10_000 { elapsed /= 1000 }
-        return NowPlayingInfo(
+        let shuffleRaw = (dict["kMRMediaRemoteNowPlayingInfoShuffleMode"] as? NSNumber)?.intValue
+            ?? (dict["shuffleMode"] as? Int) ?? 0
+        let repeatRaw = (dict["kMRMediaRemoteNowPlayingInfoRepeatMode"] as? NSNumber)?.intValue
+            ?? (dict["repeatMode"] as? Int) ?? 0
+        var info = NowPlayingInfo(
             title: title.isEmpty ? NowPlayingInfo.empty.title : title,
             artist: artist,
             album: album,
@@ -444,6 +503,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             elapsed: max(0, elapsed),
             duration: max(0, duration)
         )
+        info.isShuffling = shuffleRaw != 0
+        info.repeatMode = RepeatMode(rawValue: repeatRaw) ?? .none
+        return info
     }
 
     private func publish(_ info: NowPlayingInfo) {

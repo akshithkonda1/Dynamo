@@ -12,12 +12,13 @@ import Carbon.HIToolbox
 ///
 /// Not MainActor-isolated: Carbon installs from AppDelegate property init.
 final class GlobalHotKeys: @unchecked Sendable {
-    enum Action: UInt32, Sendable {
+    enum Action: UInt32, Sendable, CaseIterable {
         case showNotch = 1
         case playPause = 2
         case mute = 3
         case focusShelf = 4
         case focusCalendar = 5
+        case focusToggle = 6
     }
 
     /// Called on the main actor.
@@ -31,7 +32,7 @@ final class GlobalHotKeys: @unchecked Sendable {
 
     var registrationSummary: String {
         if failedActions.isEmpty {
-            return "All hotkeys registered (⌃⌥ D/P/M/S/C)."
+            return "All hotkeys registered (⌃⌥ D/P/M/S/C/F)."
         }
         let names = failedActions.map(\.label).joined(separator: ", ")
         return "Some hotkeys unavailable (conflict): \(names)."
@@ -88,6 +89,7 @@ final class GlobalHotKeys: @unchecked Sendable {
         register(keyCode: UInt32(kVK_ANSI_M), id: .mute, modifiers: mods)
         register(keyCode: UInt32(kVK_ANSI_S), id: .focusShelf, modifiers: mods)
         register(keyCode: UInt32(kVK_ANSI_C), id: .focusCalendar, modifiers: mods)
+        register(keyCode: UInt32(kVK_ANSI_F), id: .focusToggle, modifiers: mods)
     }
 
     func uninstall() {
@@ -137,6 +139,18 @@ extension GlobalHotKeys.Action {
         case .mute: return "⌃⌥M"
         case .focusShelf: return "⌃⌥S"
         case .focusCalendar: return "⌃⌥C"
+        case .focusToggle: return "⌃⌥F"
+        }
+    }
+
+    var actionName: String {
+        switch self {
+        case .showNotch: return "Show Notch"
+        case .playPause: return "Play / Pause"
+        case .mute: return "Mute / Unmute"
+        case .focusShelf: return "Focus Shelf"
+        case .focusCalendar: return "Focus Calendar"
+        case .focusToggle: return "Toggle Focus Mode"
         }
     }
 }

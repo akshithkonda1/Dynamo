@@ -1,10 +1,25 @@
 import Foundation
 
+/// A single entry in the upcoming track queue as surfaced by MusicKit.
+struct UpcomingTrackInfo: Equatable, Identifiable {
+    let id: String          // MusicItemID.rawValue (stable across sessions)
+    let title: String
+    let artist: String
+    let artworkURL: URL?    // High-res catalog artwork URL (load on demand)
+    let albumTitle: String
+}
+
 /// Which scriptable player is currently providing now-playing info.
 enum MediaPlayerApp: String, Equatable {
     case music
     case spotify
     case other
+}
+
+enum RepeatMode: Int, Equatable {
+    case none = 0
+    case one = 1
+    case all = 2
 }
 
 /// Decouples Media Controls UI from *how* now-playing data is obtained.
@@ -22,6 +37,16 @@ struct NowPlayingInfo: Equatable {
     var elapsed: TimeInterval
     /// Track length in seconds (0 when unknown).
     var duration: TimeInterval
+    var isShuffling: Bool = false
+    var repeatMode: RepeatMode = .none
+
+    // MARK: MusicKit enrichment (nil/default when MusicKit is unauthorized or Spotify is playing)
+    var genre: String? = nil
+    var releaseYear: Int? = nil
+    var isExplicit: Bool = false
+    var musicKitCatalogID: String? = nil
+    var upcomingTracks: [UpcomingTrackInfo] = []
+    var highResArtworkURL: URL? = nil
 
     static let empty = NowPlayingInfo(
         title: "Not Playing",
@@ -52,6 +77,8 @@ protocol NowPlayingProvider: AnyObject {
     func togglePlayPause()
     func nextTrack()
     func previousTrack()
+    func toggleShuffle()
+    func toggleRepeat()
 
     /// Bring the connected player to the front and reveal the current track / playlist.
     func openConnectedApp()
@@ -68,4 +95,6 @@ extension NowPlayingProvider {
     func availablePlaylists() -> [String] { [] }
     func playPlaylist(named name: String) {}
     func seek(to elapsed: TimeInterval) {}
+    func toggleShuffle() {}
+    func toggleRepeat() {}
 }

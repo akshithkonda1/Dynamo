@@ -34,9 +34,8 @@ final class SystemVolumeController: ObservableObject {
         refreshFromSystem()
         installHardwareListener()
         rebindDeviceListeners()
-        // Core Audio listeners catch most changes; light poll as a backup only.
-        // 0.5s is plenty for HUD accuracy and cuts main-thread AppleScript work ~2.5×.
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        // Core Audio listeners catch most changes; poll is a sparse backup only.
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshFromSystem(announceExternal: true) }
         }
         RunLoop.main.add(t, forMode: .common)

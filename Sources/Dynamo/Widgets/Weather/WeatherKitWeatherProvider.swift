@@ -114,6 +114,19 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
             let today = weather.dailyForecast.forecast.first
             let name = await resolvePlaceName(for: location)
 
+            let now = Date()
+            let hourly = weather.hourlyForecast.forecast
+                .filter { $0.date > now }
+                .prefix(5)
+                .map { WeatherHourItem(hour: $0.date, symbolName: $0.symbolName, temperature: $0.temperature) }
+            let daily = weather.dailyForecast.forecast.prefix(10).map {
+                WeatherDayItem(
+                    day: $0.date,
+                    symbolName: $0.symbolName,
+                    high: $0.highTemperature,
+                    low: $0.lowTemperature
+                )
+            }
             snapshot = WeatherSnapshot(
                 locationName: name,
                 temperature: current.temperature,
@@ -122,7 +135,12 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
                 high: today?.highTemperature,
                 low: today?.lowTemperature,
                 isDaylight: current.isDaylight,
-                updatedAt: Date()
+                updatedAt: now,
+                hourly: Array(hourly),
+                daily: Array(daily),
+                feelsLike: current.apparentTemperature,
+                windSpeedKph: current.wind.speed.converted(to: .kilometersPerHour).value,
+                humidityPercent: Int(current.humidity * 100)
             )
             alerts = (weather.weatherAlerts ?? []).map { alert in
                 WeatherAlertItem(

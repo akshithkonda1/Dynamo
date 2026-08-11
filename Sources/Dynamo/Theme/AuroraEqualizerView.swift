@@ -7,8 +7,9 @@ struct AuroraEqualizerView: View {
     @ObservedObject private var sampler = MusicAudioSampler.shared
 
     var isActive: Bool = true
-    var barCount: Int = 32
-    var fps: Double = 48
+    var barCount: Int = 28
+    /// 30fps is plenty for musical motion and keeps GPU/CPU modest.
+    var fps: Double = 30
 
     /// Bars occupy the lower portion so text stays primary.
     private let heightCeiling: CGFloat = 0.56
@@ -128,20 +129,25 @@ struct AuroraEqualizerView: View {
         let x = Double(index) / Double(max(barCount - 1, 1))
         let low = palette.deep.mixed(with: palette.secondary, t: 0.4)
         let mid = palette.primary.mixed(with: palette.accent, t: 0.3)
-        let high = palette.accent.mixed(with: palette.highlight, t: 0.45)
-        let stops = [low, mid, high]
-        let pos = min(1.99, x * 2.0 + (tone - 0.5) * 0.25)
+        // Stay locked to cover-art hues — boost saturation so EQ clearly matches art.
+        let high = palette.highlight.mixed(with: palette.accent, t: 0.25).boosted(saturation: 1.45)
+        let stops = [
+            low.boosted(saturation: 1.35),
+            mid.boosted(saturation: 1.4),
+            high
+        ]
+        let pos = min(1.99, x * 2.0 + (tone - 0.5) * 0.18)
         let i0 = min(stops.count - 1, max(0, Int(pos)))
         let i1 = min(stops.count - 1, i0 + 1)
         let frac = pos - Double(i0)
         var rgb = stops[i0].mixed(with: stops[i1], t: frac)
 
         if kick > 0.1 {
-            rgb = rgb.mixed(with: palette.highlight, t: kick * 0.28)
+            rgb = rgb.mixed(with: palette.highlight.boosted(saturation: 1.5), t: kick * 0.35)
         }
-        let lift = 0.6 + Double(heightFrac) * 0.65 + kick * 0.1
+        // Lift without washing toward white (that killed the album match).
+        let lift = 0.72 + Double(heightFrac) * 0.55 + kick * 0.12
         rgb = rgb.scaled(brightness: lift)
-        rgb = rgb.mixed(with: CoverArtPalette.RGB(r: 0.88, g: 0.9, b: 0.96), t: 0.12)
         return rgb.color
     }
 
@@ -155,11 +161,23 @@ struct AuroraEqualizerView: View {
     ) -> some View {
         let shift = CGFloat(sin(beatPhase * .pi * 2) * 0.05)
         return ZStack {
-            Color.black.opacity(0.32)
+            // Soft wash of the album palette under the bars.
+            LinearGradient(
+                colors: [
+                    palette.deep.color.opacity(0.55),
+                    palette.primary.color.opacity(0.28),
+                    palette.accent.color.opacity(0.18)
+                ],
+                startPoint: .bottomLeading,
+                endPoint: .topTrailing
+            )
+            .opacity(0.55 + kick * 0.2)
+
+            Color.black.opacity(0.28)
 
             EllipticalGradient(
                 colors: [
-                    palette.primary.color.opacity(0.12 + kick * 0.14),
+                    palette.primary.color.opacity(0.22 + kick * 0.18),
                     Color.clear
                 ],
                 center: UnitPoint(x: 0.32 + shift, y: 0.88),
@@ -169,7 +187,7 @@ struct AuroraEqualizerView: View {
 
             EllipticalGradient(
                 colors: [
-                    palette.accent.color.opacity(0.07 + kick * 0.08),
+                    palette.accent.color.opacity(0.16 + kick * 0.12),
                     Color.clear
                 ],
                 center: UnitPoint(x: 0.7 - shift, y: 0.72),
@@ -178,7 +196,7 @@ struct AuroraEqualizerView: View {
             )
 
             LinearGradient(
-                colors: [Color.clear, palette.deep.color.opacity(0.22)],
+                colors: [Color.clear, palette.deep.color.opacity(0.35)],
                 startPoint: .center,
                 endPoint: .bottom
             )

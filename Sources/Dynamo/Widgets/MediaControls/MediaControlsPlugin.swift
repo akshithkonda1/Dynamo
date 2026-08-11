@@ -9,11 +9,13 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let displayName = "Media"
     let systemImage = "music.note"
 
-    var expandedContentHeight: CGFloat { 255 }
+    var expandedContentHeight: CGFloat { 268 }
 
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
     @Published var showPlaylistPicker = false
+    @Published private(set) var isTrackLiked: Bool = false
+    @Published private(set) var isLikeLoading: Bool = false
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: NowPlayingProvider
@@ -40,6 +42,9 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         lastTrackKey = Self.trackKey(info)
         MediaPeekPulse.shared.sync(from: info)
         refreshPlaylists()
+        if #available(macOS 12.0, *) {
+            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
+        }
     }
 
     func stop() {
@@ -71,6 +76,13 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         else { return }
 
         if isNewTrack {
+            // Reset like state; check library async once MusicKit catalog ID arrives.
+            isTrackLiked = false
+            if let catalogID = newValue.musicKitCatalogID, #available(macOS 12.0, *) {
+                Task { @MainActor in
+                    self.isTrackLiked = await MusicKitBridge.shared.isInLibrary(catalogID: catalogID)
+                }
+            }
             // Forward *or* backward skip, auto-advance, playlist jump — always peek.
             presentTrackPeek(newValue)
             return
@@ -182,6 +194,20 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         provider.seek(to: elapsed)
     }
 
+    func toggleShuffle() { provider.toggleShuffle() }
+    func toggleRepeat() { provider.toggleRepeat() }
+
+    func toggleLike() {
+        guard let catalogID = info.musicKitCatalogID else { return }
+        guard #available(macOS 12.0, *) else { return }
+        isLikeLoading = true
+        Task { @MainActor in
+            let liked = await MusicKitBridge.shared.toggleLike(catalogID: catalogID)
+            isTrackLiked = liked
+            isLikeLoading = false
+        }
+    }
+
     // MARK: - NotchAmbientProviding
 
     var isAmbientActive: Bool { info.isPlaying }
@@ -194,6 +220,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 private struct AmbientMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
     @ObservedObject private var meeting = MeetingMode.shared
+    @ObservedObject private var pulse = MediaPeekPulse.shared
 
     private var dimmed: Bool { meeting.shouldDimMediaAmbient() }
 
@@ -209,23 +236,38 @@ private struct AmbientMediaView: View {
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                 }
-                if let remainingLabel {
-                    Text(remainingLabel)
-                        .font(NotchTheme.micro.monospacedDigit())
+                if !plugin.info.artist.isEmpty {
+                    Text(plugin.info.artist)
+                        .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .lineLimit(1)
                 }
+                if let remainingLabel {
+                    Text(remainingLabel)
+                        .font(NotchTheme.micro.monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
-            .frame(maxWidth: 90, alignment: .leading)
+            .frame(maxWidth: 128, alignment: .leading)
             Spacer(minLength: 0)
             if !dimmed {
                 MusicBarsView(
                     isPlaying: plugin.info.isPlaying,
-                    barCount: 6,
-                    maxHeight: 16,
-                    color: NotchTheme.mediaGlow.opacity(0.95)
+                    barCount: 5,
+                    maxHeight: 14,
+                    color: pulse.palette.primary.mixed(with: pulse.palette.accent, t: 0.45)
+                        .boosted(saturation: 1.4).color.opacity(0.95)
                 )
                     .fixedSize()
+                if let dev = AudioOutputController.shared.devices.first(where: { $0.id == AudioOutputController.shared.selectedID }),
+                   !dev.name.localizedCaseInsensitiveContains("built-in"),
+                   !dev.name.localizedCaseInsensitiveContains("speakers") {
+                    Text(dev.name)
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.horizontal, NotchTheme.ambientInset)
@@ -252,25 +294,45 @@ private struct AmbientMediaView: View {
     @ViewBuilder
     private var artThumb: some View {
         let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
-        if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(1, contentMode: .fill)
-                .frame(width: 18, height: 18)
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-                .contentShape(shape)
-        } else {
-            shape
-                .fill(NotchTheme.chipFill)
-                .frame(width: 18, height: 18)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                )
-                .contentShape(shape)
+        let duration = plugin.info.duration
+        let elapsed = plugin.info.elapsed
+        let showRing = duration > 1 && elapsed >= 0
+        let fraction = showRing ? min(1, max(0, elapsed / duration)) : 0
+
+        ZStack {
+            if showRing {
+                let ringColor = pulse.palette.primary.color
+                Circle()
+                    .stroke(ringColor.opacity(0.18), lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(ringColor.opacity(0.80),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .frame(width: 22, height: 22)
+                    .rotationEffect(.degrees(-90))
+            }
+            if let data = plugin.info.artworkData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: 18, height: 18)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .contentShape(shape)
+            } else {
+                shape
+                    .fill(NotchTheme.chipFill)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textSecondary)
+                    )
+                    .contentShape(shape)
+            }
         }
+        .frame(width: 22, height: 22)
     }
 }
 
@@ -279,6 +341,7 @@ private struct AmbientMediaView: View {
 private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
     @ObservedObject private var volume = SystemVolumeController.shared
+    @ObservedObject private var amplify = MediaAmplifyController.shared
     /// Local scrub value while the user is dragging the timeline.
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
@@ -296,56 +359,65 @@ private struct ExpandedMediaView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-            artwork
+        GeometryReader { geo in
+            let artSize: CGFloat = geo.size.width >= 620 ? 128 : (geo.size.width >= 520 ? 116 : 104)
+            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+                artwork(size: artSize)
 
-            VStack(alignment: .leading, spacing: 6) {
-                header
-                if hasTrack {
-                    MarqueeText(
-                        text: plugin.info.title,
-                        font: .system(size: 16, weight: .semibold),
-                        foreground: NotchTheme.textPrimary,
-                        speed: 32
-                    )
-                    .frame(height: 20)
-                    .onTapGesture { plugin.openConnectedApp() }
-                    MarqueeText(
-                        text: subtitle,
-                        font: NotchTheme.caption,
-                        foreground: NotchTheme.textSecondary,
-                        speed: 28
-                    )
-                    .frame(height: 16)
-                    timelineBar
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Nothing playing")
-                            .font(NotchTheme.body.weight(.semibold))
-                            .foregroundStyle(NotchTheme.textPrimary)
-                        Text("Start Music or Spotify — transport still works.")
-                            .font(NotchTheme.micro)
-                            .foregroundStyle(NotchTheme.textTertiary)
-                        Button {
-                            plugin.openConnectedApp()
-                        } label: {
-                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                VStack(alignment: .leading, spacing: 6) {
+                    header
+                    if hasTrack {
+                        MarqueeText(
+                            text: plugin.info.title,
+                            font: .system(size: geo.size.width >= 560 ? 17 : 16, weight: .semibold),
+                            foreground: NotchTheme.textPrimary,
+                            speed: 32
+                        )
+                        .frame(height: 22)
+                        .onTapGesture { plugin.openConnectedApp() }
+                        MarqueeText(
+                            text: subtitle,
+                            font: NotchTheme.caption,
+                            foreground: NotchTheme.textSecondary,
+                            speed: 28
+                        )
+                        .frame(height: 16)
+                        timelineBar
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Nothing playing")
+                                .font(NotchTheme.body.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                            Text("Start Music or Spotify — transport still works.")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                            Button {
+                                plugin.openConnectedApp()
+                            } label: {
+                                NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
+
+                    systemVolumeSection
+
+                    if hasTrack {
+                        playlistRow
+                    }
+
+                    // Queue strip — hidden when volume section is open to preserve height budget
+                    if hasTrack, !plugin.info.upcomingTracks.isEmpty, !showSystemVolume {
+                        QueuePeekView(tracks: plugin.info.upcomingTracks)
+                    }
+
+                    Spacer(minLength: 2)
+                    transportRow
                 }
-
-                systemVolumeSection
-
-                if hasTrack {
-                    playlistRow
-                }
-
-                Spacer(minLength: 2)
-                transportRow
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .onAppear {
@@ -409,6 +481,32 @@ private struct ExpandedMediaView: View {
                     maxHeight: 16,
                     color: NotchTheme.mediaGlow.opacity(0.95)
                 )
+                    .fixedSize()
+            }
+            // Explicit badge
+            if plugin.info.isExplicit {
+                Text("E")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .frame(width: 14, height: 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(NotchTheme.textQuaternary, lineWidth: 1)
+                    )
+            }
+            // Genre chip
+            if let genre = plugin.info.genre {
+                Text(genre)
+                    .font(NotchTheme.micro.weight(.medium))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            // Release year
+            if let year = plugin.info.releaseYear {
+                Text(String(year))
+                    .font(NotchTheme.micro.monospacedDigit())
+                    .foregroundStyle(NotchTheme.textQuaternary)
                     .fixedSize()
             }
             Spacer(minLength: 0)
@@ -477,7 +575,77 @@ private struct ExpandedMediaView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    /// Collapsible subsection under Media — system output volume (AppleScript UI %).
+    /// Amplify icon button — **green glow when on**, **red glow when off**.
+    /// Real `Button` + notch hit target (Menu labels eat first-click on the
+    /// nonactivating notch panel).
+    private var amplifyIconButton: some View {
+        let on = amplify.isEnabled
+        let inMeeting = FocusController.shared.isMeetingActive
+        let green = Color(red: 0.18, green: 0.95, blue: 0.45)
+        let red = Color(red: 1.0, green: 0.28, blue: 0.32)
+        let glow = on ? green : red
+        return Button {
+            guard !inMeeting else { return }
+            amplify.toggle()
+        } label: {
+            Image(systemName: "waveform.circle.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(glow)
+                .shadow(color: glow.opacity(0.95), radius: on ? 7 : 5)
+                .shadow(color: glow.opacity(0.5), radius: on ? 12 : 8)
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(glow.opacity(on ? 0.22 : 0.16))
+                        .frame(width: 34, height: 34)
+                )
+                .contentShape(Circle())
+        }
+        // Same press path as play/pause — first click always fires.
+        .buttonStyle(.notchIcon(diameter: 34, prominent: on))
+        .disabled(inMeeting)
+        .opacity(inMeeting ? 0.4 : 1)
+        .help(
+            inMeeting
+                ? "Amplify pauses in Meeting Mode"
+                : (on
+                   ? "Amplify \(amplify.profile.title) — shapes tone, not volume\(amplify.activePresetName.map { " · \($0)" } ?? "")"
+                   : "Amplify off — Dolby-style presence/cinema/impact via EQ only")
+        )
+        .accessibilityLabel(on ? "Amplify \(amplify.profile.title) on" : "Amplify off")
+        .accessibilityAddTraits(.isButton)
+        .contextMenu {
+            ForEach(MediaAmplifyProfile.allCases) { profile in
+                Button {
+                    amplify.profile = profile
+                    if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                        amplify.isEnabled = true
+                    }
+                } label: {
+                    if amplify.profile == profile {
+                        Label("\(profile.title) — \(profile.subtitle)", systemImage: "checkmark")
+                    } else {
+                        Text("\(profile.title) — \(profile.subtitle)")
+                    }
+                }
+            }
+            Divider()
+            Button("Cycle profile") {
+                amplify.cycleProfile()
+                if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                    amplify.isEnabled = true
+                }
+            }
+        }
+        .onChange(of: plugin.info.sourceApp) { _ in
+            amplify.reapplyForSource()
+        }
+        .onChange(of: plugin.info.title) { _ in
+            amplify.reapplyForTrack(title: plugin.info.title, artist: plugin.info.artist)
+        }
+    }
+
+    /// Collapsible subsection under Media — system output volume.
     private var systemVolumeSection: some View {
         NotchCard(padding: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -612,9 +780,9 @@ private struct ExpandedMediaView: View {
     }
 
     @ViewBuilder
-    private var artwork: some View {
-        let corner: CGFloat = 16
-        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: 104, cornerRadius: corner) {
+    private func artwork(size: CGFloat) -> some View {
+        let corner: CGFloat = size >= 120 ? 18 : 16
+        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: size, cornerRadius: corner) {
             Group {
                 if let data = plugin.info.artworkData, let image = NSImage(data: data) {
                     Image(nsImage: image)
@@ -628,12 +796,12 @@ private struct ExpandedMediaView: View {
                             endPoint: .bottomTrailing
                         )
                         Image(systemName: "music.note")
-                            .font(.system(size: 28, weight: .medium))
+                            .font(.system(size: size * 0.27, weight: .medium))
                             .foregroundStyle(NotchTheme.textTertiary)
                     }
                 }
             }
-            .frame(width: 104, height: 104)
+            .frame(width: size, height: size)
             .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
             .overlay(alignment: .bottomTrailing) {
                 Image(systemName: "arrow.up.right")
@@ -650,26 +818,75 @@ private struct ExpandedMediaView: View {
     }
 
     private var transportRow: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
+            transportButton(
+                "shuffle",
+                accessibility: "Shuffle",
+                size: 12,
+                diameter: 34,
+                prominent: plugin.info.isShuffling,
+                activeTint: plugin.info.isShuffling
+            ) { plugin.toggleShuffle() }
+
             transportButton(
                 "backward.fill",
                 accessibility: "Previous",
                 size: 15,
-                diameter: 38
+                diameter: 40
             ) { plugin.previousTrack() }
+
             transportButton(
                 plugin.info.isPlaying ? "pause.fill" : "play.fill",
                 accessibility: plugin.info.isPlaying ? "Pause" : "Play",
-                size: 17,
-                diameter: 46,
+                size: 18,
+                diameter: 48,
                 prominent: true
             ) { plugin.togglePlayPause() }
+
             transportButton(
                 "forward.fill",
                 accessibility: "Next",
                 size: 15,
-                diameter: 38
+                diameter: 40
             ) { plugin.nextTrack() }
+
+            transportButton(
+                plugin.info.repeatMode == .one ? "repeat.1" : "repeat",
+                accessibility: "Repeat",
+                size: 12,
+                diameter: 34,
+                prominent: plugin.info.repeatMode != .none,
+                activeTint: plugin.info.repeatMode != .none
+            ) { plugin.toggleRepeat() }
+
+            Spacer(minLength: 4)
+
+            amplifyIconButton
+
+            // Like / Add to Library — only when MusicKit has a catalog ID
+            Button {
+                plugin.toggleLike()
+            } label: {
+                Group {
+                    if plugin.isLikeLoading {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                    } else {
+                        Image(systemName: plugin.isTrackLiked ? "heart.fill" : "heart")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(
+                                plugin.isTrackLiked
+                                    ? Color(red: 1, green: 0.22, blue: 0.37)
+                                    : NotchTheme.textQuaternary
+                            )
+                    }
+                }
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(plugin.info.musicKitCatalogID == nil || plugin.isLikeLoading)
+            .opacity(plugin.info.musicKitCatalogID == nil ? 0 : 1)
+            .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
         }
     }
 
@@ -679,6 +896,7 @@ private struct ExpandedMediaView: View {
         size: CGFloat,
         diameter: CGFloat,
         prominent: Bool = false,
+        activeTint: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         // Real `Button` + shared style so first-clicks fire on the nonactivating
@@ -686,9 +904,12 @@ private struct ExpandedMediaView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
+                .foregroundStyle(activeTint || prominent ? NotchTheme.textPrimary : NotchTheme.textSecondary)
+                .symbolRenderingMode(.hierarchical)
         }
         .buttonStyle(.notchIcon(diameter: diameter, prominent: prominent))
+        // Zero animation lag on press so transport feels instant.
+        .transaction { $0.animation = nil }
         .help(accessibility)
         .accessibilityLabel(accessibility)
     }

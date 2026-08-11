@@ -7,12 +7,20 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
     let displayName = "Focus"
     let systemImage = "scope"
 
-    var expandedContentHeight: CGFloat { 255 }
+    /// Meeting companion needs more vertical room; other modes stay compact.
+    var expandedContentHeight: CGFloat {
+        switch FocusController.shared.baseMode {
+        case .meeting: return 320
+        case .trueFocus: return 280
+        default: return 260
+        }
+    }
 
     var isAmbientActive: Bool {
         let f = FocusController.shared
         if f.isMeetingActive { return true }
         if f.baseMode == .trueFocus, FocusAgendaEngine.shared.snapshot.now != nil { return true }
+        if f.baseMode == .dynamic, FocusAgendaEngine.shared.snapshot.upNext.first != nil { return true }
         return false
     }
 
@@ -85,6 +93,7 @@ private struct ExpandedFocusView: View {
     @ObservedObject private var notes = MeetingNotesStore.shared
     @ObservedObject private var speech = MeetingSpeechCapture.shared
     @ObservedObject private var volume = SystemVolumeController.shared
+    @State private var showAllAgenda = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -94,29 +103,40 @@ private struct ExpandedFocusView: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header.padding(.bottom, 6)
-            modePicker.padding(.bottom, 6)
+        GeometryReader { geo in
+            // Wider island (min ~540) — dual-column Meeting/Focus at modest widths.
+            let wide = geo.size.width >= 500
+            VStack(alignment: .leading, spacing: 0) {
+                header.padding(.bottom, 6)
+                modePicker.padding(.bottom, 6)
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if focus.baseMode == .meeting {
-                        meetingCompanion
-                    } else {
-                        modeBody
+                ScrollView(.vertical, showsIndicators: false) {
+                    Group {
+                        if focus.baseMode == .meeting {
+                            meetingCompanion(wide: wide)
+                        } else {
+                            modeBody
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+
+                if focus.baseMode != .meeting {
+                    footerActions.padding(.top, 6)
                 }
             }
-
-            if focus.baseMode != .meeting {
-                footerActions.padding(.top, 6)
-            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             SystemVolumeController.shared.start()
             FocusController.shared.reevaluateMeeting()
             speech.refreshAuth()
+            // Ensure panel height matches mode.
+            NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
+        }
+        .onChange(of: focus.baseMode) { _ in
+            NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
         }
     }
 
@@ -149,11 +169,18 @@ private struct ExpandedFocusView: View {
     }
 
     private var statusLine: String {
+        // Depend on tick so the timer redraws every second in Meeting.
+        let _ = focus.meetingElapsedTick
         switch focus.baseMode {
         case .meeting:
             let m = Int(focus.meetingElapsed / 60)
             let s = Int(focus.meetingElapsed) % 60
-            return String(format: "Companion · %d:%02d · vol %d%%", m, s, volume.percent)
+            let ducked = volume.percent <= focus.duckPercent + 3
+            return String(
+                format: "Companion · %d:%02d · vol %d%%%@",
+                m, s, volume.percent,
+                ducked ? " · ducked" : ""
+            )
         case .dynamic: return "Next actions & peeks"
         case .trueFocus: return "Agenda from Calendar & Reminders"
         case .normal: return "Default Dynamo"
@@ -195,11 +222,21 @@ private struct ExpandedFocusView: View {
 
     // MARK: Meeting companion
 
-    private var meetingCompanion: some View {
+    @ViewBuilder
+    private func meetingCompanion(wide: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             meetingContextStrip
-            talkSuggestions
-            notesPanel
+            if wide {
+                HStack(alignment: .top, spacing: 10) {
+                    talkSuggestions
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    notesPanel
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            } else {
+                talkSuggestions
+                notesPanel
+            }
             meetingFooter
         }
     }
@@ -248,166 +285,80 @@ private struct ExpandedFocusView: View {
     }
 
     private var contextSubtitle: String {
-        if let app = focus.suggestedCallApp {
+        if let hint = focus.meetingSmartHint { return hint }
+        if let app = focus.suggestedCallApp ?? focus.activeCallApp {
             return "\(app) open · notes stay on this Mac"
         }
         return "Notetaker + talk tips · never joins the call"
     }
 
     private var talkSuggestions: some View {
-        let tips = MeetingTalkCoach.suggestions(
+        TalkCoachView(
             calendarTitle: focus.calendarMeetingTitle() ?? notes.session?.calendarTitle,
             callApp: focus.suggestedCallApp ?? notes.session?.callApp,
-            notes: notes.bullets,
-            elapsed: focus.meetingElapsed
+            elapsed: focus.meetingElapsed,
+            tick: focus.meetingElapsedTick
         )
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("What to say")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
-            ForEach(tips.prefix(3)) { tip in
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(tip.text, forType: .string)
-                    notes.pinSuggestion(tip.text)
-                } label: {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(NotchTheme.mediaGlow)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(tip.text)
-                                .font(NotchTheme.micro.weight(.medium))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(tip.reason + " · tap to copy & pin")
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundStyle(NotchTheme.textQuaternary)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     private var notesPanel: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("Notes")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                Spacer(minLength: 0)
-                Button {
-                    speech.toggleListen()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: speech.isListening ? "mic.fill" : "mic")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(speech.isListening ? "Listening" : "Listen")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(speech.isListening ? NotchTheme.positive : NotchTheme.textTertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule().fill(
-                            speech.isListening
-                                ? NotchTheme.positive.opacity(0.15)
-                                : Color.white.opacity(0.06)
-                        )
-                    )
-                }
-                .buttonStyle(.plain)
-                .help("Free Apple Speech recognition for meeting notes")
-            }
-
-            if !speech.partialText.isEmpty {
-                Text(speech.partialText)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .lineLimit(2)
-            } else if !speech.statusMessage.isEmpty {
-                Text(speech.statusMessage)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
-            }
-
-            // Recent bullets
-            ForEach(notes.bullets.suffix(4).reversed()) { b in
-                HStack(alignment: .top, spacing: 6) {
-                    Text(Self.timeFormatter.string(from: b.createdAt))
-                        .font(.system(size: 8, weight: .medium).monospacedDigit())
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .frame(width: 36, alignment: .leading)
-                    Text(b.text)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textSecondary)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                    Image(systemName: sourceIcon(b.source))
-                        .font(.system(size: 8))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                }
-            }
-
-            HStack(spacing: 6) {
-                TextField("Add note…", text: $notes.draft)
-                    .textFieldStyle(.plain)
-                    .font(NotchTheme.micro)
-                    .onSubmit { notes.submitDraft() }
-                Button { notes.submitDraft() } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(
-                            notes.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? NotchTheme.textQuaternary
-                                : NotchTheme.textPrimary
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-        }
-    }
-
-    private func sourceIcon(_ s: MeetingNoteBullet.Source) -> String {
-        switch s {
-        case .typed: return "keyboard"
-        case .speech: return "mic.fill"
-        case .suggestion: return "text.bubble"
-        }
+        MeetingNotesPanel()
     }
 
     private var meetingFooter: some View {
-        HStack(spacing: 8) {
-            chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
-            chipButton("Clear", "trash") { notes.clearBullets() }
-            Spacer(minLength: 0)
-            Button {
-                speech.stop()
-                focus.leaveMeetingMode()
-            } label: {
-                Text("Leave Meeting")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.caution)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Toggle(isOn: $focus.smartAutoEnterMeeting) {
+                    Text("Smart enter")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Auto-enter when Calendar meeting is live and a call app is open")
+
+                Toggle(isOn: $focus.autoListenOnEnter) {
+                    Text("Auto Listen")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Start speech notes when entering Meeting (if already authorized)")
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                chipButton("Copy", "doc.on.doc") { notes.copyAllToPasteboard() }
+                chipButton("Save", "square.and.arrow.down") { notes.saveToFile() }
+                chipButton("Clear", "trash") { notes.clearBullets() }
+                chipButton(
+                    speech.isListening ? "Stop" : "Listen",
+                    speech.isListening ? "waveform.badge.mic" : "mic.fill"
+                ) {
+                    speech.toggleListen()
+                }
+                chipButton(
+                    volume.isMuted ? "Unmute" : "Mute",
+                    volume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                ) {
+                    volume.toggleMute()
+                }
+                Spacer(minLength: 0)
+                Button {
+                    speech.stop()
+                    focus.leaveMeetingMode()
+                } label: {
+                    Text("Leave Meeting")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.caution)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(NotchTheme.caution.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .help("Exit Meeting Mode and restore volume")
+            }
         }
     }
 
@@ -420,7 +371,7 @@ private struct ExpandedFocusView: View {
             tipCard(
                 "circle",
                 "Normal",
-                "Default Dynamo. Select Meeting for notes & quiet island when you’re on a call — Dynamo never joins the meeting."
+                "Default Dynamo. Select Meeting for notes & a quiet island — Dynamo never joins the call."
             )
             if let app = focus.suggestedCallApp {
                 Button { focus.enterMeetingMode() } label: {
@@ -429,6 +380,8 @@ private struct ExpandedFocusView: View {
                         Text("\(app) is open — Enter Meeting Mode")
                             .font(NotchTheme.micro.weight(.semibold))
                         Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
                     }
                     .foregroundStyle(NotchTheme.caution)
                     .padding(8)
@@ -436,10 +389,39 @@ private struct ExpandedFocusView: View {
                 }
                 .buttonStyle(.plain)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Modes")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                modeHintRow("Dynamic", "Smart peeks for what’s next")
+                modeHintRow("True Focus", "Agenda from Calendar & Reminders")
+                modeHintRow("Meeting", "Notes, talk tips, duck music")
+            }
+            .padding(.top, 2)
         case .dynamic:
             tipCard("bolt.horizontal.circle", "Dynamic", "Peeks surface what’s next. Media stays first-class.")
             if let next = agenda.snapshot.upNext.first {
                 miniRow("Up next", next.title, timeLabel(next.when))
+            } else if let due = agenda.snapshot.needsAttention.first {
+                miniRow("Overdue", due.title, due.detail)
+            } else {
+                Text("Nothing urgent — enjoy the flow.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            if !focus.recentDynamicPeeks.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Recent nudges")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                    ForEach(focus.recentDynamicPeeks, id: \.self) { item in
+                        Text("· \(item)")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.top, 4)
             }
         case .trueFocus:
             trueFocusBody
@@ -453,11 +435,20 @@ private struct ExpandedFocusView: View {
             if let now = agenda.snapshot.now {
                 agendaRow("Now", now, NotchTheme.positive)
             }
-            ForEach(agenda.snapshot.upNext.prefix(3)) { item in
+            let upNext = agenda.snapshot.upNext
+            ForEach(upNext.prefix(showAllAgenda ? upNext.count : 3)) { item in
                 agendaRow(nil, item, NotchTheme.mediaGlow)
             }
             ForEach(agenda.snapshot.needsAttention.prefix(2)) { item in
                 agendaRow("Due", item, NotchTheme.caution)
+            }
+            if upNext.count > 3 {
+                Button(showAllAgenda ? "Show less" : "Show all \(upNext.count)") {
+                    showAllAgenda.toggle()
+                }
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .buttonStyle(.plain)
             }
             if agenda.snapshot.now == nil && agenda.snapshot.upNext.isEmpty {
                 tipCard("target", "No agenda yet", "Allow Calendar & Reminders to fill True Focus.")
@@ -523,23 +514,49 @@ private struct ExpandedFocusView: View {
         }
     }
 
+    private func modeHintRow(_ title: String, _ detail: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textSecondary)
+                .frame(width: 72, alignment: .leading)
+            Text(detail)
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
     private var footerActions: some View {
-        HStack(spacing: 8) {
-            chipButton("Refresh", "arrow.clockwise") {
-                focus.reevaluateMeeting()
-                FocusAgendaEngine.shared.rebuild()
-            }
-            chipButton("Calendar", "calendar") {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
-                    NSWorkspace.shared.open(url)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                chipButton("Refresh", "arrow.clockwise") {
+                    focus.reevaluateMeeting()
+                    FocusAgendaEngine.shared.rebuild()
                 }
-            }
-            chipButton("Reminders", "checklist") {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
-                    NSWorkspace.shared.open(url)
+                chipButton("Calendar", "calendar") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
+                chipButton("Reminders", "checklist") {
+                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.reminders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Spacer()
             }
-            Spacer()
+            Toggle(isOn: Binding(
+                get: { focus.suggestMeetingOnCall },
+                set: { focus.suggestMeetingOnCall = $0 }
+            )) {
+                Text("Suggest Meeting Mode on calls")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
         }
     }
 
@@ -563,5 +580,437 @@ private struct ExpandedFocusView: View {
         if mins > 0, mins < 180 { return "in \(mins)m" }
         if mins <= 0, mins > -120 { return "now" }
         return Self.timeFormatter.string(from: date)
+    }
+}
+
+// MARK: - Meeting Notes Panel
+
+private struct MeetingNotesPanel: View {
+    @ObservedObject private var notes = MeetingNotesStore.shared
+    @ObservedObject private var speech = MeetingSpeechCapture.shared
+
+    @State private var editingID: UUID? = nil
+    @State private var editDraft: String = ""
+    @State private var historyVisible: Bool = false
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            panelHeader
+
+            if !speech.partialText.isEmpty {
+                Text(speech.partialText)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .lineLimit(2)
+            } else if !speech.statusMessage.isEmpty {
+                Text(speech.statusMessage)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
+            }
+
+            if notes.bullets.isEmpty {
+                Text("No notes yet — type below or tap Listen")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(notes.bullets.reversed()) { b in
+                        bulletRow(b)
+                    }
+                }
+            }
+
+            draftRow
+
+            if historyVisible {
+                Divider().overlay(NotchTheme.separator).padding(.vertical, 2)
+                MeetingHistoryPanel(onDismiss: { historyVisible = false })
+            }
+        }
+    }
+
+    private var panelHeader: some View {
+        HStack(spacing: 6) {
+            Text("Notes")
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+            Spacer(minLength: 0)
+            Button {
+                historyVisible.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 8, weight: .semibold))
+                    Text("History")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(historyVisible ? NotchTheme.mediaGlow : NotchTheme.textQuaternary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.white.opacity(0.05)))
+            }
+            .buttonStyle(.plain)
+            Button {
+                speech.toggleListen()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: speech.isListening ? "mic.fill" : "mic")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(speech.isListening ? "Listening" : "Listen")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(speech.isListening ? NotchTheme.positive : NotchTheme.textTertiary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill(speech.isListening ? NotchTheme.positive.opacity(0.15) : Color.white.opacity(0.06))
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Free Apple Speech recognition for meeting notes")
+        }
+    }
+
+    private func bulletRow(_ b: MeetingNoteBullet) -> some View {
+        HStack(alignment: .center, spacing: 5) {
+            // Tag chip — cycles on tap
+            Button {
+                let next: BulletTag?
+                if let current = b.tag { next = current.next } else { next = .decision }
+                notes.tagBullet(id: b.id, tag: next)
+            } label: {
+                if let tag = b.tag {
+                    Image(systemName: tag.systemImage)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(tagColor(tag))
+                        .frame(width: 14)
+                } else {
+                    Image(systemName: "circle.dotted")
+                        .font(.system(size: 8))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .frame(width: 14)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Tap to tag: Decision / Action / Risk")
+
+            // Text or inline edit field
+            if editingID == b.id {
+                TextField("", text: $editDraft)
+                    .textFieldStyle(.plain)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .onSubmit { commitEdit(b.id) }
+                    .onExitCommand { editingID = nil }
+            } else {
+                Text(b.text)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(b.tag == nil ? NotchTheme.textSecondary : NotchTheme.textPrimary)
+                    .lineLimit(2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editDraft = b.text
+                        editingID = b.id
+                    }
+            }
+
+            Spacer(minLength: 0)
+
+            // Timestamp
+            Text(Self.timeFmt.string(from: b.createdAt))
+                .font(.system(size: 7.5).monospacedDigit())
+                .foregroundStyle(NotchTheme.textQuaternary)
+
+            // Source icon
+            Image(systemName: sourceIcon(b.source))
+                .font(.system(size: 7.5))
+                .foregroundStyle(NotchTheme.textQuaternary)
+
+            // Delete
+            Button { notes.deleteBullet(id: b.id) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove note")
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(b.tag.map { tagColor($0).opacity(0.07) } ?? Color.white.opacity(0.03))
+        )
+    }
+
+    private var draftRow: some View {
+        HStack(spacing: 6) {
+            TextField("Add note…", text: $notes.draft)
+                .textFieldStyle(.plain)
+                .font(NotchTheme.micro)
+                .onSubmit { notes.submitDraft() }
+            Button { notes.submitDraft() } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        notes.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? NotchTheme.textQuaternary
+                            : NotchTheme.textPrimary
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    private func commitEdit(_ id: UUID) {
+        notes.editBullet(id: id, text: editDraft)
+        editingID = nil
+    }
+
+    private func tagColor(_ tag: BulletTag) -> Color {
+        switch tag {
+        case .decision: return NotchTheme.mediaGlow
+        case .action:   return NotchTheme.positive
+        case .risk:     return NotchTheme.caution
+        }
+    }
+
+    private func sourceIcon(_ s: MeetingNoteBullet.Source) -> String {
+        switch s {
+        case .typed:      return "keyboard"
+        case .speech:     return "mic.fill"
+        case .suggestion: return "text.bubble"
+        }
+    }
+}
+
+// MARK: - Talk Coach View (dismissible suggestions)
+
+private struct TalkCoachView: View {
+    let calendarTitle: String?
+    let callApp: String?
+    let elapsed: TimeInterval
+    /// Bumps every second in Meeting so mid-call tips refresh.
+    var tick: Int = 0
+    @ObservedObject private var notes = MeetingNotesStore.shared
+    @State private var dismissed: Set<String> = []
+    @State private var collapsed = false
+
+    var body: some View {
+        let _ = tick
+        let tips = MeetingTalkCoach.suggestions(
+            calendarTitle: calendarTitle,
+            callApp: callApp,
+            notes: notes.bullets,
+            elapsed: elapsed
+        ).filter { !dismissed.contains($0.id) }
+
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("What to say")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.easeOut(duration: 0.12)) { collapsed.toggle() }
+                } label: {
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !collapsed {
+                if tips.isEmpty {
+                    Text("No suggestions yet — add notes to unlock more.")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                } else {
+                    ForEach(tips.prefix(3)) { tip in
+                        HStack(alignment: .top, spacing: 5) {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(tip.text, forType: .string)
+                                notes.pinSuggestion(tip.text)
+                            } label: {
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: "text.bubble")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.mediaGlow)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(tip.text)
+                                            .font(NotchTheme.micro.weight(.medium))
+                                            .foregroundStyle(NotchTheme.textPrimary)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Text(tip.reason + " · tap to copy & pin")
+                                            .font(.system(size: 8, weight: .medium))
+                                            .foregroundStyle(NotchTheme.textQuaternary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.white.opacity(0.05))
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button { dismissed.insert(tip.id) } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Dismiss suggestion")
+                            .padding(.top, 9)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Meeting History Panel
+
+private struct MeetingHistoryPanel: View {
+    var onDismiss: () -> Void
+    @State private var sessions: [MeetingNoteSession] = []
+    @State private var expanded: UUID? = nil
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; return f
+    }()
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Past sessions")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Spacer(minLength: 0)
+                Button("Done") { onDismiss() }
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .buttonStyle(.plain)
+            }
+
+            if sessions.isEmpty {
+                Text("No past sessions found.")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(sessions.prefix(6)) { s in
+                    sessionRow(s)
+                }
+            }
+        }
+        .onAppear {
+            sessions = MeetingNotesStore.shared.loadPastSessions()
+        }
+    }
+
+    private func sessionRow(_ s: MeetingNoteSession) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(s.calendarTitle ?? "Untitled")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                        .lineLimit(1)
+                    Text("\(Self.dateFmt.string(from: s.startedAt)) · \(s.bullets.count) note\(s.bullets.count == 1 ? "" : "s")")
+                        .font(.system(size: 8).monospacedDigit())
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                Spacer(minLength: 0)
+                Button { MeetingNotesStore.shared.copySession(s) } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 9))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy notes")
+                Button { MeetingNotesStore.shared.saveSession(s) } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Save as Markdown")
+                Button {
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        expanded = expanded == s.id ? nil : s.id
+                    }
+                } label: {
+                    Image(systemName: expanded == s.id ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if expanded == s.id {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(s.bullets.prefix(10)) { b in
+                        HStack(spacing: 5) {
+                            if let tag = b.tag {
+                                Image(systemName: tag.systemImage)
+                                    .font(.system(size: 7.5))
+                                    .foregroundStyle(tagColor(tag))
+                            } else {
+                                Image(systemName: "circle.dotted")
+                                    .font(.system(size: 7.5))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
+                            Text(b.text)
+                                .font(.system(size: 9))
+                                .foregroundStyle(NotchTheme.textSecondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(Self.timeFmt.string(from: b.createdAt))
+                                .font(.system(size: 7.5).monospacedDigit())
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                        }
+                    }
+                    if s.bullets.count > 10 {
+                        Text("+ \(s.bullets.count - 10) more")
+                            .font(.system(size: 8))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    }
+                }
+                .padding(.leading, 6)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func tagColor(_ tag: BulletTag) -> Color {
+        switch tag {
+        case .decision: return NotchTheme.mediaGlow
+        case .action:   return NotchTheme.positive
+        case .risk:     return NotchTheme.caution
+        }
     }
 }

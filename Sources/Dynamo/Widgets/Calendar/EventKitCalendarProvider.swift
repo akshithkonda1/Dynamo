@@ -102,6 +102,8 @@ final class EventKitCalendarProvider: CalendarProvider {
                     )
                 }
                 let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let notes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                let attendees = event.attendees?.compactMap { $0.name }.filter { !$0.isEmpty } ?? []
                 let id: String
                 if let ek = event.eventIdentifier, !ek.isEmpty {
                     id = "\(ek)|\(event.startDate.timeIntervalSinceReferenceDate)"
@@ -116,7 +118,9 @@ final class EventKitCalendarProvider: CalendarProvider {
                     calendarColor: color,
                     isAllDay: event.isAllDay,
                     calendarName: event.calendar.title,
-                    location: (location?.isEmpty == false) ? location : nil
+                    location: (location?.isEmpty == false) ? location : nil,
+                    notes: notes,
+                    attendees: attendees
                 )
             }
         upcoming = Array(events)
@@ -165,6 +169,14 @@ final class EventKitCalendarProvider: CalendarProvider {
         CalendarNewEventOpener.open()
     }
 
+    func createEvent(_ draft: CalendarEventComposer.Draft) -> CalendarEventComposer.Result {
+        let result = CalendarEventComposer.create(draft, store: store)
+        if case .created = result {
+            refresh()
+        }
+        return result
+    }
+
     func openToday() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
@@ -181,7 +193,8 @@ final class EventKitCalendarProvider: CalendarProvider {
             case .fullAccess, .authorized:
                 authorizationState = .authorized
             case .writeOnly:
-                authorizationState = .denied
+                // Write-only still allows create; reads may be empty.
+                authorizationState = .authorized
             case .notDetermined:
                 authorizationState = .notDetermined
             default:

@@ -4,12 +4,17 @@ import Foundation
 /// Watches the general pasteboard for text + images; pins persist under App Support.
 @MainActor
 final class ClipboardStore: ObservableObject {
-    static let historyLimit = 20
+    static var historyLimit: Int {
+        let cap = UserDefaults.standard.integer(forKey: "clipboardHistoryCap")
+        return cap > 0 ? cap : 20
+    }
     private static let fileName = "clipboard.json"
     private static let imageFolder = "ClipboardImages"
 
     @Published private(set) var history: [ClipboardHistoryItem] = []
     @Published private(set) var snippets: [PinnedSnippet] = []
+
+    var onNewItem: ((ClipboardHistoryItem) -> Void)?
 
     private var lastChangeCount: Int = -1
     private var timer: Timer?
@@ -28,7 +33,8 @@ final class ClipboardStore: ObservableObject {
         isStarted = true
         load()
         lastChangeCount = NSPasteboard.general.changeCount
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // changeCount is cheap; 2s is enough without burning a 1Hz timer.
+        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollPasteboard()
             }
@@ -123,6 +129,13 @@ final class ClipboardStore: ObservableObject {
         var updated = snippet
         updated.updatedAt = Date()
         snippets[idx] = updated
+        persist()
+    }
+
+    func renameSnippet(id: UUID, title: String) {
+        guard let i = snippets.firstIndex(where: { $0.id == id }) else { return }
+        snippets[i].title = title
+        snippets[i].updatedAt = Date()
         persist()
     }
 

@@ -37,10 +37,10 @@ private struct NotchIconButtonBody: View {
                     )
             )
             .contentShape(Rectangle())
-            // Subtle press — closer to AppKit toolbar buttons than a hard scale.
-            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
-            .opacity(configuration.isPressed ? 0.88 : 1.0)
-            .animation(NotchTheme.quick, value: configuration.isPressed)
+            // Instant press feedback — no spring lag on transport buttons.
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(nil, value: configuration.isPressed)
             .animation(NotchTheme.quick, value: isHovering)
             .onHover { isHovering = $0 }
     }
