@@ -78,6 +78,12 @@ final class MeetingNotesStore: ObservableObject {
 
     @Published private(set) var session: MeetingNoteSession?
     @Published var draft: String = ""
+    /// True right after "Clear" while the undo window is still open.
+    @Published private(set) var canUndoClearBullets = false
+
+    private var clearedBulletsSnapshot: [MeetingNoteBullet]?
+    private var clearBulletsUndoTimer: Timer?
+    private static let clearUndoWindow: TimeInterval = 6
 
     private let dir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -158,10 +164,42 @@ final class MeetingNotesStore: ObservableObject {
         _ = addBullet(text, source: .suggestion, tag: .action)
     }
 
+    /// Clears the current session's bullets, but keeps a snapshot for a short
+    /// grace window so `undoClearBullets()` can fully restore it — matching
+    /// Mail/Notes-style "deleted, tap to undo" behavior.
     func clearBullets() {
+        guard let current = session?.bullets, !current.isEmpty else { return }
+        clearedBulletsSnapshot = current
+        canUndoClearBullets = true
         session?.bullets = []
         persist()
         objectWillChange.send()
+
+        clearBulletsUndoTimer?.invalidate()
+        let t = Timer(timeInterval: Self.clearUndoWindow, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finalizeClearBullets() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        clearBulletsUndoTimer = t
+    }
+
+    /// Restores the bullets cleared by the most recent `clearBullets()` call,
+    /// if the undo window hasn't elapsed yet.
+    func undoClearBullets() {
+        guard let snapshot = clearedBulletsSnapshot else { return }
+        clearBulletsUndoTimer?.invalidate()
+        clearBulletsUndoTimer = nil
+        session?.bullets = snapshot
+        clearedBulletsSnapshot = nil
+        canUndoClearBullets = false
+        persist()
+        objectWillChange.send()
+    }
+
+    private func finalizeClearBullets() {
+        clearedBulletsSnapshot = nil
+        canUndoClearBullets = false
+        clearBulletsUndoTimer = nil
     }
 
     var bullets: [MeetingNoteBullet] { session?.bullets ?? [] }

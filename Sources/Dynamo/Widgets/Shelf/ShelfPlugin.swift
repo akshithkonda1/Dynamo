@@ -88,6 +88,20 @@ private struct ExpandedShelfView: View {
                 )
             )
 
+            if store.canUndoClear {
+                HStack(spacing: 6) {
+                    Text("Shelf cleared")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    Spacer(minLength: 0)
+                    Button("Undo") { store.undoClear() }
+                        .buttonStyle(.plain)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                }
+                .transition(.opacity)
+            }
+
             if store.items.isEmpty {
                 dropHint
                     .contentShape(Rectangle())
@@ -108,6 +122,7 @@ private struct ExpandedShelfView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.2), value: store.canUndoClear)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleProviders(providers)
         }
@@ -201,6 +216,7 @@ private struct ExpandedShelfView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Share via AirDrop")
+            .accessibilityLabel("Share via AirDrop")
 
             Button {
                 store.revealInFinder(item)
@@ -211,6 +227,7 @@ private struct ExpandedShelfView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Reveal in Finder")
+            .accessibilityLabel("Reveal in Finder")
 
             Button {
                 store.remove(id: item.id)

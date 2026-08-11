@@ -370,6 +370,21 @@ private struct ExpandedFocusView: View {
                 .buttonStyle(.plain)
                 .help("Exit Meeting Mode and restore volume")
             }
+
+            if notes.canUndoClearBullets {
+                HStack(spacing: 6) {
+                    Text("Notes cleared")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    Spacer(minLength: 0)
+                    Button("Undo") { notes.undoClearBullets() }
+                        .buttonStyle(.plain)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: notes.canUndoClearBullets)
+            }
         }
     }
 
@@ -709,6 +724,7 @@ private struct MeetingNotesPanel: View {
             }
             .buttonStyle(.plain)
             .help("Tap to tag: Decision / Action / Risk")
+            .accessibilityLabel("Tag: \(b.tag?.label ?? "None")")
 
             // Text or inline edit field
             if editingID == b.id {
@@ -750,6 +766,7 @@ private struct MeetingNotesPanel: View {
             }
             .buttonStyle(.plain)
             .help("Remove note")
+            .accessibilityLabel("Remove note")
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -887,6 +904,7 @@ private struct TalkCoachView: View {
                             }
                             .buttonStyle(.plain)
                             .help("Dismiss suggestion")
+                            .accessibilityLabel("Dismiss suggestion")
                             .padding(.top, 9)
                         }
                     }
@@ -959,6 +977,7 @@ private struct MeetingHistoryPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy notes")
+                .accessibilityLabel("Copy notes")
                 Button { MeetingNotesStore.shared.saveSession(s) } label: {
                     Image(systemName: "square.and.arrow.down")
                         .font(.system(size: 9))
@@ -966,6 +985,7 @@ private struct MeetingHistoryPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help("Save as Markdown")
+                .accessibilityLabel("Save as Markdown")
                 Button {
                     withAnimation(.easeOut(duration: 0.1)) {
                         expanded = expanded == s.id ? nil : s.id
