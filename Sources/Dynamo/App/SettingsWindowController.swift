@@ -185,7 +185,7 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, weather, sports, health — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS still may show system banners unless you quiet them in Focus / Notifications settings.")
+            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, sports, health — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS still may show system banners unless you quiet them in Focus / Notifications settings. Weather is disabled in this production build.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -376,7 +376,7 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         SettingsSection(title: "Permissions") {
-            Text("Everything Dynamo may need from macOS. Core features work best when Calendar, Reminders, and Music control are granted. Optional items unlock Weather, Webcam, Meeting Listen, Amplify EQ, and system notification mirroring.")
+            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen (mic/speech), Amplify EQ (Music automation), notification mirror (Full Disk Access). Weather / Location are not required in this production build.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

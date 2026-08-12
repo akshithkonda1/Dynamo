@@ -51,7 +51,7 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .speech:
             return "Meeting Mode notetaker (on-device preferred)"
         case .location:
-            return "Weather automatic place (or set a city in Settings instead)"
+            return "Not used in this build (Weather is disabled for production)"
         case .fullDiskAccess:
             return "Optional Calendar local DB fallback + broader file access"
         case .notificationMirror:

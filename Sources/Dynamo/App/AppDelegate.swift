@@ -73,13 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.sneakPeekController = sneakPeekController
 
         // Default tray order. Settings can reorder without hosts knowing names.
+        // Weather is intentionally omitted from the production daily driver
+        // (WeatherKit needs a paid Apple team + Xcode-signed app). Source stays
+        // in the tree for optional re-enable later.
         let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
         mediaPlugin = media
         registry.register(media)
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
-        registry.register(WeatherPlugin())
         registry.register(BatteryPlugin())
         registry.register(FocusPlugin())
         registry.register(SportsPlugin())
@@ -88,6 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(WebcamPlugin())
 
         WidgetSettingsStore.shared.apply(to: registry)
+        // Drop any legacy "weather" id from saved tray prefs.
+        WidgetSettingsStore.shared.stripDisabledWidgets(from: registry, ids: ["weather"])
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
