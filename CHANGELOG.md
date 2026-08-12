@@ -2,6 +2,25 @@
 
 All notable changes to Dynamo are documented here.
 
+## [1.0.0] — 2026-08-03
+
+**Production daily driver (Weather disabled).**
+
+### Highlights
+
+- Production tray without Weather/WeatherKit (paid-team dependency removed from ship path)
+- Peek notification center + system notification mirror + DynamoNotificationAPI
+- Media Amplify (EQ-only Presence/Cinema/Impact); transport under scrubber
+- Calendar create, Reminders R/W, battery power modes, Focus/Meeting
+- Full permissions catalog in Settings
+- Single-instance dist/Dynamo.app packaging (ditto/python byte-copy + ad-hoc codesign)
+
+### Notes
+
+- Weather source remains in tree for a future opt-in build
+- Notarization / Developer ID still optional for other Macs
+
+
 ## [0.4.0] — 2026-07-15
 
 **Stability & day-driver release.** Focus: the notch stays put, Music works, Webcam mirrors correctly, and local packaging is trustworthy.
