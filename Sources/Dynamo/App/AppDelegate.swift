@@ -19,6 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Opts into the modern (macOS 12+) secure state-restoration contract.
+    /// Without this, AppKit logs a console warning on every launch and quit.
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             hotKeys.uninstall()
@@ -178,12 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         meetingItem.state = MeetingMode.shared.isEnabled ? .on : .off
         menu.addItem(meetingItem)
         meetingModeMenuItem = meetingItem
-        let hiddenItem = NSMenuItem(title: "Hidden mode", action: #selector(toggleHiddenMode), keyEquivalent: "")
+        let hiddenItem = NSMenuItem(title: "Hidden Mode", action: #selector(toggleHiddenMode), keyEquivalent: "")
         hiddenItem.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
         menu.addItem(hiddenItem)
         hiddenModeMenuItem = hiddenItem
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "About Dynamo", action: #selector(showAboutPanel), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Dynamo", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
@@ -251,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // Keep the checkmark in sync if Hidden mode was toggled from Settings.
+    // Keep the checkmark in sync if Hidden Mode was toggled from Settings.
     func menuWillOpen(_ menu: NSMenu) {
         MainActor.assumeIsolated {
             hiddenModeMenuItem?.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
@@ -265,6 +272,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notchController.setHiddenMode(!notchController.isHiddenModeEnabled)
             hiddenModeMenuItem?.state = notchController.isHiddenModeEnabled ? .on : .off
         }
+    }
+
+    @objc private func showAboutPanel() {
+        NSApp.orderFrontStandardAboutPanel(options: [:])
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func openSettings() {

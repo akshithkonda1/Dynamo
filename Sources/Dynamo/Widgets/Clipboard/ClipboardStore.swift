@@ -13,12 +13,17 @@ final class ClipboardStore: ObservableObject {
 
     @Published private(set) var history: [ClipboardHistoryItem] = []
     @Published private(set) var snippets: [PinnedSnippet] = []
+    /// True right after "Clear" while the undo window is still open.
+    @Published private(set) var canUndoClearHistory = false
 
     var onNewItem: ((ClipboardHistoryItem) -> Void)?
 
     private var lastChangeCount: Int = -1
     private var timer: Timer?
     private var isStarted = false
+    private var clearedHistorySnapshot: [ClipboardHistoryItem]?
+    private var clearHistoryUndoTimer: Timer?
+    private static let clearUndoWindow: TimeInterval = 6
 
     private var imageRoot: URL {
         let dir = AppSupportStore.rootDirectory.appendingPathComponent(Self.imageFolder, isDirectory: true)
@@ -47,6 +52,8 @@ final class ClipboardStore: ObservableObject {
         isStarted = false
         timer?.invalidate()
         timer = nil
+        clearHistoryUndoTimer?.invalidate()
+        clearHistoryUndoTimer = nil
     }
 
     func imageURL(for fileName: String) -> URL {
@@ -147,14 +154,47 @@ final class ClipboardStore: ObservableObject {
         persist()
     }
 
+    /// Clears history, but keeps a snapshot (image files included) for a
+    /// short grace window so `undoClearHistory()` can fully restore it —
+    /// matching Mail/Notes-style "deleted, tap to undo" behavior.
     func clearHistory() {
-        for item in history {
+        guard !history.isEmpty else { return }
+        clearedHistorySnapshot = history
+        canUndoClearHistory = true
+        history.removeAll()
+        persist()
+
+        clearHistoryUndoTimer?.invalidate()
+        let t = Timer(timeInterval: Self.clearUndoWindow, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finalizeClearedHistory() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        clearHistoryUndoTimer = t
+    }
+
+    /// Restores the history cleared by the most recent `clearHistory()` call,
+    /// if the undo window hasn't elapsed yet.
+    func undoClearHistory() {
+        guard let snapshot = clearedHistorySnapshot else { return }
+        clearHistoryUndoTimer?.invalidate()
+        clearHistoryUndoTimer = nil
+        history = snapshot
+        clearedHistorySnapshot = nil
+        canUndoClearHistory = false
+        persist()
+    }
+
+    /// Undo window elapsed — actually delete the backing image files now.
+    private func finalizeClearedHistory() {
+        guard let snapshot = clearedHistorySnapshot else { return }
+        for item in snapshot {
             if let name = item.imageFileName {
                 try? FileManager.default.removeItem(at: imageURL(for: name))
             }
         }
-        history.removeAll()
-        persist()
+        clearedHistorySnapshot = nil
+        canUndoClearHistory = false
+        clearHistoryUndoTimer = nil
     }
 
     func removeHistoryItem(id: UUID) {

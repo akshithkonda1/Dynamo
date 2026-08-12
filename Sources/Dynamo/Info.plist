@@ -20,6 +20,10 @@
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 akshithkonda1</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Dynamo shows your upcoming events in the notch tray.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

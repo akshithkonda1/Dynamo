@@ -57,6 +57,7 @@ private struct ExpandedShelfView: View {
     @ObservedObject var plugin: ShelfPlugin
     @ObservedObject private var store: ShelfStore
     @State private var isDropTargeted = false
+    @State private var showClearConfirm = false
 
     init(plugin: ShelfPlugin) {
         self.plugin = plugin
@@ -78,7 +79,7 @@ private struct ExpandedShelfView: View {
                         .help("Add files from Finder")
 
                         if !store.items.isEmpty {
-                            Button("Clear") { store.clear() }
+                            Button("Clear") { showClearConfirm = true }
                                 .buttonStyle(.plain)
                                 .font(NotchTheme.micro)
                                 .foregroundStyle(NotchTheme.textTertiary)
@@ -86,6 +87,20 @@ private struct ExpandedShelfView: View {
                     }
                 )
             )
+
+            if store.canUndoClear {
+                HStack(spacing: 6) {
+                    Text("Shelf cleared")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                    Spacer(minLength: 0)
+                    Button("Undo") { store.undoClear() }
+                        .buttonStyle(.plain)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textPrimary)
+                }
+                .transition(.opacity)
+            }
 
             if store.items.isEmpty {
                 dropHint
@@ -107,8 +122,19 @@ private struct ExpandedShelfView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.2), value: store.canUndoClear)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleProviders(providers)
+        }
+        .confirmationDialog(
+            "Clear the File Shelf?",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Shelf", role: .destructive) { store.clear() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all stashed items and deletes Dynamo’s stored copies of them. If the original file was moved or deleted since stashing, this copy was the only one left.")
         }
     }
 
@@ -190,6 +216,7 @@ private struct ExpandedShelfView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Share via AirDrop")
+            .accessibilityLabel("Share via AirDrop")
 
             Button {
                 store.revealInFinder(item)
@@ -200,6 +227,7 @@ private struct ExpandedShelfView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Reveal in Finder")
+            .accessibilityLabel("Reveal in Finder")
 
             Button {
                 store.remove(id: item.id)

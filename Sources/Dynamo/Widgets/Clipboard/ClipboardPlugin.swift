@@ -84,6 +84,7 @@ private struct ExpandedClipboardView: View {
     @State private var searchQuery = ""
     @State private var renamingID: UUID?
     @State private var renameText = ""
+    @State private var showClearHistoryConfirm = false
 
     private static let timeFmt: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -125,12 +126,27 @@ private struct ExpandedClipboardView: View {
                         trailing: store.history.isEmpty
                             ? nil
                             : AnyView(
-                                Button("Clear") { store.clearHistory() }
+                                Button("Clear") { showClearHistoryConfirm = true }
                                     .buttonStyle(.plain)
                                     .font(NotchTheme.micro)
                                     .foregroundStyle(NotchTheme.textTertiary)
                             )
                     )
+
+                    if store.canUndoClearHistory {
+                        HStack(spacing: 6) {
+                            Text("History cleared")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                            Spacer(minLength: 0)
+                            Button("Undo") { store.undoClearHistory() }
+                                .buttonStyle(.plain)
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                        }
+                        .padding(.vertical, 2)
+                        .transition(.opacity)
+                    }
 
                     if !store.history.isEmpty {
                         TextField("Search history…", text: $searchQuery)
@@ -141,9 +157,20 @@ private struct ExpandedClipboardView: View {
                     historySection
                 }
                 .padding(.bottom, 4)
+                .animation(.easeInOut(duration: 0.2), value: store.canUndoClearHistory)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .confirmationDialog(
+            "Clear clipboard history?",
+            isPresented: $showClearHistoryConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) { store.clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all unpinned clipboard history. Pinned snippets are kept.")
+        }
     }
 
     @ViewBuilder
@@ -242,6 +269,7 @@ private struct ExpandedClipboardView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Delete pin")
+            .accessibilityLabel("Delete pin")
         }
         .notchRowBackground()
     }
@@ -283,6 +311,7 @@ private struct ExpandedClipboardView: View {
             }
             .buttonStyle(.notchIcon(diameter: 24))
             .help("Pin")
+            .accessibilityLabel("Pin")
 
             VStack(alignment: .trailing, spacing: 2) {
                 Button {
@@ -294,6 +323,7 @@ private struct ExpandedClipboardView: View {
                 }
                 .buttonStyle(.notchIcon(diameter: 24))
                 .help("Remove")
+                .accessibilityLabel("Remove")
                 Text(Self.timeFmt.localizedString(for: item.createdAt, relativeTo: Date()))
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)

@@ -41,6 +41,12 @@ final class ShelfStore: ObservableObject {
     private static let stashFolder = "ShelfFiles"
 
     @Published private(set) var items: [ShelfItem] = []
+    /// True right after "Clear" while the undo window is still open.
+    @Published private(set) var canUndoClear = false
+
+    private var clearedItemsSnapshot: [ShelfItem]?
+    private var clearUndoTimer: Timer?
+    private static let clearUndoWindow: TimeInterval = 6
 
     private var stashRoot: URL {
         let dir = AppSupportStore.rootDirectory.appendingPathComponent(Self.stashFolder, isDirectory: true)
@@ -55,7 +61,10 @@ final class ShelfStore: ObservableObject {
         pruneMissing()
     }
 
-    func stop() {}
+    func stop() {
+        clearUndoTimer?.invalidate()
+        clearUndoTimer = nil
+    }
 
     func add(urls: [URL]) {
         var changed = false
@@ -90,12 +99,45 @@ final class ShelfStore: ObservableObject {
         persist()
     }
 
+    /// Clears the shelf, but keeps a snapshot (stashed files included) for a
+    /// short grace window so `undoClear()` can fully restore it — matching
+    /// Mail/Notes-style "deleted, tap to undo" behavior.
     func clear() {
-        for item in items {
-            deleteStashFiles(for: item)
-        }
+        guard !items.isEmpty else { return }
+        clearedItemsSnapshot = items
+        canUndoClear = true
         items.removeAll()
         persist()
+
+        clearUndoTimer?.invalidate()
+        let t = Timer(timeInterval: Self.clearUndoWindow, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finalizeClear() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        clearUndoTimer = t
+    }
+
+    /// Restores the items cleared by the most recent `clear()` call, if the
+    /// undo window hasn't elapsed yet.
+    func undoClear() {
+        guard let snapshot = clearedItemsSnapshot else { return }
+        clearUndoTimer?.invalidate()
+        clearUndoTimer = nil
+        items = snapshot
+        clearedItemsSnapshot = nil
+        canUndoClear = false
+        persist()
+    }
+
+    /// Undo window elapsed — actually delete the stashed copies now.
+    private func finalizeClear() {
+        guard let snapshot = clearedItemsSnapshot else { return }
+        for item in snapshot {
+            deleteStashFiles(for: item)
+        }
+        clearedItemsSnapshot = nil
+        canUndoClear = false
+        clearUndoTimer = nil
     }
 
     func revealInFinder(_ item: ShelfItem) {
