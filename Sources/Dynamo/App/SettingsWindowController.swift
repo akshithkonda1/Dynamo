@@ -264,7 +264,7 @@ struct SettingsView: View {
 
             Text("Media Amplify")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Amplify EQ (Apple Music)", isOn: Binding(
+            Toggle("Amplify EQ (local DSP)", isOn: Binding(
                 get: { amplify.isEnabled },
                 set: { amplify.isEnabled = $0 }
             ))
@@ -290,19 +290,17 @@ struct SettingsView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    if amplify.needsAutomationPermission {
-                        Button("Open Automation") {
-                            amplify.openAutomationSettings()
-                        }
-                        .controlSize(.small)
+                    Button("Open Audio Privacy") {
+                        amplify.openAutomationSettings()
                     }
+                    .controlSize(.small)
                     Button("Retry EQ") {
                         amplify.retryApply()
                     }
                     .controlSize(.small)
                 }
             }
-            Text("Shapes tone only — never the volume fader. Requires System Settings → Privacy → Automation → Dynamo → Music. Spotify has no scriptable EQ.")
+            Text("Local multi-band EQ (DynamoEQ) — Spatial/Atmos-safe: EQ after the player’s spatial render, same curve on every channel (no mono fold). No Music Automation, no cloud APIs. macOS 14.2+ · allow audio capture when prompted. Music & Spotify.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
