@@ -154,13 +154,13 @@ struct SettingsView: View {
             )) {
                 Text("Hover only (immediate)").tag(0)
                 Text("3 seconds (snappy)").tag(3)
-                Text("5 seconds").tag(5)
-                Text("7 seconds (default)").tag(7)
+                Text("5 seconds (default)").tag(5)
+                Text("7 seconds").tag(7)
                 Text("10 seconds").tag(10)
                 Text("30 seconds").tag(30)
             }
             .labelsHidden()
-            Text("How long the tray stays open after the cursor leaves. Expand/collapse springs are snappy; use 3s if you want the tray to feel more sensitive.")
+            Text("How long the tray stays open after the cursor leaves. Default is 5s so empty glances don’t linger. Use 3s for snappier feel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -289,8 +289,20 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if amplify.needsAutomationPermission {
+                        Button("Open Automation") {
+                            amplify.openAutomationSettings()
+                        }
+                        .controlSize(.small)
+                    }
+                    Button("Retry EQ") {
+                        amplify.retryApply()
+                    }
+                    .controlSize(.small)
+                }
             }
-            Text("Shapes tone only — never the volume fader. Spotify has no scriptable EQ; Amplify re-applies when Music is active.")
+            Text("Shapes tone only — never the volume fader. Requires System Settings → Privacy → Automation → Dynamo → Music. Spotify has no scriptable EQ.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

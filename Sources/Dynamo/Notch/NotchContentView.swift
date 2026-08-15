@@ -129,7 +129,6 @@ struct NotchContentView: View {
                 TrayIconButton(
                     systemImage: "gearshape.fill",
                     displayName: "Preferences",
-                    shortLabel: nil,
                     isActive: false
                 ) {
                     NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
@@ -140,14 +139,8 @@ struct NotchContentView: View {
             .padding(.bottom, 6)
             .frame(height: NotchTheme.chromeTray)
 
-            // Active widget name + live clock — makes the open tab obvious at a glance.
+            // Live clock only — icons are self-explanatory (no selected-tab name).
             HStack(spacing: 10) {
-                if let active = registry.activePlugin {
-                    Text(active.displayName)
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
-                        .lineLimit(1)
-                }
                 Spacer(minLength: 0)
                 liveClockPill
             }
@@ -225,20 +218,6 @@ struct NotchContentView: View {
     /// Right-side tray cluster (before Settings): Focus, Sports, Health, Shelf, Webcam.
     private static let trailingTrayIDs = ["focus", "sports", "system-health", "shelf", "webcam"]
 
-    /// Compact tray labels — full `displayName` still used for help + a11y.
-    private static let shortTrayLabels: [String: String] = [
-        "media": "Media",
-        "calendar": "Cal",
-        "checklist": "Tasks",
-        "clipboard": "Clip",
-        "world-clock": "Clocks",
-        "focus": "Focus",
-        "sports": "Sports",
-        "system-health": "Health",
-        "shelf": "Shelf",
-        "webcam": "Cam"
-    ]
-
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
         let trailing = Set(Self.trailingTrayIDs)
         return registry.plugins.filter { !trailing.contains($0.id) }
@@ -257,7 +236,6 @@ struct NotchContentView: View {
         TrayIconButton(
             systemImage: plugin.systemImage,
             displayName: plugin.displayName,
-            shortLabel: isActive ? (Self.shortTrayLabels[plugin.id] ?? plugin.displayName) : nil,
             isActive: isActive,
             isLive: isAmbient
         ) {
@@ -272,44 +250,37 @@ struct NotchContentView: View {
     }
 }
 
-/// Tray control: icon-only when idle; expands to icon + short label when selected
-/// so the open tab is obvious without reading tooltips.
+/// Tray control: icon-only. Hover highlights + tab-style name preview; press never expands a label.
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
-    var shortLabel: String? = nil
     let isActive: Bool
     var isLive: Bool = false
     let action: () -> Void
+
     @State private var isHovering = false
+    @State private var showPreview = false
+    @State private var previewTask: Task<Void, Never>?
+
+    /// Slight dwell so skimming the tray doesn’t flash every name.
+    private static let previewDelayNs: UInt64 = 280_000_000
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
-                        .foregroundStyle(isActive || isHovering ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                        .symbolRenderingMode(.hierarchical)
-                    if isLive && !isActive {
-                        Circle()
-                            .fill(NotchTheme.positive)
-                            .frame(width: 5, height: 5)
-                            .shadow(color: NotchTheme.positive.opacity(0.7), radius: 2)
-                            .offset(x: 2, y: -2)
-                    }
-                }
-                if let shortLabel {
-                    Text(shortLabel)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(NotchTheme.textPrimary)
-                        .lineLimit(1)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
+                    .foregroundStyle(isActive || isHovering ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                    .symbolRenderingMode(.hierarchical)
+                if isLive && !isActive {
+                    Circle()
+                        .fill(NotchTheme.positive)
+                        .frame(width: 5, height: 5)
+                        .shadow(color: NotchTheme.positive.opacity(0.7), radius: 2)
+                        .offset(x: 2, y: -2)
                 }
             }
-            .padding(.horizontal, shortLabel == nil ? 0 : 10)
-            .frame(width: shortLabel == nil ? 32 : nil, height: 32)
-            .frame(minWidth: 32, minHeight: 32)
+            .frame(width: 32, height: 32)
             .background(
                 Capsule(style: .continuous)
                     .fill(fillColor)
@@ -326,12 +297,54 @@ private struct TrayIconButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            isHovering = hovering
+            previewTask?.cancel()
+            if hovering {
+                previewTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: Self.previewDelayNs)
+                    guard !Task.isCancelled, isHovering else { return }
+                    withAnimation(NotchTheme.quick) { showPreview = true }
+                }
+            } else {
+                withAnimation(NotchTheme.quick) { showPreview = false }
+            }
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            showPreview = false
+        }
+        .overlay(alignment: .bottom) {
+            if showPreview {
+                // Tab-style hover preview — floats under the icon, not in the chip.
+                Text(displayName)
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.black.opacity(0.82))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                    )
+                    .fixedSize()
+                    .offset(y: 22)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .zIndex(showPreview ? 20 : 0)
         .animation(NotchTheme.quick, value: isHovering)
         .animation(NotchTheme.snappy, value: isActive)
-        .animation(NotchTheme.snappy, value: shortLabel)
-        .help(displayName)
+        .animation(NotchTheme.quick, value: showPreview)
+        // No system `.help` — that competes with our preview and can feel like a press label.
         .accessibilityLabel(displayName)
+        .accessibilityHint("Opens \(displayName)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
