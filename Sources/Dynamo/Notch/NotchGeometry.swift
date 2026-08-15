@@ -78,8 +78,8 @@ enum NotchGeometry {
             fraction = 0.48
         }
         let raw = w * fraction
-        // Wide enough for dual-column lists; ~1000pt cap on large displays.
-        return min(1000, max(520, raw.rounded()))
+        // Wide enough for dual-column lists; ~1200pt cap on large displays.
+        return min(1200, max(520, raw.rounded()))
     }
 
     /// Scale widget content height modestly with display height.
