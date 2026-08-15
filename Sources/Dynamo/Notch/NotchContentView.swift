@@ -250,14 +250,20 @@ struct NotchContentView: View {
     }
 }
 
-/// Tray control: icon-only. Active = filled chip; name via tooltip / a11y only.
+/// Tray control: icon-only. Hover highlights + tab-style name preview; press never expands a label.
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
     let isActive: Bool
     var isLive: Bool = false
     let action: () -> Void
+
     @State private var isHovering = false
+    @State private var showPreview = false
+    @State private var previewTask: Task<Void, Never>?
+
+    /// Slight dwell so skimming the tray doesn’t flash every name.
+    private static let previewDelayNs: UInt64 = 280_000_000
 
     var body: some View {
         Button(action: action) {
@@ -291,11 +297,54 @@ private struct TrayIconButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            isHovering = hovering
+            previewTask?.cancel()
+            if hovering {
+                previewTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: Self.previewDelayNs)
+                    guard !Task.isCancelled, isHovering else { return }
+                    withAnimation(NotchTheme.quick) { showPreview = true }
+                }
+            } else {
+                withAnimation(NotchTheme.quick) { showPreview = false }
+            }
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            showPreview = false
+        }
+        .overlay(alignment: .bottom) {
+            if showPreview {
+                // Tab-style hover preview — floats under the icon, not in the chip.
+                Text(displayName)
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.black.opacity(0.82))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                    )
+                    .fixedSize()
+                    .offset(y: 22)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .zIndex(showPreview ? 20 : 0)
         .animation(NotchTheme.quick, value: isHovering)
         .animation(NotchTheme.snappy, value: isActive)
-        .help(displayName)
+        .animation(NotchTheme.quick, value: showPreview)
+        // No system `.help` — that competes with our preview and can feel like a press label.
         .accessibilityLabel(displayName)
+        .accessibilityHint("Opens \(displayName)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
