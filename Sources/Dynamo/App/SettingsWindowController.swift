@@ -289,8 +289,20 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if amplify.needsAutomationPermission {
+                        Button("Open Automation") {
+                            amplify.openAutomationSettings()
+                        }
+                        .controlSize(.small)
+                    }
+                    Button("Retry EQ") {
+                        amplify.retryApply()
+                    }
+                    .controlSize(.small)
+                }
             }
-            Text("Shapes tone only — never the volume fader. Spotify has no scriptable EQ; Amplify re-applies when Music is active.")
+            Text("Shapes tone only — never the volume fader. Requires System Settings → Privacy → Automation → Dynamo → Music. Spotify has no scriptable EQ.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
