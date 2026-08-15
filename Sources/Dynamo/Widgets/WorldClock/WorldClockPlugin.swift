@@ -2,6 +2,34 @@ import AppKit
 import CoreLocation
 import SwiftUI
 
+/// How selected clocks are ordered in ambient + expanded lists.
+enum WorldClockSortMode: String, CaseIterable, Identifiable {
+    case selection
+    case nearest
+    case farthest
+    case random
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .selection: return "As picked"
+        case .nearest: return "Nearest first"
+        case .farthest: return "Farthest first"
+        case .random: return "Random"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .selection: return "list.number"
+        case .nearest: return "location.north.line"
+        case .farthest: return "location.north.line.fill"
+        case .random: return "shuffle"
+        }
+    }
+}
+
 /// World Clock — major cities, current location, and IANA time zones.
 /// Pure Apple: `Foundation.TimeZone` + optional `CoreLocation` (no WeatherKit).
 @MainActor
@@ -9,7 +37,7 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
     let id = "world-clock"
     let displayName = "Clocks"
     let systemImage = "globe"
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { 280 }
 
     @Published var selectedIDs: [String] {
         didSet {
@@ -18,12 +46,31 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         }
     }
 
+    @Published var sortMode: WorldClockSortMode {
+        didSet {
+            UserDefaults.standard.set(sortMode.rawValue, forKey: Self.sortKey)
+            if sortMode == .random, randomSeed == 0 {
+                reshuffle()
+            }
+            objectWillChange.send()
+        }
+    }
+
+    /// Seed for stable random order until reshuffled.
+    @Published private(set) var randomSeed: UInt64 {
+        didSet { UserDefaults.standard.set(String(randomSeed), forKey: Self.randomSeedKey) }
+    }
+
     /// Placename for “Current Location” when Core Location succeeds.
     @Published private(set) var locationPlaceName: String?
     @Published private(set) var locationStatusLine: String = "Using Mac time zone"
     @Published private(set) var locationAuth: CLAuthorizationStatus = .notDetermined
+    /// GPS / last fix used as origin for distance sort.
+    @Published private(set) var referenceCoordinate: CLLocationCoordinate2D?
 
     private static let selectedKey = "dynamo.worldClock.selectedIDs"
+    private static let sortKey = "dynamo.worldClock.sortMode"
+    private static let randomSeedKey = "dynamo.worldClock.randomSeed"
     private var timer: Timer?
     private let location = WorldClockLocationResolver()
 
@@ -33,12 +80,27 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         } else {
             selectedIDs = ["current-location", "new-york", "london", "tokyo"]
         }
+        if let raw = UserDefaults.standard.string(forKey: Self.sortKey),
+           let mode = WorldClockSortMode(rawValue: raw) {
+            sortMode = mode
+        } else {
+            sortMode = .nearest
+        }
+        if let seedStr = UserDefaults.standard.string(forKey: Self.randomSeedKey),
+           let seed = UInt64(seedStr) {
+            randomSeed = seed
+        } else {
+            randomSeed = UInt64.random(in: 1...UInt64.max)
+        }
         locationAuth = location.authorizationStatus
-        location.onUpdate = { [weak self] place, statusLine, auth in
+        location.onUpdate = { [weak self] place, statusLine, auth, coordinate in
             guard let self else { return }
             self.locationPlaceName = place
             self.locationStatusLine = statusLine
             self.locationAuth = auth
+            if let coordinate {
+                self.referenceCoordinate = coordinate
+            }
             self.objectWillChange.send()
         }
     }
@@ -61,6 +123,21 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         location.request()
     }
 
+    func reshuffle() {
+        randomSeed = UInt64.random(in: 1...UInt64.max)
+        sortMode = .random
+        objectWillChange.send()
+    }
+
+    func cycleSortMode() {
+        let all = WorldClockSortMode.allCases
+        guard let idx = all.firstIndex(of: sortMode) else {
+            sortMode = .nearest
+            return
+        }
+        sortMode = all[(idx + 1) % all.count]
+    }
+
     func expandedView() -> AnyView {
         AnyView(ExpandedWorldClockView(plugin: self))
     }
@@ -76,14 +153,82 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         AnyView(WorldClockSettingsView(plugin: self))
     }
 
-    /// Resolved active clocks in selection order.
+    /// Resolved active clocks in sort order (distance / reverse / random / pick order).
     var activeEntries: [WorldClockEntry] {
-        selectedIDs.compactMap { resolveEntry(id: $0) }
+        let base = selectedIDs.compactMap { resolveEntry(id: $0) }
+        return sortedEntries(base)
+    }
+
+    func sortedEntries(_ entries: [WorldClockEntry]) -> [WorldClockEntry] {
+        switch sortMode {
+        case .selection:
+            return entries
+        case .nearest:
+            return entries.sorted { distanceKm(for: $0) < distanceKm(for: $1) }
+        case .farthest:
+            return entries.sorted { distanceKm(for: $0) > distanceKm(for: $1) }
+        case .random:
+            // Stable shuffle keyed by seed + id.
+            return entries.sorted { a, b in
+                shuffleKey(a.id) < shuffleKey(b.id)
+            }
+        }
+    }
+
+    /// Kilometers from reference location (0 for “Here”).
+    func distanceKm(for entry: WorldClockEntry) -> Double {
+        if entry.kind == .currentLocation { return 0 }
+        guard let origin = distanceOrigin,
+              let lat = entry.latitude, let lon = entry.longitude
+        else {
+            // Unknown coords — pin to end of nearest list.
+            return 50_000
+        }
+        let from = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
+        let to = CLLocation(latitude: lat, longitude: lon)
+        return from.distance(from: to) / 1000.0
+    }
+
+    func distanceLabel(for entry: WorldClockEntry) -> String? {
+        guard sortMode == .nearest || sortMode == .farthest else { return nil }
+        if entry.kind == .currentLocation { return "0 km" }
+        let km = distanceKm(for: entry)
+        if km >= 49_000 { return nil }
+        if km < 10 {
+            return String(format: "%.1f km", km)
+        }
+        return String(format: "%.0f km", km.rounded())
+    }
+
+    /// Origin for distance: live GPS if available, else first selected city with coords.
+    private var distanceOrigin: CLLocationCoordinate2D? {
+        if let referenceCoordinate { return referenceCoordinate }
+        // Prefer a non-here city with coords as origin fallback when GPS off.
+        for id in selectedIDs {
+            if id == WorldClockEntry.currentLocationID { continue }
+            if let e = resolveEntry(id: id), let lat = e.latitude, let lon = e.longitude {
+                return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            }
+        }
+        return nil
+    }
+
+    private func shuffleKey(_ id: String) -> UInt64 {
+        // FNV-1a style mix of seed + id bytes for stable random order.
+        var hash: UInt64 = randomSeed ^ 0xcbf29ce484222325
+        for b in id.utf8 {
+            hash ^= UInt64(b)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
     }
 
     func resolveEntry(id: String) -> WorldClockEntry? {
         if id == WorldClockEntry.currentLocationID {
-            return WorldClockEntry.currentLocation(placeName: locationPlaceName)
+            return WorldClockEntry.currentLocation(
+                placeName: locationPlaceName,
+                coordinate: referenceCoordinate
+            )
         }
         if let city = WorldClockEntry.majorCities.first(where: { $0.id == id }) {
             return city
@@ -95,12 +240,15 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         if id.hasPrefix("tz:") {
             let ident = String(id.dropFirst(3))
             guard TimeZone(identifier: ident) != nil else { return nil }
+            let coord = WorldClockEntry.coordinate(forTimeZone: ident)
             return WorldClockEntry(
                 id: id,
                 name: WorldClockEntry.shortZoneName(ident),
                 timeZoneIdentifier: ident,
                 kind: .timeZone,
-                region: "Time Zone"
+                region: "Time Zone",
+                latitude: coord?.lat,
+                longitude: coord?.lon
             )
         }
         return nil
@@ -149,6 +297,9 @@ struct WorldClockEntry: Identifiable, Equatable {
     let timeZoneIdentifier: String
     let kind: WorldClockKind
     let region: String
+    /// Approximate WGS84 for distance sort (nil = unknown).
+    let latitude: Double?
+    let longitude: Double?
 
     static let currentLocationID = "current-location"
 
@@ -159,14 +310,16 @@ struct WorldClockEntry: Identifiable, Equatable {
         return TimeZone(identifier: timeZoneIdentifier) ?? .current
     }
 
-    static func currentLocation(placeName: String?) -> WorldClockEntry {
+    static func currentLocation(placeName: String?, coordinate: CLLocationCoordinate2D?) -> WorldClockEntry {
         let label = placeName ?? "Current Location"
         return WorldClockEntry(
             id: currentLocationID,
             name: label,
             timeZoneIdentifier: TimeZone.current.identifier,
             kind: .currentLocation,
-            region: "Location"
+            region: "Location",
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude
         )
     }
 
@@ -179,114 +332,119 @@ struct WorldClockEntry: Identifiable, Equatable {
             ?? identifier
     }
 
-    // MARK: Major cities (Apple IANA zones)
+    static func coordinate(forTimeZone ident: String) -> (lat: Double, lon: Double)? {
+        timeZoneCoordinates[ident]
+    }
+
+    // MARK: Major cities (Apple IANA zones + lat/lon for distance)
 
     static let majorCities: [WorldClockEntry] = {
-        let rows: [(String, String, String, String)] = [
-            // Americas
-            ("honolulu", "Honolulu", "Pacific/Honolulu", "Americas"),
-            ("anchorage", "Anchorage", "America/Anchorage", "Americas"),
-            ("los-angeles", "Los Angeles", "America/Los_Angeles", "Americas"),
-            ("vancouver", "Vancouver", "America/Vancouver", "Americas"),
-            ("denver", "Denver", "America/Denver", "Americas"),
-            ("phoenix", "Phoenix", "America/Phoenix", "Americas"),
-            ("chicago", "Chicago", "America/Chicago", "Americas"),
-            ("mexico-city", "Mexico City", "America/Mexico_City", "Americas"),
-            ("new-york", "New York", "America/New_York", "Americas"),
-            ("toronto", "Toronto", "America/Toronto", "Americas"),
-            ("miami", "Miami", "America/New_York", "Americas"),
-            ("sao-paulo", "São Paulo", "America/Sao_Paulo", "Americas"),
-            ("buenos-aires", "Buenos Aires", "America/Argentina/Buenos_Aires", "Americas"),
-            // Europe / Africa
-            ("london", "London", "Europe/London", "Europe / Africa"),
-            ("dublin", "Dublin", "Europe/Dublin", "Europe / Africa"),
-            ("lisbon", "Lisbon", "Europe/Lisbon", "Europe / Africa"),
-            ("paris", "Paris", "Europe/Paris", "Europe / Africa"),
-            ("madrid", "Madrid", "Europe/Madrid", "Europe / Africa"),
-            ("amsterdam", "Amsterdam", "Europe/Amsterdam", "Europe / Africa"),
-            ("berlin", "Berlin", "Europe/Berlin", "Europe / Africa"),
-            ("rome", "Rome", "Europe/Rome", "Europe / Africa"),
-            ("zurich", "Zurich", "Europe/Zurich", "Europe / Africa"),
-            ("stockholm", "Stockholm", "Europe/Stockholm", "Europe / Africa"),
-            ("warsaw", "Warsaw", "Europe/Warsaw", "Europe / Africa"),
-            ("athens", "Athens", "Europe/Athens", "Europe / Africa"),
-            ("istanbul", "Istanbul", "Europe/Istanbul", "Europe / Africa"),
-            ("moscow", "Moscow", "Europe/Moscow", "Europe / Africa"),
-            ("cairo", "Cairo", "Africa/Cairo", "Europe / Africa"),
-            ("johannesburg", "Johannesburg", "Africa/Johannesburg", "Europe / Africa"),
-            ("lagos", "Lagos", "Africa/Lagos", "Europe / Africa"),
-            ("nairobi", "Nairobi", "Africa/Nairobi", "Europe / Africa"),
-            // Middle East / Asia
-            ("dubai", "Dubai", "Asia/Dubai", "Middle East / Asia"),
-            ("tel-aviv", "Tel Aviv", "Asia/Jerusalem", "Middle East / Asia"),
-            ("riyadh", "Riyadh", "Asia/Riyadh", "Middle East / Asia"),
-            ("tehran", "Tehran", "Asia/Tehran", "Middle East / Asia"),
-            ("karachi", "Karachi", "Asia/Karachi", "Middle East / Asia"),
-            ("mumbai", "Mumbai", "Asia/Kolkata", "Middle East / Asia"),
-            ("delhi", "Delhi", "Asia/Kolkata", "Middle East / Asia"),
-            ("colombo", "Colombo", "Asia/Colombo", "Middle East / Asia"),
-            ("dhaka", "Dhaka", "Asia/Dhaka", "Middle East / Asia"),
-            ("bangkok", "Bangkok", "Asia/Bangkok", "Middle East / Asia"),
-            ("jakarta", "Jakarta", "Asia/Jakarta", "Middle East / Asia"),
-            ("singapore", "Singapore", "Asia/Singapore", "Middle East / Asia"),
-            ("hong-kong", "Hong Kong", "Asia/Hong_Kong", "Middle East / Asia"),
-            ("shanghai", "Shanghai", "Asia/Shanghai", "Middle East / Asia"),
-            ("taipei", "Taipei", "Asia/Taipei", "Middle East / Asia"),
-            ("seoul", "Seoul", "Asia/Seoul", "Middle East / Asia"),
-            ("tokyo", "Tokyo", "Asia/Tokyo", "Middle East / Asia"),
-            // Pacific
-            ("perth", "Perth", "Australia/Perth", "Pacific"),
-            ("sydney", "Sydney", "Australia/Sydney", "Pacific"),
-            ("melbourne", "Melbourne", "Australia/Melbourne", "Pacific"),
-            ("brisbane", "Brisbane", "Australia/Brisbane", "Pacific"),
-            ("auckland", "Auckland", "Pacific/Auckland", "Pacific"),
-            ("fiji", "Fiji", "Pacific/Fiji", "Pacific")
+        // id, name, tz, region, lat, lon
+        let rows: [(String, String, String, String, Double, Double)] = [
+            ("honolulu", "Honolulu", "Pacific/Honolulu", "Americas", 21.3069, -157.8583),
+            ("anchorage", "Anchorage", "America/Anchorage", "Americas", 61.2181, -149.9003),
+            ("los-angeles", "Los Angeles", "America/Los_Angeles", "Americas", 34.0522, -118.2437),
+            ("vancouver", "Vancouver", "America/Vancouver", "Americas", 49.2827, -123.1207),
+            ("denver", "Denver", "America/Denver", "Americas", 39.7392, -104.9903),
+            ("phoenix", "Phoenix", "America/Phoenix", "Americas", 33.4484, -112.0740),
+            ("chicago", "Chicago", "America/Chicago", "Americas", 41.8781, -87.6298),
+            ("mexico-city", "Mexico City", "America/Mexico_City", "Americas", 19.4326, -99.1332),
+            ("new-york", "New York", "America/New_York", "Americas", 40.7128, -74.0060),
+            ("toronto", "Toronto", "America/Toronto", "Americas", 43.6532, -79.3832),
+            ("miami", "Miami", "America/New_York", "Americas", 25.7617, -80.1918),
+            ("sao-paulo", "São Paulo", "America/Sao_Paulo", "Americas", -23.5505, -46.6333),
+            ("buenos-aires", "Buenos Aires", "America/Argentina/Buenos_Aires", "Americas", -34.6037, -58.3816),
+            ("london", "London", "Europe/London", "Europe / Africa", 51.5074, -0.1278),
+            ("dublin", "Dublin", "Europe/Dublin", "Europe / Africa", 53.3498, -6.2603),
+            ("lisbon", "Lisbon", "Europe/Lisbon", "Europe / Africa", 38.7223, -9.1393),
+            ("paris", "Paris", "Europe/Paris", "Europe / Africa", 48.8566, 2.3522),
+            ("madrid", "Madrid", "Europe/Madrid", "Europe / Africa", 40.4168, -3.7038),
+            ("amsterdam", "Amsterdam", "Europe/Amsterdam", "Europe / Africa", 52.3676, 4.9041),
+            ("berlin", "Berlin", "Europe/Berlin", "Europe / Africa", 52.5200, 13.4050),
+            ("rome", "Rome", "Europe/Rome", "Europe / Africa", 41.9028, 12.4964),
+            ("zurich", "Zurich", "Europe/Zurich", "Europe / Africa", 47.3769, 8.5417),
+            ("stockholm", "Stockholm", "Europe/Stockholm", "Europe / Africa", 59.3293, 18.0686),
+            ("warsaw", "Warsaw", "Europe/Warsaw", "Europe / Africa", 52.2297, 21.0122),
+            ("athens", "Athens", "Europe/Athens", "Europe / Africa", 37.9838, 23.7275),
+            ("istanbul", "Istanbul", "Europe/Istanbul", "Europe / Africa", 41.0082, 28.9784),
+            ("moscow", "Moscow", "Europe/Moscow", "Europe / Africa", 55.7558, 37.6173),
+            ("cairo", "Cairo", "Africa/Cairo", "Europe / Africa", 30.0444, 31.2357),
+            ("johannesburg", "Johannesburg", "Africa/Johannesburg", "Europe / Africa", -26.2041, 28.0473),
+            ("lagos", "Lagos", "Africa/Lagos", "Europe / Africa", 6.5244, 3.3792),
+            ("nairobi", "Nairobi", "Africa/Nairobi", "Europe / Africa", -1.2921, 36.8219),
+            ("dubai", "Dubai", "Asia/Dubai", "Middle East / Asia", 25.2048, 55.2708),
+            ("tel-aviv", "Tel Aviv", "Asia/Jerusalem", "Middle East / Asia", 32.0853, 34.7818),
+            ("riyadh", "Riyadh", "Asia/Riyadh", "Middle East / Asia", 24.7136, 46.6753),
+            ("tehran", "Tehran", "Asia/Tehran", "Middle East / Asia", 35.6892, 51.3890),
+            ("karachi", "Karachi", "Asia/Karachi", "Middle East / Asia", 24.8607, 67.0011),
+            ("mumbai", "Mumbai", "Asia/Kolkata", "Middle East / Asia", 19.0760, 72.8777),
+            ("delhi", "Delhi", "Asia/Kolkata", "Middle East / Asia", 28.6139, 77.2090),
+            ("colombo", "Colombo", "Asia/Colombo", "Middle East / Asia", 6.9271, 79.8612),
+            ("dhaka", "Dhaka", "Asia/Dhaka", "Middle East / Asia", 23.8103, 90.4125),
+            ("bangkok", "Bangkok", "Asia/Bangkok", "Middle East / Asia", 13.7563, 100.5018),
+            ("jakarta", "Jakarta", "Asia/Jakarta", "Middle East / Asia", -6.2088, 106.8456),
+            ("singapore", "Singapore", "Asia/Singapore", "Middle East / Asia", 1.3521, 103.8198),
+            ("hong-kong", "Hong Kong", "Asia/Hong_Kong", "Middle East / Asia", 22.3193, 114.1694),
+            ("shanghai", "Shanghai", "Asia/Shanghai", "Middle East / Asia", 31.2304, 121.4737),
+            ("taipei", "Taipei", "Asia/Taipei", "Middle East / Asia", 25.0330, 121.5654),
+            ("seoul", "Seoul", "Asia/Seoul", "Middle East / Asia", 37.5665, 126.9780),
+            ("tokyo", "Tokyo", "Asia/Tokyo", "Middle East / Asia", 35.6762, 139.6503),
+            ("perth", "Perth", "Australia/Perth", "Pacific", -31.9505, 115.8605),
+            ("sydney", "Sydney", "Australia/Sydney", "Pacific", -33.8688, 151.2093),
+            ("melbourne", "Melbourne", "Australia/Melbourne", "Pacific", -37.8136, 144.9631),
+            ("brisbane", "Brisbane", "Australia/Brisbane", "Pacific", -27.4698, 153.0251),
+            ("auckland", "Auckland", "Pacific/Auckland", "Pacific", -36.8485, 174.7633),
+            ("fiji", "Fiji", "Pacific/Fiji", "Pacific", -18.1416, 178.4419)
         ]
         return rows.map {
-            WorldClockEntry(id: $0.0, name: $0.1, timeZoneIdentifier: $0.2, kind: .majorCity, region: $0.3)
+            WorldClockEntry(
+                id: $0.0, name: $0.1, timeZoneIdentifier: $0.2, kind: .majorCity, region: $0.3,
+                latitude: $0.4, longitude: $0.5
+            )
         }
     }()
 
+    /// Representative coordinates for IANA zones (hub city).
+    private static let timeZoneCoordinates: [String: (lat: Double, lon: Double)] = [
+        "UTC": (0, 0),
+        "GMT": (51.5074, -0.1278),
+        "Pacific/Honolulu": (21.3069, -157.8583),
+        "America/Anchorage": (61.2181, -149.9003),
+        "America/Los_Angeles": (34.0522, -118.2437),
+        "America/Denver": (39.7392, -104.9903),
+        "America/Chicago": (41.8781, -87.6298),
+        "America/New_York": (40.7128, -74.0060),
+        "America/Sao_Paulo": (-23.5505, -46.6333),
+        "Atlantic/Reykjavik": (64.1466, -21.9426),
+        "Europe/London": (51.5074, -0.1278),
+        "Europe/Paris": (48.8566, 2.3522),
+        "Europe/Berlin": (52.5200, 13.4050),
+        "Europe/Moscow": (55.7558, 37.6173),
+        "Africa/Cairo": (30.0444, 31.2357),
+        "Asia/Dubai": (25.2048, 55.2708),
+        "Asia/Kolkata": (28.6139, 77.2090),
+        "Asia/Bangkok": (13.7563, 100.5018),
+        "Asia/Shanghai": (31.2304, 121.4737),
+        "Asia/Tokyo": (35.6762, 139.6503),
+        "Australia/Sydney": (-33.8688, 151.2093),
+        "Pacific/Auckland": (-36.8485, 174.7633)
+    ]
+
     /// Curated IANA reference zones (offsets + hubs Apple ships in the TZ database).
     static let referenceTimeZones: [WorldClockEntry] = {
-        let ids = [
-            "UTC",
-            "GMT",
-            "Pacific/Honolulu",
-            "America/Anchorage",
-            "America/Los_Angeles",
-            "America/Denver",
-            "America/Chicago",
-            "America/New_York",
-            "America/Sao_Paulo",
-            "Atlantic/Reykjavik",
-            "Europe/London",
-            "Europe/Paris",
-            "Europe/Berlin",
-            "Europe/Moscow",
-            "Africa/Cairo",
-            "Asia/Dubai",
-            "Asia/Kolkata",
-            "Asia/Bangkok",
-            "Asia/Shanghai",
-            "Asia/Tokyo",
-            "Australia/Sydney",
-            "Pacific/Auckland"
-        ]
+        let ids = Array(timeZoneCoordinates.keys).sorted()
         return ids.compactMap { ident -> WorldClockEntry? in
             guard TimeZone(identifier: ident) != nil else { return nil }
-            let name: String
-            if ident == "UTC" || ident == "GMT" {
-                name = ident
-            } else {
-                name = shortZoneName(ident)
-            }
+            let name = (ident == "UTC" || ident == "GMT") ? ident : shortZoneName(ident)
+            let c = timeZoneCoordinates[ident]
             return WorldClockEntry(
                 id: "tz:\(ident)",
                 name: name,
                 timeZoneIdentifier: ident,
                 kind: .timeZone,
-                region: "Time Zones"
+                region: "Time Zones",
+                latitude: c?.lat,
+                longitude: c?.lon
             )
         }
     }()
@@ -296,7 +454,8 @@ struct WorldClockEntry: Identifiable, Equatable {
 
 @MainActor
 private final class WorldClockLocationResolver: NSObject, CLLocationManagerDelegate {
-    var onUpdate: ((String?, String, CLAuthorizationStatus) -> Void)?
+    /// place name, status line, auth, optional WGS84 coordinate for distance sort
+    var onUpdate: ((String?, String, CLAuthorizationStatus, CLLocationCoordinate2D?) -> Void)?
 
     private let manager = CLLocationManager()
     private let geocoder = CLGeocoder()
@@ -316,13 +475,12 @@ private final class WorldClockLocationResolver: NSObject, CLLocationManagerDeleg
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .denied, .restricted:
-            onUpdate?(nil, "Location denied — using Mac time zone (\(TimeZone.current.identifier))", manager.authorizationStatus)
+            onUpdate?(nil, "Location denied — using Mac time zone (\(TimeZone.current.identifier))", manager.authorizationStatus, nil)
         default:
-            // authorized / authorizedAlways / authorizedWhenInUse (and future cases)
             if isAuthorized(manager.authorizationStatus) {
                 manager.requestLocation()
             } else {
-                onUpdate?(nil, "Using Mac time zone (\(TimeZone.current.identifier))", manager.authorizationStatus)
+                onUpdate?(nil, "Using Mac time zone (\(TimeZone.current.identifier))", manager.authorizationStatus, nil)
             }
         }
     }
@@ -335,7 +493,8 @@ private final class WorldClockLocationResolver: NSObject, CLLocationManagerDeleg
             onUpdate?(
                 nil,
                 "Using Mac time zone (\(TimeZone.current.identifier))",
-                status
+                status,
+                nil
             )
         }
     }
@@ -355,9 +514,9 @@ private final class WorldClockLocationResolver: NSObject, CLLocationManagerDeleg
             if self.isAuthorized(status) {
                 manager.requestLocation()
             } else if status == .denied || status == .restricted {
-                self.onUpdate?(nil, "Location denied — using Mac time zone", status)
+                self.onUpdate?(nil, "Location denied — using Mac time zone", status, nil)
             } else if status == .notDetermined {
-                self.onUpdate?(nil, "Location not requested yet", status)
+                self.onUpdate?(nil, "Location not requested yet", status, nil)
             }
         }
     }
@@ -374,12 +533,14 @@ private final class WorldClockLocationResolver: NSObject, CLLocationManagerDeleg
             self.onUpdate?(
                 nil,
                 "Location unavailable — Mac TZ \(TimeZone.current.identifier)",
-                manager.authorizationStatus
+                manager.authorizationStatus,
+                nil
             )
         }
     }
 
     private func reverseGeocode(_ location: CLLocation) {
+        let coord = location.coordinate
         geocoder.cancelGeocode()
         geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
             Task { @MainActor in
@@ -389,9 +550,9 @@ private final class WorldClockLocationResolver: NSObject, CLLocationManagerDeleg
                 let place = city ?? mark?.name
                 let tz = TimeZone.current.identifier
                 if let place {
-                    self.onUpdate?(place, "\(place) · \(tz)", self.manager.authorizationStatus)
+                    self.onUpdate?(place, "\(place) · \(tz)", self.manager.authorizationStatus, coord)
                 } else {
-                    self.onUpdate?(nil, "Mac time zone · \(tz)", self.manager.authorizationStatus)
+                    self.onUpdate?(nil, "Mac time zone · \(tz)", self.manager.authorizationStatus, coord)
                 }
             }
         }
@@ -552,7 +713,11 @@ private struct ExpandedWorldClockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-            NotchSectionHeader("World Clock")
+            HStack(spacing: 8) {
+                NotchSectionHeader("World Clock")
+                Spacer(minLength: 0)
+                sortControls
+            }
 
             TimelineView(.periodic(from: .now, by: 15)) { context in
                 ScrollView {
@@ -566,11 +731,69 @@ private struct ExpandedWorldClockView: View {
                 }
             }
 
-            Text("Major cities · current location · Apple time zones · offline")
+            Text(footerLine)
                 .font(NotchTheme.micro)
                 .foregroundStyle(NotchTheme.textQuaternary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var footerLine: String {
+        switch plugin.sortMode {
+        case .nearest: return "Sorted nearest → farthest from you · offline"
+        case .farthest: return "Sorted farthest → nearest · offline"
+        case .random: return "Random order · shuffle to re-roll · offline"
+        case .selection: return "As picked · major cities · time zones · offline"
+        }
+    }
+
+    private var sortControls: some View {
+        HStack(spacing: 4) {
+            Menu {
+                ForEach(WorldClockSortMode.allCases) { mode in
+                    Button {
+                        plugin.sortMode = mode
+                    } label: {
+                        Label(mode.title, systemImage: mode.systemImage)
+                    }
+                }
+                Divider()
+                Button {
+                    plugin.reshuffle()
+                } label: {
+                    Label("Shuffle now", systemImage: "shuffle")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: plugin.sortMode.systemImage)
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(plugin.sortMode.title)
+                        .font(NotchTheme.micro.weight(.semibold))
+                }
+                .foregroundStyle(NotchTheme.textSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(NotchTheme.chipFill)
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .help("Sort clocks by distance, reverse, random, or pick order")
+
+            if plugin.sortMode == .random {
+                Button {
+                    plugin.reshuffle()
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Reshuffle")
+            }
+        }
     }
 
     private func cityRow(_ entry: WorldClockEntry, at date: Date) -> some View {
@@ -618,6 +841,13 @@ private struct ExpandedWorldClockView: View {
                         Text(WorldClockFormat.offsetLabel(from: ref, to: tz, date: date))
                             .font(NotchTheme.micro.monospacedDigit())
                             .foregroundStyle(NotchTheme.textTertiary)
+                    }
+                    if let dist = plugin.distanceLabel(for: entry) {
+                        Text("·")
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                        Text(dist)
+                            .font(NotchTheme.micro.monospacedDigit())
+                            .foregroundStyle(NotchTheme.calmGlow.opacity(0.9))
                     }
                     if dst {
                         Text("DST")
@@ -763,10 +993,34 @@ private struct WorldClockSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Pick up to 10 clocks. References: current location, major cities, and Apple time zones.")
+            Text("Pick up to 10 clocks. Sort by distance from your location, reverse, random, or keep pick order.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sort order")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Sort", selection: $plugin.sortMode) {
+                    ForEach(WorldClockSortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                if plugin.sortMode == .nearest || plugin.sortMode == .farthest {
+                    Text("Uses Current Location (GPS) when available; otherwise the first city with known coordinates.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if plugin.sortMode == .random {
+                    Button("Shuffle now") { plugin.reshuffle() }
+                        .controlSize(.small)
+                }
+            }
+
+            Divider()
 
             // Current location
             VStack(alignment: .leading, spacing: 6) {
