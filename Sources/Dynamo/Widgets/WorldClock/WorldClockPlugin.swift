@@ -9,7 +9,7 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
     let id = "world-clock"
     let displayName = "Clocks"
     let systemImage = "globe"
-    var expandedContentHeight: CGFloat { 320 }
+    var expandedContentHeight: CGFloat { 268 }
 
     @Published var selectedIDs: [String] {
         didSet {

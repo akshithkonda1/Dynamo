@@ -81,9 +81,9 @@ struct NotchEmptyState: View {
     var prominent: Bool = false
 
     var body: some View {
-        VStack(spacing: prominent ? 8 : 5) {
+        VStack(spacing: prominent ? 6 : 4) {
             Image(systemName: systemImage)
-                .font(.system(size: prominent ? 22 : 16, weight: .medium))
+                .font(.system(size: prominent ? 18 : 14, weight: .medium))
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .symbolRenderingMode(.hierarchical)
                 .symbolVariant(.none)
@@ -97,10 +97,11 @@ struct NotchEmptyState: View {
                     .foregroundStyle(NotchTheme.textQuaternary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, prominent ? NotchTheme.spaceMD : NotchTheme.spaceSM)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, prominent ? NotchTheme.spaceSM : 4)
     }
 }
 

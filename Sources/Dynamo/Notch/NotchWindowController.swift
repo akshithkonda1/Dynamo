@@ -76,8 +76,8 @@ final class NotchWindowController: ObservableObject {
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
     static let collapseDelayKey = "dynamo.collapseDelaySeconds"
-    /// Default: mid 5–10s window so the tray stays usable after you leave.
-    static let defaultCollapseDelay: TimeInterval = 7.0
+    /// Default: snappy enough that an empty glance doesn’t linger over the desktop.
+    static let defaultCollapseDelay: TimeInterval = 5.0
     /// Published for Settings binding. `0` = collapse immediately on leave (hover-only).
     @Published private(set) var collapseDelaySeconds: TimeInterval = defaultCollapseDelay
 

@@ -60,46 +60,44 @@ enum NotchGeometry {
     // MARK: - Aspect-adaptive expanded panel
 
     /// Expanded island width from screen size + aspect ratio.
-    /// Tuned wide for readable lists / dual columns while still reading as an
-    /// island (not a full menu bar strip). Ultrawide uses a lower fraction so
-    /// it doesn’t stretch edge-to-edge; compact displays get a higher fraction.
+    /// Reads as a notch island — not a modal sheet covering the desktop.
     static func expandedWidth(for screen: NSScreen?) -> CGFloat {
-        guard let screen else { return 720 }
+        guard let screen else { return 560 }
         let w = screen.frame.width
         let h = max(screen.frame.height, 1)
         let aspect = w / h
         let fraction: CGFloat
         if aspect >= 2.0 {          // ultrawide
-            fraction = 0.30
+            fraction = 0.24
         } else if aspect >= 1.7 {   // 16:9–16:10 laptop
-            fraction = 0.40
+            fraction = 0.32
         } else if aspect >= 1.45 {  // 3:2
-            fraction = 0.46
+            fraction = 0.36
         } else {                    // nearer square / portrait external
-            fraction = 0.54
+            fraction = 0.42
         }
         let raw = w * fraction
-        // Floor high enough for labeled tray + dual-column Focus/Meeting.
-        return min(940, max(540, raw.rounded()))
+        // Comfortable for tray labels; never a half-screen slab.
+        return min(680, max(480, raw.rounded()))
     }
 
-    /// Scale widget content height with display height so tall screens get more room.
+    /// Scale widget content height modestly with display height.
     static func expandedContentHeight(base: CGFloat, for screen: NSScreen?) -> CGFloat {
         guard let screen else { return base }
         let h = screen.frame.height
-        // ~900pt tall MBP is baseline 1.0; clamp so small displays don't crush UI.
-        let scale = min(1.34, max(0.94, h / 900))
+        // Keep empty/short tabs compact on large displays.
+        let scale = min(1.12, max(0.94, h / 900))
         return (base * scale).rounded()
     }
 
     /// Peek / HUD overlay width tracks expanded width lightly.
     static func peekOverlaySize(for screen: NSScreen?) -> NSSize {
-        let w = min(580, max(400, expandedWidth(for: screen) * 0.62))
+        let w = min(480, max(360, expandedWidth(for: screen) * 0.72))
         return NSSize(width: w.rounded(), height: 104)
     }
 
     static func hudOverlaySize(for screen: NSScreen?) -> NSSize {
-        let w = min(420, max(300, expandedWidth(for: screen) * 0.46))
+        let w = min(360, max(280, expandedWidth(for: screen) * 0.52))
         return NSSize(width: w.rounded(), height: 50)
     }
 }

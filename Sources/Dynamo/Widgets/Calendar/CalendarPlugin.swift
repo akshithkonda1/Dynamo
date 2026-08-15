@@ -69,7 +69,8 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         provider.start()
         applyProviderSnapshot()
         switch authState {
-        case .notDetermined:
+        case .notDetermined, .writeOnly:
+            // Prompt (again) for full read access — write-only leaves the list empty.
             Task { await provider.requestAccess() }
         case .authorized:
             provider.refresh()
@@ -85,8 +86,22 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     private func applyProviderSnapshot() {
         let now = Date()
-        events = provider.upcoming.filter { $0.end > now }
+        let previousCount = events.count
+        let previousAuth = authState
+        events = provider.upcoming.filter { item in
+            if item.end > now { return true }
+            // Keep all-day items that still land on today.
+            if item.isAllDay {
+                return Calendar.current.isDateInToday(item.start)
+                    || Calendar.current.isDateInToday(item.end)
+            }
+            return false
+        }
         authState = provider.authorizationState
+        // Resize island when empty ↔ list or auth flips (compact empty tray).
+        if previousCount != events.count || previousAuth != authState {
+            NotificationCenter.default.post(name: .dynamoFocusLayoutDidChange, object: nil)
+        }
         // Feed Focus modes.
         FocusController.shared.reevaluateMeeting()
         FocusAgendaEngine.shared.updateEvents(events)
@@ -160,7 +175,18 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         AnyView(ExpandedCalendarView(plugin: self))
     }
 
-    var expandedContentHeight: CGFloat { 268 }
+    /// Compact when empty / no read access; taller only when listing events.
+    var expandedContentHeight: CGFloat {
+        if showComposer { return 250 }
+        switch authState {
+        case .authorized:
+            if events.isEmpty { return 118 }
+            let rows = min(events.count, 5)
+            return min(280, 120 + CGFloat(rows) * 42)
+        case .writeOnly, .denied, .notDetermined:
+            return 148
+        }
+    }
 
     private func checkUpcomingEvents() {
         let liveIDs = Set(events.map(\.id))
@@ -325,7 +351,7 @@ private struct ExpandedCalendarView: View {
                 }
             }
 
-            if plugin.showComposer, plugin.authState == .authorized {
+            if plugin.showComposer, plugin.authState == .authorized || plugin.authState == .writeOnly {
                 calendarComposer
             }
 
@@ -343,23 +369,43 @@ private struct ExpandedCalendarView: View {
 
             switch plugin.authState {
             case .notDetermined:
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Calendar access needed")
                         .font(NotchTheme.caption.weight(.semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
-                    Text("Allow Dynamo to read your calendars so upcoming events appear in the notch.")
+                    Text("Allow Full Calendar Access so upcoming events appear here.")
                         .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Allow Calendar Access") { plugin.requestAccess() }
                         .controlSize(.small)
                 }
+            case .writeOnly:
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Full access required to show events")
+                        .font(NotchTheme.caption.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textSecondary)
+                    Text("macOS only granted write access. Dynamo can create events but cannot read your schedule until you enable Full Calendar Access.")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Request Full Access") { plugin.requestAccess() }
+                            .controlSize(.small)
+                        Button("Open Calendar Privacy") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .controlSize(.small)
+                    }
+                }
             case .denied:
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Calendar access is off")
                         .font(NotchTheme.caption.weight(.semibold))
                         .foregroundStyle(NotchTheme.textSecondary)
-                    Text("Grant Full Calendar Access in System Settings. Dynamo never writes to your calendar.")
+                    Text("Grant Full Calendar Access in System Settings.")
                         .font(NotchTheme.micro)
                         .foregroundStyle(NotchTheme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -381,36 +427,19 @@ private struct ExpandedCalendarView: View {
                     NotchEmptyState(
                         systemImage: "calendar",
                         title: "No upcoming events",
-                        caption: "Next two weeks are clear — tap New to schedule. Reminders live under Checklist.",
-                        prominent: true
+                        caption: "Next 3 weeks look clear — New to schedule.",
+                        prominent: false
                     )
                 } else {
-                    GeometryReader { geo in
-                        let columns = geo.size.width >= 560 ? 2 : 1
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                                ForEach(groupedDays, id: \.dayStart) { group in
-                                    Text(dayLabel(group.dayStart))
-                                        .font(NotchTheme.micro.weight(.semibold))
-                                        .foregroundStyle(NotchTheme.textQuaternary)
-                                        .padding(.top, 2)
-                                    if columns == 2 {
-                                        LazyVGrid(
-                                            columns: [
-                                                GridItem(.flexible(), spacing: 8),
-                                                GridItem(.flexible(), spacing: 8)
-                                            ],
-                                            spacing: 6
-                                        ) {
-                                            ForEach(group.events) { event in
-                                                eventRow(event)
-                                            }
-                                        }
-                                    } else {
-                                        ForEach(group.events) { event in
-                                            eventRow(event)
-                                        }
-                                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+                            ForEach(groupedDays, id: \.dayStart) { group in
+                                Text(dayLabel(group.dayStart))
+                                    .font(NotchTheme.micro.weight(.semibold))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                                    .padding(.top, 2)
+                                ForEach(group.events) { event in
+                                    eventRow(event)
                                 }
                             }
                         }
@@ -419,6 +448,7 @@ private struct ExpandedCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { plugin.refresh() }
     }
 
     private var calendarComposer: some View {

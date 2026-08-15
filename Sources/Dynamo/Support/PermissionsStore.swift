@@ -203,7 +203,10 @@ final class PermissionsStore: ObservableObject {
         let status = EKEventStore.authorizationStatus(for: .event)
         if #available(macOS 14.0, *) {
             switch status {
-            case .fullAccess, .authorized, .writeOnly: return .granted
+            case .fullAccess: return .granted
+            case .authorized: return .granted
+            // Write-only cannot list events — treat as incomplete for Permissions UI.
+            case .writeOnly: return .notDetermined
             case .notDetermined: return .notDetermined
             case .denied, .restricted: return .denied
             @unknown default: return .unknown

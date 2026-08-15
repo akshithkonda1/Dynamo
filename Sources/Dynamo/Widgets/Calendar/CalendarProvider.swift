@@ -25,7 +25,10 @@ struct CodableColor: Equatable {
 
 enum CalendarAuthState: Equatable {
     case notDetermined
+    /// Full read access (macOS 14+ fullAccess, or legacy authorized).
     case authorized
+    /// macOS 14+ write-only — can create events but **cannot read** the schedule.
+    case writeOnly
     case denied
 }
 
