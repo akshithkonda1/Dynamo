@@ -48,26 +48,31 @@ final class EventKitCalendarProvider: CalendarProvider {
         do {
             let eventsGranted: Bool
             if #available(macOS 14.0, *) {
+                // Always ask for **full** access so we can list upcoming events.
+                // Write-only leaves the tray empty even when the calendar is full.
                 eventsGranted = try await store.requestFullAccessToEvents()
             } else {
                 eventsGranted = try await store.requestAccess(to: .event)
             }
-            authorizationState = eventsGranted ? .authorized : .denied
-            if eventsGranted {
+            updateAuthState()
+            if eventsGranted || authorizationState == .authorized {
                 refresh()
             } else {
                 upcoming = []
                 onChange?()
             }
         } catch {
-            authorizationState = .denied
-            upcoming = []
+            updateAuthState()
+            if authorizationState != .authorized {
+                upcoming = []
+            }
             onChange?()
         }
     }
 
     func refresh() {
         updateAuthState()
+        // Write-only / denied / undetermined cannot read the schedule.
         guard authorizationState == .authorized else {
             upcoming = []
             onChange?()
@@ -75,20 +80,42 @@ final class EventKitCalendarProvider: CalendarProvider {
         }
 
         let start = Date()
-        let end = Calendar.current.date(byAdding: .day, value: 14, to: start)
-            ?? start.addingTimeInterval(14 * 86_400)
+        let end = Calendar.current.date(byAdding: .day, value: 21, to: start)
+            ?? start.addingTimeInterval(21 * 86_400)
 
+        // Prefer every event calendar the user can see. `nil` calendars uses
+        // EventKit’s default (all accessible) — more reliable after partial TCC.
         let calendars = store.calendars(for: .event)
+        let windowStart = start.addingTimeInterval(-12 * 60 * 60)
         let predicate = store.predicateForEvents(
-            withStart: start.addingTimeInterval(-6 * 60 * 60),
+            withStart: windowStart,
             end: end,
             calendars: calendars.isEmpty ? nil : calendars
         )
         let now = Date()
-        let events = store.events(matching: predicate)
-            .filter { $0.endDate > now }
+        var raw = store.events(matching: predicate)
+        // Safety net: unrestricted calendar set if the first pass is empty.
+        if raw.isEmpty, !calendars.isEmpty {
+            let fallback = store.predicateForEvents(
+                withStart: windowStart,
+                end: end,
+                calendars: nil
+            )
+            raw = store.events(matching: fallback)
+        }
+
+        let events = raw
+            .filter { event in
+                // Keep in-progress and future; all-day ending today still counts.
+                if event.endDate > now { return true }
+                if event.isAllDay {
+                    return Calendar.current.isDateInToday(event.startDate)
+                        || Calendar.current.isDateInToday(event.endDate)
+                }
+                return false
+            }
             .sorted { $0.startDate < $1.startDate }
-            .prefix(40)
+            .prefix(50)
             .map { event -> CalendarEventItem in
                 var color: CodableColor?
                 if let cg = event.calendar.cgColor,
@@ -190,10 +217,13 @@ final class EventKitCalendarProvider: CalendarProvider {
     private func updateAuthState() {
         if #available(macOS 14.0, *) {
             switch EKEventStore.authorizationStatus(for: .event) {
-            case .fullAccess, .authorized:
+            case .fullAccess:
                 authorizationState = .authorized
             case .writeOnly:
-                // Write-only still allows create; reads may be empty.
+                // Can create, cannot list — do not pretend we can read.
+                authorizationState = .writeOnly
+            case .authorized:
+                // Legacy alias on some SDKs.
                 authorizationState = .authorized
             case .notDetermined:
                 authorizationState = .notDetermined

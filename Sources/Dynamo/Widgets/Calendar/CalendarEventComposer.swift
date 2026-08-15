@@ -30,7 +30,8 @@ enum CalendarEventComposer {
     /// Create and commit an event into the default calendar.
     static func create(_ draft: Draft, store: EKEventStore = EKEventStore()) -> Result {
         let auth = authorization()
-        guard auth == .authorized else {
+        // Write-only still allows create; full access required only for listing.
+        guard auth == .authorized || auth == .writeOnly else {
             return .denied
         }
 
@@ -79,7 +80,9 @@ enum CalendarEventComposer {
     static func authorization() -> CalendarAuthState {
         if #available(macOS 14.0, *) {
             switch EKEventStore.authorizationStatus(for: .event) {
-            case .fullAccess, .authorized, .writeOnly: return .authorized
+            case .fullAccess: return .authorized
+            case .writeOnly: return .writeOnly
+            case .authorized: return .authorized
             case .notDetermined: return .notDetermined
             default: return .denied
             }
