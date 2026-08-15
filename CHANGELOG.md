@@ -2,6 +2,26 @@
 
 All notable changes to Dynamo are documented here.
 
+## [1.0.1] — 2026-08-15
+
+**Snappier notch + World Clock + Preferences.**
+
+### Highlights
+
+- **World Clock** replaces Weather in the production tray (free, offline, no WeatherKit)
+- Clocks references: **major cities**, **current location** (Core Location city label), **Apple IANA time zones**
+- DST badges, call-window, converter (“when it’s X here”), copy time, full TZ search in Preferences
+- **Preferences** renames awkward “Settings…” labeling (menu, gear tray, window title)
+- New **Feel & alerts** pane: collapse delay (incl. 3s snappy), Peek duration/haptics, Amplify EQ, notification mirror
+- Snappier expand/collapse springs and faster media / volume / call / notif polls
+- Slightly more sensitive hover (near padding, shorter retreat / suppress windows)
+
+### Notes
+
+- Weather source remains in tree for a future opt-in build
+- Version 1.0.1 build 101
+
+
 ## [1.0.0] — 2026-08-03
 
 **Production daily driver (Weather disabled).**

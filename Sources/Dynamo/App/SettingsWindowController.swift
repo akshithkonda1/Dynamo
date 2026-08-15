@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Real Settings window (NSWindow, not a notch panel), opened from the menu bar.
+/// Preferences window (NSWindow, not a notch panel), opened from the menu bar.
 @MainActor
 final class SettingsWindowController: NSObject {
     private var window: NSWindow?
@@ -18,14 +18,14 @@ final class SettingsWindowController: NSObject {
         if window == nil {
             let root = SettingsView(registry: registry, notch: notch)
             let hosting = NSHostingController(rootView: root)
-            // Standard macOS settings window — titled, translucent titlebar.
+            // Standard macOS preferences window — titled, translucent titlebar.
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 600, height: 760),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Dynamo Settings"
+            window.title = "Preferences"
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .visible
             window.toolbarStyle = .unified
@@ -33,8 +33,8 @@ final class SettingsWindowController: NSObject {
             window.contentViewController = hosting
             window.center()
             window.isReleasedWhenClosed = false
-            window.setFrameAutosaveName("DynamoSettingsWindow")
-            window.setContentSize(NSSize(width: 600, height: 760))
+            window.setFrameAutosaveName("DynamoPreferencesWindow")
+            window.setContentSize(NSSize(width: 600, height: 800))
             window.minSize = NSSize(width: 520, height: 560)
             self.window = window
         }
@@ -52,20 +52,23 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchStatus = LaunchAtLogin.statusDescription
     @AppStorage("peekDwellMultiplier") private var peekDwellMultiplier: Double = 1.0
+    @ObservedObject private var amplify = MediaAmplifyController.shared
+    @ObservedObject private var mirror = SystemNotificationMirror.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Dynamo Settings")
+                    Text("Preferences")
                         .font(.largeTitle.weight(.bold))
-                    Text("notch widget dock")
+                    Text("Dynamo · notch dock")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
 
-                // IA: General · Appearance · Widgets · Permissions · About
+                // IA: General · Feel · Appearance · Widgets · Permissions · About
                 generalSection
+                feelSection
                 appearanceSection
                 widgetsSection
                 keyboardShortcutsSection
@@ -110,26 +113,6 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Collapse after leaving notch")
-                .font(.subheadline.weight(.semibold))
-            Picker("Collapse delay", selection: Binding(
-                get: { Int(notch.collapseDelaySeconds) },
-                set: { notch.setCollapseDelay(TimeInterval($0)) }
-            )) {
-                Text("Hover only (immediate)").tag(0)
-                Text("5 seconds").tag(5)
-                Text("7 seconds (default)").tag(7)
-                Text("10 seconds").tag(10)
-                Text("30 seconds").tag(30)
-            }
-            .labelsHidden()
-            Text("How long the expanded tray stays open after the cursor leaves. Default is 7 seconds (in the 5–10s sweet spot). Hover-only collapses as soon as you leave.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
             Toggle("Hidden Mode (peek from the top edge)", isOn: Binding(
                 get: { notch.isHiddenModeEnabled },
                 set: { notch.setHiddenMode($0) }
@@ -157,6 +140,47 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Feel & alerts — collapse timing, peeks, Amplify, notification surface.
+    private var feelSection: some View {
+        SettingsSection(title: "Feel & alerts") {
+            Text("Notch responsiveness")
+                .font(.subheadline.weight(.semibold))
+            Picker("Collapse delay", selection: Binding(
+                get: { Int(notch.collapseDelaySeconds) },
+                set: { notch.setCollapseDelay(TimeInterval($0)) }
+            )) {
+                Text("Hover only (immediate)").tag(0)
+                Text("3 seconds (snappy)").tag(3)
+                Text("5 seconds").tag(5)
+                Text("7 seconds (default)").tag(7)
+                Text("10 seconds").tag(10)
+                Text("30 seconds").tag(30)
+            }
+            .labelsHidden()
+            Text("How long the tray stays open after the cursor leaves. Expand/collapse springs are snappy; use 3s if you want the tray to feel more sensitive.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Text("Peek duration")
+                .font(.subheadline.weight(.semibold))
+            Picker("Peek duration", selection: $peekDwellMultiplier) {
+                Text("Shorter").tag(0.5)
+                Text("Normal").tag(1.0)
+                Text("Longer").tag(1.5)
+                Text("Extra long").tag(2.0)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("How long each Peek stays up. Normal is ~3–7.5s depending on urgency.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -174,8 +198,8 @@ struct SettingsView: View {
                 }
             ))
             Toggle("Mirror other apps’ notifications", isOn: Binding(
-                get: { SystemNotificationMirror.shared.isEnabled },
-                set: { SystemNotificationMirror.shared.isEnabled = $0 }
+                get: { mirror.isEnabled },
+                set: { mirror.isEnabled = $0 }
             ))
             Toggle("Peek haptics", isOn: Binding(
                 get: { PeekNotificationCenter.shared.hapticsEnabled },
@@ -185,19 +209,15 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, sports, health — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS still may show system banners unless you quiet them in Focus / Notifications settings. Weather is disabled in this production build.")
+            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, sports, health, world clock — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS may still show system banners unless you quiet them in Focus / Notifications.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(SystemNotificationMirror.shared.lastStatus)
+            Text(mirror.lastStatus)
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(
-                    SystemNotificationMirror.shared.accessDenied
-                        ? Color.orange
-                        : Color.secondary
-                )
+                .foregroundStyle(mirror.accessDenied ? Color.orange : Color.secondary)
                 .lineLimit(2)
-            if SystemNotificationMirror.shared.accessDenied {
+            if mirror.accessDenied {
                 Button("Open Privacy → Full Disk Access") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                         NSWorkspace.shared.open(url)
@@ -223,7 +243,7 @@ struct SettingsView: View {
                 get: { PeekBridge.shared.isEnabled },
                 set: { PeekBridge.shared.isEnabled = $0 }
             ))
-            Text("Notification API: dynamo://notify?title=…&subtitle=…&urgency=high · distributed com.akshithkonda.Dynamo.notify (legacy: …externalPeek / dynamo://peek).")
+            Text("Notification API: dynamo://notify?title=…&subtitle=…&urgency=high · distributed com.akshithkonda.Dynamo.notify")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -242,17 +262,35 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Peek duration")
+            Text("Media Amplify")
                 .font(.subheadline.weight(.semibold))
-            Picker("Peek duration", selection: $peekDwellMultiplier) {
-                Text("Shorter").tag(0.5)
-                Text("Normal").tag(1.0)
-                Text("Longer").tag(1.5)
-                Text("Extra long").tag(2.0)
+            Toggle("Amplify EQ (Apple Music)", isOn: Binding(
+                get: { amplify.isEnabled },
+                set: { amplify.isEnabled = $0 }
+            ))
+            Picker("Profile", selection: Binding(
+                get: { amplify.profile },
+                set: { amplify.profile = $0 }
+            )) {
+                ForEach(MediaAmplifyProfile.allCases) { profile in
+                    Text(profile.title).tag(profile)
+                }
             }
-            .pickerStyle(.segmented)
             .labelsHidden()
-            Text("How long each Peek stays up. Normal is 3–7.5s depending on urgency.")
+            Text(amplify.profile.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(amplify.statusLine)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            if let err = amplify.lastError {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Shapes tone only — never the volume fader. Spotify has no scriptable EQ; Amplify re-applies when Music is active.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -340,7 +378,7 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 }
             }
-            Text("Notch widget dock for macOS — media, calendar, clipboard, shelf, webcam, and more.")
+            Text("Notch widget dock for macOS — media, calendar, world clock, clipboard, shelf, webcam, and more.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -376,7 +414,7 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         SettingsSection(title: "Permissions") {
-            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen (mic/speech), Amplify EQ (Music automation), notification mirror (Full Disk Access). Weather / Location are not required in this production build.")
+            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen, Amplify EQ, notification mirror (Full Disk Access), Location (optional city label for Clocks “Here”). Clocks use Apple’s time zone database offline.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -439,7 +477,7 @@ struct SettingsView: View {
             }
             Spacer(minLength: 0)
             if permissions.status(for: permission) != .granted {
-                Button("Open Settings") {
+                Button("System Settings") {
                     permissions.openSystemSettings(for: permission)
                 }
                 .controlSize(.small)
@@ -464,7 +502,7 @@ struct SettingsView: View {
     private func statusLabel(_ status: PermissionMemoryStatus) -> String {
         switch status {
         case .granted: return "Granted"
-        case .denied: return "Denied — open System Settings to change"
+        case .denied: return "Denied — open macOS System Settings to change"
         case .notDetermined: return "Not asked yet — use the feature once to prompt"
         case .unknown: return "Unknown (app may be closed / not installed)"
         }

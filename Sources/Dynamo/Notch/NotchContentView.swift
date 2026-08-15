@@ -128,7 +128,7 @@ struct NotchContentView: View {
                 }
                 TrayIconButton(
                     systemImage: "gearshape.fill",
-                    displayName: "Settings",
+                    displayName: "Preferences",
                     shortLabel: nil,
                     isActive: false
                 ) {
@@ -231,6 +231,7 @@ struct NotchContentView: View {
         "calendar": "Cal",
         "checklist": "Tasks",
         "clipboard": "Clip",
+        "world-clock": "Clocks",
         "focus": "Focus",
         "sports": "Sports",
         "system-health": "Health",
