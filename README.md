@@ -6,12 +6,12 @@ Dynamo turns the notch into an interactive tray with a plugin architecture (widg
 
 | | |
 |---|---|
-| **Version** | **1.0.0** (production, Weather disabled) |
+| **Version** | **1.0.1** (production — World Clock, no Weather) |
 | **Platform** | macOS 13+ (14.2+ for live process-tap equalizer) |
 | **Daily driver** | `dist/Dynamo.app` only (single-instance) |
 | **License** | MIT |
 
-> Personal daily-driver project. Prefer free data sources and native frameworks; treat notarization / paid-team WeatherKit as optional infrastructure.
+> Personal daily-driver project. Prefer free data sources and native frameworks. WeatherKit is optional infrastructure; production uses **World Clock** instead.
 
 ---
 
@@ -25,16 +25,17 @@ Registered in `AppDelegate.bootstrap()`:
 | **Calendar** | Upcoming events (EventKit), in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist |
 | **Clipboard** | Recent snippets |
+| **Clocks** | Multi-city **World Clock** (free, offline Time Zone DB — Weather replacement) |
 | **Battery** | Charge, health, drain estimate; **Low / Auto / High** power modes (`pmset`) |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
 | **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
-| **System Health** | Local Mac health score + deep links to Settings / updates |
+| **System Health** | Local Mac health score + deep links to System Settings / updates |
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
 **Background systems (not tray tabs):** Peek notification center, Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts.
 
-> **Production note:** The **Weather** widget is **not shipped** in `dist/Dynamo.app` (WeatherKit needs a paid Apple Developer team). Source remains under `Widgets/Weather/` for a future opt-in build.
+> **Production note:** **Weather** is **not registered** in production (WeatherKit needs a paid team). **World Clock** fills that tray slot. Weather source remains under `Widgets/Weather/` for a future opt-in build.
 
 ---
 

@@ -9,9 +9,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>Dynamo</string>
 	<key>CFBundleVersion</key>
-	<string>100</string>
+	<string>101</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.0.1</string>
 	<key>CFBundleExecutable</key>
 	<string>Dynamo</string>
 	<key>CFBundlePackageType</key>
@@ -33,7 +33,7 @@
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Dynamo needs full Reminders access to read, create, complete, and delete reminders from the Checklist tab. Changes sync with the Reminders app.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Dynamo uses your location to show local weather in the notch. Location is sent only to Apple’s WeatherKit service to fetch the forecast; you can also set a location manually in Settings instead.</string>
+	<string>Dynamo may use your location for optional widgets that need it. Production builds use World Clock (no location) instead of Weather.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Dynamo can show a live camera mirror in the notch, including Continuity Camera (iPhone). The camera only runs while you have the Webcam tab open — never in the background.</string>
 	<!-- Required so Continuity Camera devices appear as .continuityCamera (not mislabeled built-in). -->

@@ -73,15 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.sneakPeekController = sneakPeekController
 
         // Default tray order. Settings can reorder without hosts knowing names.
-        // Weather is intentionally omitted from the production daily driver
-        // (WeatherKit needs a paid Apple team + Xcode-signed app). Source stays
-        // in the tree for optional re-enable later.
+        // Weather/WeatherKit is replaced by free World Clock in production.
         let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
         mediaPlugin = media
         registry.register(media)
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
+        registry.register(WorldClockPlugin())
         registry.register(BatteryPlugin())
         registry.register(FocusPlugin())
         registry.register(SportsPlugin())
@@ -193,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(hiddenItem)
         hiddenModeMenuItem = hiddenItem
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Preferences", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "About Dynamo", action: #selector(showAboutPanel), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Dynamo", action: #selector(quit), keyEquivalent: "q"))

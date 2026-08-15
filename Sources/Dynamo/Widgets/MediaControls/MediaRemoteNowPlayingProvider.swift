@@ -63,7 +63,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         }
         refreshAll()
         // MediaRemote notifications drive most updates; poll is a safety net only.
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Snappier transport status; still far lighter than 4–10 Hz.
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
             }
