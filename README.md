@@ -2,16 +2,16 @@
 
 **macOS notch dock** — a Dynamic Island–style widget tray for the MacBook notch, built for daily productivity rather than pure visual mimicry.
 
-Dynamo turns the notch into an interactive tray with a plugin architecture (widgets are cheap to add or remove). Alerts surface as **Peeks** in the notch instead of system banners. Everything is on-device by default; free/native Apple frameworks are preferred over paid APIs.
+Dynamo turns the notch into an interactive tray with a plugin architecture (widgets are cheap to add or remove). Alerts surface as **Peeks** in the notch instead of system banners. Everything is **on-device by default** — free/native frameworks preferred over paid cloud APIs.
 
 | | |
 |---|---|
-| **Version** | **1.0.1** (production — World Clock, no Weather) |
-| **Platform** | macOS 13+ (14.2+ for live process-tap equalizer) |
+| **Version** | **1.0.1** |
+| **Platform** | macOS 13+ (14.2+ for live process-tap EQ / local Amplify) |
 | **Daily driver** | `dist/Dynamo.app` only (single-instance) |
 | **License** | MIT |
 
-> Personal daily-driver project. Prefer free data sources and native frameworks. WeatherKit is optional infrastructure; production uses **World Clock** instead.
+> Personal daily-driver project. Production ships **World Clock** instead of Weather (WeatherKit needs a paid Apple team). Amplify EQ is **local DSP** — no Music Automation dependency, no network APIs.
 
 ---
 
@@ -21,11 +21,11 @@ Registered in `AppDelegate.bootstrap()`:
 
 | Widget | What it does |
 |--------|----------------|
-| **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (green = on / red = off), cover-art equalizer |
-| **Calendar** | Upcoming events (EventKit), in-notch **create event**, open Calendar.app |
+| **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ), cover-art equalizer |
+| **Calendar** | Upcoming events (EventKit full access), in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist |
 | **Clipboard** | Recent snippets |
-| **Clocks** | **World Clock**: major cities · current location · Apple IANA time zones (DST, converter, call window) |
+| **Clocks** | **World Clock** — major cities · current location · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
 | **Battery** | Charge, health, drain estimate; **Low / Auto / High** power modes (`pmset`) |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
 | **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
@@ -33,70 +33,83 @@ Registered in `AppDelegate.bootstrap()`:
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
-**Background systems (not tray tabs):** Peek notification center, Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts.
+**Background systems (not tray tabs):** Peek notification center, Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** local amplify engine.
 
-> **Production note:** **Weather** is **not registered** in production (WeatherKit needs a paid team). **World Clock** fills that tray slot. Weather source remains under `Widgets/Weather/` for a future opt-in build.
+> **Production note:** **Weather** is **not registered** (WeatherKit needs a paid team). Source remains under `Widgets/Weather/` for a future opt-in build. **Clocks** is the free replacement.
 
 ---
 
-## Highlights (0.5.x)
+## Highlights (1.0.1)
 
-### Peek as notification center
-Alerts surface in the notch via **`PeekNotificationCenter`**:
+### Preferences (not “Settings…”)
+Menu bar and gear open **Preferences**. Sections include **General**, **Feel & alerts** (collapse delay, Peek, Amplify), **Appearance**, **Widgets**, **Permissions**, and per-widget options.
 
-- **Dynamo sources:** calendar, reminders, battery, focus/meeting, media, weather, sports, health, clipboard
-- **Other apps:** `SystemNotificationMirror` reads the local Notification Center store and mirrors new deliveries as Peeks (best-effort; may need **Full Disk Access**)
-- Queue + coalesce by id; media / critical peeks preempt
-- Haptics (optional critical sound)
-- **Notification API:** `DynamoNotificationAPI.post(...)` · `dynamo://notify?title=…&urgency=high` · distributed `com.akshithkonda.Dynamo.notify` (legacy: `externalPeek` / `dynamo://peek`)
-- Meeting Mode quiets low/normal peeks
-- macOS may still show system banners unless you quiet them in Focus / Notifications settings — Dynamo **adds** Peek delivery; it cannot fully delete Apple’s banner UI without private APIs
+### Tray UX
+- **Icon-only** tray — no name chips when a tab is selected  
+- **Hover preview** — short delay, then a tab-style name under the icon  
+- Expanded island width is aspect-adaptive (cap **1650pt** on large displays)  
+- Empty Calendar stays **compact** (no giant blank sheet)
 
-### Media Amplify (Dolby-style intents, no volume fader)
-Transport-row icon button (same first-click path as play/pause):
+### Clocks (World Clock)
+Free, offline, no WeatherKit:
 
-- **Green glow** = Amplify on · **Red glow** = off  
-- **Presence** — dialogue/air clarity (Vocal Booster / Treble)  
-- **Cinema** — perceived loudness contour (Loudness)  
-- **Impact** — bass body & punch (Bass Booster / Electronic / Rock)  
-- **EQ only** — never raises system volume; re-applies on track/source change  
-- Right-click for profile; disabled while Meeting Mode is ducking volume  
+| Feature | Detail |
+|---------|--------|
+| References | Major cities · **Current Location** (optional GPS label) · Apple IANA time zones |
+| Sort | **Nearest first** · **Farthest first** · **Random** (shuffle) · **As picked** |
+| Distance | km from GPS (or fallback city) on distance modes |
+| Extras | DST badges, call-window, “when it’s X here” converter, copy time |
 
-### Adaptive island
-Expanded width scales with display aspect ratio (min ~540pt, max ~940pt). Active tray tab shows a short label; primary widgets sit left of Focus / tools.
+### Media Amplify — local DynamoEQ (Atmos / Spatial–safe)
+Not Music Automation. Not system volume.
 
-### Focus & Meeting
-User-selected modes (Meeting is not a silent auto-overlay):
+| | |
+|--|--|
+| **Engine** | `LocalAmplifyEngine` — process tap → multi-band biquad EQ → output |
+| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` — pure Python 3 stdlib, no network APIs |
+| **Profiles** | **Presence** · **Cinema** · **Impact** |
+| **Spatial / Atmos** | EQ after the player’s spatial render; **same curve on every channel** (no mono fold); mute-when-tapped so you hear one path |
+| **Players** | Music and Spotify (macOS **14.2+**, audio capture permission) |
+| **UI** | Green = on · red = off; right-click profile; Preferences → Feel & alerts |
 
-- **Meeting** — notes, optional Listen (speech), talk tips, volume duck; never joins the call  
-- Optional smart enter (calendar “now” + call app) and leave suggestions  
-- Call apps: FaceTime, Zoom, Teams, Discord, Slack, Loom, Webex, …  
+```bash
+# Optional offline designer / self-test (curves also embedded in the app)
+python3 Tools/DynamoEQ/dynamo_eq.py selftest
+python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile impact --sr 48000
+```
+
+### Peek as notification surface
+- Dynamo sources: calendar, reminders, battery, focus/meeting, media, sports, health, clipboard, clocks  
+- Optional **SystemNotificationMirror** (other apps → Peek; may need Full Disk Access)  
+- API: `dynamo://notify?title=…&urgency=high` · `DynamoNotificationAPI` · distributed notifications  
+- Meeting Mode quiets low/normal peeks  
 
 ### Calendar & Reminders
-- Create events in the notch (title, duration, start chips, location)  
-- Create reminders with due presets: **1h · Today · Tomorrow · None**  
+- **Full Calendar Access** required to list events (write-only is detected and prompted)  
+- Create events / reminders in the notch  
+
+### Focus & Meeting
+- **Meeting** — notes, optional Listen, talk tips, volume duck; never auto-joins calls  
+- Smart enter/leave suggestions from calendar + call apps  
 
 ### Battery power modes
-**Low · Auto · High** via `pmset` (High when the Mac supports it). Opt-in auto Low Power when unplugged and battery is low.
+**Low · Auto · High** via `pmset` when the Mac supports them.
 
 ---
 
 ## Requirements
 
-- **macOS 13+** (14.2+ unlocks live Core Audio process-tap EQ; older macOS degrades gracefully)
-- **Xcode 15+** (or recent beta) with macOS SDK
-- **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** (`brew install xcodegen`) for the WeatherKit app target
-- **Paid Apple Developer membership** — only if you want live **WeatherKit** (not required for Media, Calendar, Focus, etc.)
+- **macOS 13+** (14.2+ for process-tap visualizer + **local Amplify**)  
+- **Xcode 15+** (or recent beta) with macOS SDK when building from source  
+- **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** only if you want the optional WeatherKit app target  
 
-Permissions (as needed): Calendar, Reminders, Microphone (EQ sample + Meeting Listen), Speech, Camera (Webcam), Location (Weather), Automation (Music / Spotify).
+**Permissions (as needed):** Calendar (full), Reminders, Microphone / audio capture (Amplify + peek EQ + Meeting Listen), Speech, Camera (Webcam), Location (optional Clocks “Here” label), Automation (transport / playlists for Music & Spotify — **not** required for Amplify EQ).
 
 ---
 
 ## Build & run
 
-Two paths by design:
-
-### 1. Daily driver — packaged app (recommended / production)
+### 1. Daily driver — packaged app (recommended)
 
 ```bash
 ./scripts/package-app.sh          # release → dist/Dynamo.app
@@ -104,37 +117,42 @@ Two paths by design:
 open dist/Dynamo.app
 ```
 
-- Ad-hoc signed; good for Launch at Login  
-- **Only run this `.app`** — Dynamo terminates stray debug/Xcode copies when `dist` launches  
-- **Production tray does not include Weather** (no WeatherKit entitlement on ad-hoc builds)
+- Ad-hoc signed; suitable for Launch at Login  
+- **Only run `dist/Dynamo.app`** — it owns the single-instance daily driver  
+- Embeds `dynamo_eq.py` in Resources when present (optional; embedded EQ curves always work)  
+- Production tray **does not** include Weather  
 
 ### 2. Swift Package (fast compile / CI)
 
 ```bash
 export DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer   # if needed
-swift build
-.build/release/Dynamo   # or .build/debug/Dynamo
+swift build -c release
+.build/release/Dynamo
 ```
 
-No entitlements → no live WeatherKit.
-
-### 3. Xcode app target (WeatherKit)
+### 3. Xcode app target (optional WeatherKit)
 
 ```bash
 brew install xcodegen
-xcodegen generate          # project.yml → Dynamo.xcodeproj (git-ignored)
+xcodegen generate
 open Dynamo.xcodeproj
 ```
 
-Signing & Capabilities → your **paid** team. WeatherKit is in `Sources/Dynamo/Dynamo.entitlements`.
+Signing → paid team if you enable WeatherKit.
 
 ---
 
-## Settings & shortcuts
+## Preferences & shortcuts
 
-**Settings** (gear in tray or menu bar): collapse delay, Hidden mode, display picker, widgets on/off + reorder, Peek duration, Peek delivery / haptics, external Peek bridge, Meeting options.
+**Preferences** (gear in tray, menu **Preferences**, or ⌘,):
 
-**Default hotkeys** (⌃⌥ = Control + Option):
+- Launch at login, Hidden Mode, Meeting options  
+- **Feel & alerts** — collapse delay (incl. 3s snappy / 5s default), Peek, Amplify  
+- Display picker, widget toggle + reorder  
+- Clocks city/zone pickers + sort mode  
+- Full permissions catalog  
+
+**Hotkeys** (⌃⌥ = Control + Option):
 
 | Shortcut | Action |
 |----------|--------|
@@ -144,7 +162,7 @@ Signing & Capabilities → your **paid** team. WeatherKit is in `Sources/Dynamo/
 | ⌃⌥S | Focus Shelf |
 | ⌃⌥C | Focus Calendar |
 
-**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `peek?title=…&subtitle=…`
+**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `notify?title=…` · `peek?title=…`
 
 ---
 
@@ -153,30 +171,23 @@ Signing & Capabilities → your **paid** team. WeatherKit is in `Sources/Dynamo/
 - **`NotchWidgetPlugin`** — every tray widget; hosts never special-case by name  
 - **Capabilities** via protocol cast: `NotchAmbientProviding`, `NotchSneakPeekProviding`, `FileDropAccepting`, …  
 - **One folder per widget** under `Sources/Dynamo/Widgets/<Name>/`  
-- **Data behind protocols** (mock vs real swap without UI changes)  
-- **`NotchWindowController`** — collapsed ↔ expanded; peeks/HUD are overlays, not extra expand states  
-- **`PeekNotificationCenter`** — delivery policy (queue); **`NotchSneakPeekController`** — presentation  
-- **`NotchTheme`** + **`NotchIconButtonStyle`** — shared chrome; first-click-safe on nonactivating `NSPanel`  
-- **`NotchGeometry`** — collapsed size from real notch cutout; expanded size aspect-adaptive  
+- **Data behind protocols** (mock vs real without UI rewrites)  
+- **`NotchWindowController`** — collapsed ↔ expanded; peeks/HUD are overlays  
+- **`PeekNotificationCenter`** — delivery policy; **`NotchSneakPeekController`** — presentation  
+- **`LocalAmplifyEngine`** + **`Tools/DynamoEQ/`** — local Amplify DSP  
+- **`NotchGeometry`** — notch cutout + aspect-adaptive expanded width (cap 1650pt)  
 
-**SPM vs Xcode:** `Package.swift` = sources + CI; `project.yml` → signed `.app` with entitlements for WeatherKit. Both stay.
+**SPM vs Xcode:** `Package.swift` = sources + CI; `project.yml` → signed `.app` with entitlements when needed.
 
 ---
 
-## Weather (WeatherKit)
+## Weather (optional, not in production tray)
 
-Native `WeatherService` — no REST keys. Requires the **Xcode app target** and a **paid team**.
-
-- Location: Core Location, or set a city in **Settings → Weather**  
-- Attribution: Apple “Weather” mark + legal link (WeatherKit terms)
-
-If no paid team, Weather soft-fails; other widgets still work. Optional future free providers (e.g. NWS, OpenWeatherMap) can swap behind `WeatherProvider`.
+Native WeatherKit requires the **Xcode app target** and a **paid team**. Production uses **Clocks** instead. Weather source remains in-tree for opt-in builds.
 
 ---
 
 ## Notarization & release
-
-Optional tooling (no credentials in repo):
 
 | Script | Role |
 |--------|------|
@@ -186,30 +197,30 @@ Optional tooling (no credentials in repo):
 | `scripts/release-local.sh` | Package → optional notary → DMG |
 | `.github/workflows/release.yml` | Tag `v*` → CI archive / notary / DMG |
 
-See script headers and workflow for env vars / secrets. WeatherKit public builds should export from the **Xcode** Developer ID path, not ad-hoc package alone.
+No credentials in repo — see script headers for secrets.
 
 ---
 
 ## Smoke test
 
-After packaging:
-
 ```bash
 open dist/Dynamo.app
 ```
 
-Then walk **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)** and **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)**.
+Walk **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)** and **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)**.
 
 Quick checks:
 
-1. One process from `dist/Dynamo.app` only  
-2. Hover notch → tray expands; active tab labeled  
-3. Media: play/pause first-click; Amplify red↔green; skip Peek with art-colored EQ  
-4. Calendar **New** → create event  
-5. Checklist → add reminder (Tomorrow)  
-6. Battery → Low / Auto power chips  
-7. Focus → Meeting → duck + notes; Leave  
-8. `open 'dynamo://peek?title=Test&subtitle=Bridge'`  
+1. One process: `dist/Dynamo.app` only  
+2. Hover tray icons → **name preview**; press stays icon-only  
+3. **Clocks** present; no Weather tab  
+4. Clocks sort: nearest / farthest / random  
+5. Media play/pause first-click; Amplify green/red; status like `Impact · Local EQ · Spatial-ready`  
+6. Calendar: Full Access → events; empty state is short  
+7. Checklist → add reminder  
+8. Battery power chips  
+9. Focus → Meeting → Leave  
+10. `open 'dynamo://notify?title=Test&subtitle=1.0.1'`  
 
 ---
 
@@ -217,13 +228,14 @@ Quick checks:
 
 ```
 Sources/Dynamo/
-  App/              AppDelegate, Settings
-  Notch/            Panel, geometry, Peek presentation
+  App/              AppDelegate, Preferences window
+  Notch/            Panel, geometry, Peek presentation, tray UX
   Plugins/          Widget protocols + registry
   Support/          Focus, Meeting, PeekNotificationCenter, hotkeys, URLs
   System/           Volume, HUD, launch at login
-  Theme/            NotchTheme, EQ, chrome
-  Widgets/          One folder per widget
+  Theme/            NotchTheme, live EQ visualizer, chrome
+  Widgets/          One folder per widget (incl. WorldClock)
+Tools/DynamoEQ/     Pure-Python EQ designer / self-test (no network)
 scripts/            package, notarize, dmg, release
 docs/               Smoke test, production readiness
 dist/               Packaged Dynamo.app (daily driver)
@@ -237,21 +249,23 @@ dist/               Packaged Dynamo.app (daily driver)
 |-------|--------|
 | 1–2 | Notch engine, plugin tray, Media/Calendar/Clipboard/Checklist, Battery, Shelf, HUD, package-app |
 | 3–4 | WeatherKit target, peeks, Webcam, helper process, multi-display, release scripts |
-| 5–6 | Stability, resource audits, transport reliability |
-| 7 | Focus/Meeting, Sports, System Health, battery intelligence, Reminders → Checklist, hotkeys, process-tap EQ |
-| **0.5.x** | Adaptive width, power modes, in-notch event create, Amplify, Peek notification center, lighter timers, pressable Amplify control |
+| 5–6 | Stability, transport reliability |
+| 7 | Focus/Meeting, Sports, System Health, power modes, process-tap visualizer |
+| **0.5.x** | Adaptive width, Amplify intents, Peek center, pressable Amplify |
+| **1.0.0** | Production without Weather; packaging hardened |
+| **1.0.1** | World Clock + distance sort, Preferences, local Spatial-safe Amplify, calendar full-access fix, icon-only tray + hover previews |
 
-Older phase detail lives in git history and [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ---
 
 ## Known limitations
 
-- **WeatherKit** needs paid team + Xcode-signed app  
+- **WeatherKit** needs paid team + Xcode-signed app (not in production tray)  
+- **Local Amplify** needs **macOS 14.2+** and audio-capture permission; not a licensed Dolby decoder — it EQs the **post-render** Spatial/Atmos mix  
 - **Power modes** may open Battery Settings if `pmset` is blocked  
-- **Sports** uses an undocumented free ESPN feed; polls while Dynamo runs  
-- **Amplify** is Dolby-like *intent* via Music EQ only (presence/cinema/impact) — not system volume, not a licensed Dolby stack. Spotify has no scriptable EQ.  
-- **Peek** delivers Dynamo’s alerts only — not other apps’ Notification Center  
+- **Sports** uses an undocumented free ESPN feed  
+- **Notification mirror** is best-effort and may need Full Disk Access  
 - Automated UI tests remain thin relative to surface area  
 
 ---
