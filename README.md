@@ -25,7 +25,7 @@ Registered in `AppDelegate.bootstrap()`:
 | **Calendar** | Upcoming events (EventKit), in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist |
 | **Clipboard** | Recent snippets |
-| **Clocks** | Multi-city **World Clock** (free, offline Time Zone DB — Weather replacement) |
+| **Clocks** | **World Clock**: major cities · current location · Apple IANA time zones (DST, converter, call window) |
 | **Battery** | Charge, health, drain estimate; **Low / Auto / High** power modes (`pmset`) |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
 | **Sports** | Multi-league scores via free ESPN public CDN (no API key) |

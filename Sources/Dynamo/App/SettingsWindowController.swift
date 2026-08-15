@@ -414,7 +414,7 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         SettingsSection(title: "Permissions") {
-            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen (mic/speech), Amplify EQ (Music automation), notification mirror (Full Disk Access). World Clock needs no network or location.")
+            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen, Amplify EQ, notification mirror (Full Disk Access), Location (optional city label for Clocks “Here”). Clocks use Apple’s time zone database offline.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
