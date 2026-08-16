@@ -17,3 +17,7 @@ Sources/Dynamo/Secrets.local.swift
 .env.local
 *.local.json
 config.local.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
