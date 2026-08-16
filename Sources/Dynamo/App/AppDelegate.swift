@@ -77,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
         mediaPlugin = media
         registry.register(media)
+        // Peek Hub — Dynamo’s notification inbox (not a system banner mirror).
+        registry.register(NotificationsPlugin())
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
@@ -106,12 +108,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
-        // Peek is Dynamo’s primary notification surface (queue + haptics + history).
+        // Peek is Dynamo’s notification hub (queue + inbox + haptics).
         PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
         PeekBridge.shared.attach(registry: registry)
         DynamoNotificationAPI.installExternalListeners()
-        // Mirror other apps’ Notification Center deliveries (calls, texts, general) into Peeks.
-        // Independent of primaryDelivery — respects SystemNotificationMirror.isEnabled.
+        // Route system apps (Messages, FaceTime, Mail, …) into the Peek hub.
+        // Does not replace macOS banners by itself — use Focus for Peek-only.
         SystemNotificationMirror.shared.start()
         PermissionsStore.shared.refreshFromSystem()
         FocusController.shared.emitPeek = { peek in

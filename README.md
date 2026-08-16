@@ -33,7 +33,7 @@ Registered in `AppDelegate.bootstrap()`:
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
-**Background systems (not tray tabs):** Peek notification center (incl. calls/texts via optional system mirror), Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** + **Tone AI** local amplify engine.
+**Background systems:** **Peek notification hub** (Dynamo alerts + optional system-app routing for Messages/FaceTime/Mail — inbox in the **Hub** tray tab), Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** + **Tone AI** local amplify engine.
 
 > **Production note:** **Weather** is **not registered** (WeatherKit needs a paid team). Source remains under `Widgets/Weather/` for a future opt-in build. **Clocks** is the free replacement.
 
@@ -49,7 +49,7 @@ Registered in `AppDelegate.bootstrap()`:
 | **Battery** | Hero fill glyph, status chips, 2×2 vitals, actionable tips, ambient shell |
 | **Peek / HUD** | Notch-aware silhouette: camera-band top inset, modest flare from the cutout (not a banner toast) |
 | **Clocks** | **Here first** sort; **location permission requested on boot** for “Here” + distance modes |
-| **Notifications** | Calls / texts / general → Peek (system mirror + call-session probe) |
+| **Notification Hub** | Peek is the hub (not a dual mirror): queue + inbox + unread + replay; system apps **routed in**; **Hub** tray tab |
 | **Tray** | Icon-only + hover previews; aspect-adaptive island (cap 1650pt); snappier collapse options |
 | **Checklist** | Local + Apple Notes / Reminders polish |
 
@@ -113,12 +113,14 @@ python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symp
   --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le
 ```
 
-### Peek as notification surface
-- Dynamo sources: calendar, reminders, battery, focus/meeting, media, sports, health, clipboard, clocks  
-- Optional **SystemNotificationMirror** (other apps → Peek; may need Full Disk Access) — calls / texts / general  
-- Notch-aware layout: content clears the camera housing; island flares modestly from the cutout  
+### Peek as notification **hub**
+- **Single funnel** for Dynamo-originated alerts (calendar, reminders, battery, focus/meeting, media, sports, health, clipboard, clocks)  
+- Optional **routing** of system apps (Messages, FaceTime, Mail, Slack/Teams, …) into the same hub — not a second “mirror” banner surface  
+- **Hub** tray tab: inbox, unread, mark read, clear, **replay** as Peek; ambient unread badge  
+- Notch-aware Peek layout: camera-band clearance, contact-photo tint for messages  
 - API: `dynamo://notify?title=…&urgency=high` · `DynamoNotificationAPI` · distributed notifications  
-- Meeting Mode quiets low/normal peeks  
+- Meeting Mode quiets low/normal peeks; use **Focus** to silence macOS banners if you want Peek-only (Apple does not allow apps to kill system banners)  
+- Full Disk Access needed only for system-app routing (usernoted store)
 
 ### Calendar & Reminders
 - **Full Calendar Access** required to list events (write-only is detected and prompted)  

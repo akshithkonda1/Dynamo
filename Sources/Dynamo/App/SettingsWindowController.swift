@@ -185,13 +185,17 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Notifications → Peek")
+            Text("Notification Hub (Peek)")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Deliver all Dynamo alerts as Peeks", isOn: Binding(
+            Text("Peek is Dynamo’s notification hub — not a second banner tray. Calendar, reminders, battery, media, Focus, and (optionally) Messages/FaceTime/Mail all land as notch Peeks and stay in the Hub tab inbox.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Use Peek as the delivery hub", isOn: Binding(
                 get: { PeekNotificationCenter.shared.isPrimaryDelivery },
                 set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
             ))
-            Toggle("Mirror calls, texts & system notifications", isOn: Binding(
+            Toggle("Route system apps into the hub", isOn: Binding(
                 get: { mirror.isEnabled },
                 set: { mirror.isEnabled = $0 }
             ))
@@ -208,7 +212,7 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Like reminders: Messages, FaceTime/Phone, Mail, Slack/Teams, and other Notification Center alerts appear as notch Peeks when mirroring is on. Grant Full Disk Access so Dynamo can read the Notification Center store. macOS may still show system banners — quiet them in Focus / Notifications if you want Peek-only.")
+            Text("Routing system apps needs Full Disk Access (Notification Center store). macOS may still show its own banners — Dynamo cannot legally hide them. For Peek-only, silence those apps in Focus / Notifications.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -217,28 +221,42 @@ struct SettingsView: View {
                 .foregroundStyle(mirror.accessDenied ? Color.orange : Color.secondary)
                 .lineLimit(2)
             if !mirror.lastMirroredApp.isEmpty {
-                Text("Last app: \(mirror.lastMirroredApp) · \(mirror.mirroredCount) mirrored")
+                Text("Last routed: \(mirror.lastMirroredApp) · \(mirror.mirroredCount) into hub")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if mirror.accessDenied {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                if mirror.accessDenied {
                     Button("Open Full Disk Access") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                             NSWorkspace.shared.open(url)
                         }
                     }
                     .controlSize(.small)
-                    Button("Retry") {
+                    Button("Retry route") {
                         mirror.stop()
                         mirror.start()
                     }
                     .controlSize(.small)
                 }
+                Button("Open Focus settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.focus") {
+                        NSWorkspace.shared.open(url)
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+                .help("Silence system banners so the Peek hub is the only surface")
             }
             if PeekNotificationCenter.shared.pendingCount > 0 {
-                Text("\(PeekNotificationCenter.shared.pendingCount) queued")
+                Text("\(PeekNotificationCenter.shared.pendingCount) queued in hub")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if PeekNotificationCenter.shared.unreadCount > 0 {
+                Text("\(PeekNotificationCenter.shared.unreadCount) unread in Hub tab")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }

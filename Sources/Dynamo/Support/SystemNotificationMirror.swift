@@ -2,17 +2,20 @@ import AppKit
 import Foundation
 import SQLite3
 
-/// Mirrors **macOS Notification Center** deliveries into Dynamo Peeks —
-/// same surface as reminders/calendar (queued, urgent, notch Peek).
+/// **Routes** macOS Notification Center deliveries into Dynamo’s **Peek hub** —
+/// the same inbox as reminders, calendar, battery, and media Peeks.
 ///
-/// Apple does not publish an intercept API for other apps’ banners. We read the
-/// local `usernoted` SQLite store when TCC allows (Full Disk Access / Group Containers).
+/// This is not a second “mirror” surface: alerts are **ingested into the hub**
+/// and presented as notch Peeks. Apple does not publish an API to suppress
+/// system banners; users who want Peek-only can silence banners via Focus.
+///
+/// Implementation reads the local `usernoted` SQLite store when TCC allows
+/// (Full Disk Access / Group Containers).
 ///
 /// - Only **new** deliveries after Dynamo starts (no history dump)
 /// - Skips Dynamo’s own bundle
-/// - Prioritizes **calls, texts/iMessage, mail** as high/critical (survives Meeting quiet)
-/// - Routes everything through `PeekNotificationCenter` / `DynamoNotificationAPI`
-/// - Does not suppress system banners itself (use Focus / Notifications settings for that)
+/// - Prioritizes **calls, texts/iMessage, mail** as high/critical
+/// - Everything goes through `PeekNotificationCenter` / `DynamoNotificationAPI`
 @MainActor
 final class SystemNotificationMirror: ObservableObject {
     static let shared = SystemNotificationMirror()
@@ -90,7 +93,7 @@ final class SystemNotificationMirror: ObservableObject {
             self?.poll()
         }
         lastStatus = databaseFound
-            ? "Watching calls, texts & notifications"
+            ? "Routing system apps into Peek hub"
             : "Waiting for Notification Center access"
     }
 
@@ -108,7 +111,7 @@ final class SystemNotificationMirror: ObservableObject {
             databaseFound = true
             accessDenied = false
             UserDefaults.standard.set(maxID, forKey: Self.lastRecKey)
-            lastStatus = "Synced · waiting for new alerts"
+            lastStatus = "Hub ready · routing new system alerts"
             return
         }
         let stored = UserDefaults.standard.object(forKey: Self.lastRecKey) as? Int64 ?? 0
@@ -117,7 +120,7 @@ final class SystemNotificationMirror: ObservableObject {
         accessDenied = !databaseFound
         lastStatus = databaseFound
             ? "Waiting for Notification Center"
-            : "Need Full Disk Access to mirror calls & texts"
+            : "Need Full Disk Access to route calls & texts into the hub"
     }
 
     // MARK: - Poll
@@ -135,7 +138,7 @@ final class SystemNotificationMirror: ObservableObject {
 
         let rows = Self.fetchRecords(path: path, afterRecID: highWaterRecID, limit: 60)
         guard !rows.isEmpty else {
-            lastStatus = "Watching · last #\(highWaterRecID)"
+            lastStatus = "Hub idle · last #\(highWaterRecID)"
             return
         }
 
@@ -204,7 +207,7 @@ final class SystemNotificationMirror: ObservableObject {
         }
 
         UserDefaults.standard.set(highWaterRecID, forKey: Self.lastRecKey)
-        lastStatus = "Mirrored \(mirroredCount) · last #\(highWaterRecID)"
+        lastStatus = "Routed \(mirroredCount) into hub · last #\(highWaterRecID)"
     }
 
     private func urgency(for kind: NotificationKind) -> NotchSneakPeekUrgency {
