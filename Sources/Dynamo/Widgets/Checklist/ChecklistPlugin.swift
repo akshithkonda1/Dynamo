@@ -7,21 +7,22 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     let displayName = "Checklist"
     let systemImage = "checklist"
 
-    let store = ChecklistStore()
+    let store = ChecklistStore() // kept for migration / offline scratch if needed
     let reminders = RemindersProvider()
+    let notes = NotesProvider()
     @Published var draft: String = ""
-    /// Where the draft field writes: system Reminders (default) or local JSON list.
+    /// Where the draft field writes: system Reminders (default) or Apple Notes.
     @Published var draftTarget: DraftTarget = .reminders
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     enum DraftTarget: String, CaseIterable, Identifiable {
         case reminders
-        case local
+        case notes
         var id: String { rawValue }
         var label: String {
             switch self {
             case .reminders: return "Reminders"
-            case .local: return "Local"
+            case .notes: return "Notes"
             }
         }
     }
@@ -33,15 +34,16 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
     func start() {
         store.start()
+        notes.onChangeWire = { [weak self] in
+            self?.objectWillChange.send()
+            self?.syncFocusAgenda()
+        }
+        notes.start()
         reminders.onChange = { [weak self] in
             guard let self else { return }
             self.objectWillChange.send()
             self.checkDueReminders()
-            // Feed True Focus agenda + Dynamic pulses.
-            FocusAgendaEngine.shared.updateReminders(
-                self.reminders.items,
-                localOpen: self.store.items.filter { !$0.isDone }.map { ($0.id, $0.text) }
-            )
+            self.syncFocusAgenda()
             if FocusController.shared.effective == .dynamic {
                 DynamicCompanion.shared.maybePulse(
                     events: [],
@@ -59,8 +61,21 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
         }
     }
 
+    private func syncFocusAgenda() {
+        // Notes titles feed True Focus as open “local” items (stable synthetic UUIDs).
+        let noteOpen: [(UUID, String)] = notes.items.map { note in
+            let u = UUID(uuidString: String(note.id.prefix(36))) ?? UUID()
+            return (u, note.title)
+        }
+        FocusAgendaEngine.shared.updateReminders(
+            reminders.items,
+            localOpen: noteOpen
+        )
+    }
+
     func stop() {
         store.stop()
+        notes.stop()
         reminders.stop()
     }
 
@@ -152,9 +167,11 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                     objectWillChange.send()
                 }
             }
-        case .local:
-            store.add(text: text)
-            draft = ""
+        case .notes:
+            if notes.create(title: text) {
+                draft = ""
+                objectWillChange.send()
+            }
         }
     }
 
@@ -162,8 +179,31 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
         Task { await reminders.requestAccess() }
     }
 
+    func connectNotes() {
+        notes.ensureFolder()
+        objectWillChange.send()
+    }
+
     func refreshReminders() {
         reminders.refresh()
+    }
+
+    func refreshNotes() {
+        notes.refresh()
+        objectWillChange.send()
+    }
+
+    func deleteNote(_ item: NoteItem) {
+        _ = notes.delete(id: item.id)
+        objectWillChange.send()
+    }
+
+    func openNote(_ item: NoteItem) {
+        notes.open(id: item.id)
+    }
+
+    func openNotesApp() {
+        notes.openApp()
     }
 
     func completeReminder(_ item: ReminderItem) {
@@ -259,19 +299,17 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
 private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
-    @ObservedObject private var store: ChecklistStore
+    @ObservedObject private var notes: NotesProvider
     @ObservedObject private var reminders: RemindersProvider
     @State private var hoveringID: String?
 
     init(plugin: ChecklistPlugin) {
         self.plugin = plugin
-        self._store = ObservedObject(wrappedValue: plugin.store)
+        self._notes = ObservedObject(wrappedValue: plugin.notes)
         self._reminders = ObservedObject(wrappedValue: plugin.reminders)
     }
 
-    private var doneCount: Int { store.items.filter(\.isDone).count }
-    private var totalCount: Int { store.items.count }
-    private var openLocal: Int { totalCount - doneCount }
+    private var notesCount: Int { notes.items.count }
     private var reminderCount: Int { reminders.items.count }
 
     private static let timeFormatter: DateFormatter = {
@@ -325,27 +363,31 @@ private struct ExpandedChecklistView: View {
             }
             Spacer(minLength: 0)
 
-            if reminders.authState == .authorized {
-                Button {
-                    plugin.refreshReminders()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
+            Button {
+                switch plugin.draftTarget {
+                case .reminders: plugin.refreshReminders()
+                case .notes: plugin.refreshNotes()
                 }
-                .buttonStyle(.notchIcon(diameter: 22))
-                .help("Refresh")
-
-                Button {
-                    plugin.openRemindersApp()
-                } label: {
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
-                }
-                .buttonStyle(.notchIcon(diameter: 22))
-                .help("Open Reminders")
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textTertiary)
             }
+            .buttonStyle(.notchIcon(diameter: 22))
+            .help("Refresh")
+
+            Button {
+                switch plugin.draftTarget {
+                case .reminders: plugin.openRemindersApp()
+                case .notes: plugin.openNotesApp()
+                }
+            } label: {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textTertiary)
+            }
+            .buttonStyle(.notchIcon(diameter: 22))
+            .help(plugin.draftTarget == .reminders ? "Open Reminders" : "Open Notes")
         }
     }
 
@@ -355,9 +397,10 @@ private struct ExpandedChecklistView: View {
             if reminders.authState != .authorized { return "Connect Apple Reminders" }
             if reminderCount == 0 { return "No open reminders" }
             return reminderCount == 1 ? "1 open reminder" : "\(reminderCount) open reminders"
-        case .local:
-            if totalCount == 0 { return "Private to this Mac" }
-            return "\(openLocal) open · \(doneCount) done"
+        case .notes:
+            if !notes.isAvailable { return "Connect Apple Notes" }
+            if notesCount == 0 { return "Apple Notes · Dynamo folder" }
+            return notesCount == 1 ? "1 note" : "\(notesCount) notes"
         }
     }
 
@@ -370,16 +413,19 @@ private struct ExpandedChecklistView: View {
                 let count: Int = {
                     switch target {
                     case .reminders: return reminders.authState == .authorized ? reminderCount : 0
-                    case .local: return openLocal
+                    case .notes: return notes.isAvailable ? notesCount : 0
                     }
                 }()
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) {
                         plugin.draftTarget = target
+                        if target == .notes {
+                            plugin.refreshNotes()
+                        }
                     }
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: target == .reminders ? "checklist" : "tray")
+                        Image(systemName: target == .reminders ? "checklist" : "note.text")
                             .font(.system(size: 9, weight: .semibold))
                         Text(target.label)
                             .font(NotchTheme.micro.weight(.semibold))
@@ -424,8 +470,8 @@ private struct ExpandedChecklistView: View {
         switch plugin.draftTarget {
         case .reminders:
             remindersContent
-        case .local:
-            localContent
+        case .notes:
+            notesContent
         }
     }
 
@@ -470,16 +516,26 @@ private struct ExpandedChecklistView: View {
     }
 
     @ViewBuilder
-    private var localContent: some View {
-        if store.items.isEmpty {
+    private var notesContent: some View {
+        if !notes.isAvailable {
+            accessCard(
+                icon: "note.text",
+                title: "Connect Apple Notes",
+                body: "Allow Automation so Dynamo can read and write notes in the “Dynamo” folder in Notes.",
+                primary: "Connect Notes",
+                primaryAction: { plugin.connectNotes() },
+                secondary: "Open Notes",
+                secondaryAction: { plugin.openNotesApp() }
+            )
+        } else if notes.items.isEmpty {
             emptyStrip(
-                icon: "tray",
-                title: "Local list is empty",
-                caption: "Private scratch items stay on this Mac."
+                icon: "note.text",
+                title: "No notes yet",
+                caption: "Add one below — it syncs to Apple Notes → Dynamo."
             )
         } else {
-            ForEach(store.items) { item in
-                localRow(item)
+            ForEach(notes.items) { item in
+                noteRow(item)
             }
         }
     }
@@ -659,31 +715,37 @@ private struct ExpandedChecklistView: View {
         }
     }
 
-    private func localRow(_ item: ChecklistItem) -> some View {
-        let rowID = "l:\(item.id.uuidString)"
+    private func noteRow(_ item: NoteItem) -> some View {
+        let rowID = "n:\(item.id)"
         let hovering = hoveringID == rowID
 
         return HStack(alignment: .center, spacing: 10) {
-            Button {
-                store.toggle(id: item.id)
-            } label: {
-                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(item.isDone ? NotchTheme.positive : NotchTheme.textTertiary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+            Image(systemName: "note.text")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(NotchTheme.calmGlow)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(NotchTheme.body.weight(.medium))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .lineLimit(1)
+                if !item.bodyPreview.isEmpty {
+                    Text(item.bodyPreview)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                } else {
+                    Text("Notes · \(item.folderName)")
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
             }
-            .buttonStyle(.plain)
-
-            Text(item.text)
-                .font(NotchTheme.body.weight(.medium))
-                .foregroundStyle(item.isDone ? NotchTheme.textQuaternary : NotchTheme.textPrimary)
-                .strikethrough(item.isDone, color: NotchTheme.textQuaternary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
-                store.remove(id: item.id)
+                plugin.deleteNote(item)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
@@ -693,14 +755,29 @@ private struct ExpandedChecklistView: View {
             }
             .buttonStyle(.plain)
             .opacity(hovering ? 1 : 0.35)
+            .help("Delete from Notes")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.white.opacity(hovering ? 0.07 : 0.035))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(NotchTheme.calmGlow.opacity(0.85))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 8)
+                        .padding(.leading, 2)
+                }
         )
+        .contentShape(Rectangle())
         .onHover { hoveringID = $0 ? rowID : (hoveringID == rowID ? nil : hoveringID) }
+        .onTapGesture { plugin.openNote(item) }
+        .contextMenu {
+            Button("Open in Notes") { plugin.openNote(item) }
+            Divider()
+            Button("Delete", role: .destructive) { plugin.deleteNote(item) }
+        }
     }
 
     @ViewBuilder
@@ -772,7 +849,7 @@ private struct ExpandedChecklistView: View {
                     .frame(width: 16)
 
                 TextField(
-                    plugin.draftTarget == .reminders ? "Add to Reminders…" : "Add local item…",
+                    plugin.draftTarget == .reminders ? "Add to Reminders…" : "Add to Notes…",
                     text: Binding(
                         get: { plugin.draft },
                         set: { plugin.draft = $0 }
@@ -794,7 +871,7 @@ private struct ExpandedChecklistView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmit)
-                .help(plugin.draftTarget == .reminders ? "Add to Reminders" : "Add local item")
+                .help(plugin.draftTarget == .reminders ? "Add to Reminders" : "Add to Apple Notes")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -832,7 +909,19 @@ private struct ExpandedChecklistView: View {
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))
             }
 
+            if plugin.draftTarget == .notes, !notes.isAvailable {
+                Text("Allow Automation for Notes when prompted (System Settings → Privacy → Automation).")
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.caution.opacity(0.9))
+            }
+
             if let err = reminders.lastError, plugin.draftTarget == .reminders {
+                Text(err)
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.negative)
+                    .lineLimit(2)
+            }
+            if let err = notes.lastError, plugin.draftTarget == .notes {
                 Text(err)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.negative)

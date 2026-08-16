@@ -40,7 +40,7 @@
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, playlists, and Amplify EQ presets in the notch.</string>
+	<string>Dynamo controls Music and Spotify for media, and Apple Notes for the Checklist Notes tab (create, list, open, and delete notes in the Dynamo folder).</string>
 	<!-- Live peek equalizer samples system / player audio (Core Audio process tap). -->
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer and optional Amplify EQ (including Spatial Audio / Atmos renders). Audio is processed on-device only and never recorded or sent anywhere.</string>
