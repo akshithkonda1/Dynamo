@@ -206,7 +206,18 @@ No credentials in repo — see script headers for secrets.
 
 ---
 
-## Smoke test
+## Tests
+
+Mixed suite — **Python** (DynamoEQ), **Swift** (XCTest), **shell** (sanity):
+
+```bash
+./scripts/test.sh           # all
+./scripts/test.sh python    # DynamoEQ unit tests
+./scripts/test.sh swift     # Package XCTest
+./scripts/test.sh shell     # project greps / version / syntax
+```
+
+See **[Tests/README.md](Tests/README.md)** for layout. Manual UI smoke remains in **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)**.
 
 ```bash
 open dist/Dynamo.app
