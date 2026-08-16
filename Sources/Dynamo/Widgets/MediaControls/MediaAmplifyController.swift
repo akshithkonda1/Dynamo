@@ -2,11 +2,13 @@ import AppKit
 import AVFoundation
 import Foundation
 
-/// Dolby-like **intent** profiles — reshape how music *hits*, not the volume fader.
+/// Intent profiles for local Symphony EQ — fidelity-first by default options.
 ///
-/// Curves designed by `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs)
-/// and applied in real time by `LocalAmplifyEngine` (process tap + multi-band EQ).
+/// Curves from `Tools/DynamoEQ/dynamo_eq.py` + `LocalAmplifyEngine` (process tap EQ).
+/// **Reference** = transparent; **Symphony** = mild musical; Impact alone may widen stereo.
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
+    /// Transparent high-fidelity: tiny tilt, no mid-side, linked true-peak only.
+    case reference
     case symphony
     case presence
     case cinema
@@ -16,6 +18,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .reference: return "Reference"
         case .symphony: return "Symphony"
         case .presence: return "Presence"
         case .cinema: return "Cinema"
@@ -25,21 +28,26 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .symphony: return "Adaptive concert-hall path — media + device aware"
-        case .presence: return "Dialogue clarity & air — local multi-band EQ"
-        case .cinema: return "Loudness contour + soft mid scoop — local EQ"
-        case .impact: return "Bass body & punch — local EQ, not the volume fader"
+        case .reference: return "Max fidelity — minimal EQ, Atmos/Spatial safe, no width"
+        case .symphony: return "Mild concert contour — live adaptive + seamless morph"
+        case .presence: return "Dialogue clarity — soft air, no stereo width"
+        case .cinema: return "Soft loudness contour — mid scoop, fidelity-capped gains"
+        case .impact: return "Bass body & punch — only profile that may widen stereo"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .reference: return "waveform.badge.magnifyingglass"
         case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
         case .impact: return "waveform.path.ecg"
         }
     }
+
+    /// Mid-side stage allowed only for Impact on pure stereo.
+    var allowsStereoWidth: Bool { self == .impact }
 
     static func resolved(fromStored raw: String?) -> MediaAmplifyProfile {
         guard let raw else { return .symphony }
@@ -48,6 +56,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
         case "crisp": return .presence
         case "balanced": return .cinema
         case "visceral": return .impact
+        case "transparent", "hi-fi", "hifi": return .reference
         default: return .symphony
         }
     }
@@ -154,10 +163,31 @@ final class MediaAmplifyController: ObservableObject {
         startEngine(reason: "source")
     }
 
-    func reapplyForTrack(title: String, artist: String) {
-        // Local EQ is continuous — no per-track re-script needed.
-        _ = title
-        _ = artist
+    func reapplyForTrack(
+        title: String,
+        artist: String,
+        album: String = "",
+        genre: String? = nil,
+        playlist: String? = nil,
+        sourceApp: MediaPlayerApp? = nil
+    ) {
+        // Combine metadata + source app for immersive detection (Tier B).
+        let immersive = AmplifySpatialPath.contentLooksImmersive(
+            title: title, artist: artist, album: album, genre: genre, playlist: playlist
+        )
+        lastContentImmersiveHint = immersive
+        let appHint: String = {
+            switch sourceApp {
+            case .music: return "music"
+            case .spotify: return "spotify"
+            case .other: return "other"
+            case .none: return ""
+            }
+        }()
+        if #available(macOS 14.2, *) {
+            LocalAmplifyEngine.shared.setContentImmersiveHint(immersive, sourceApp: appHint)
+            if isEnabled { syncFromEngine() }
+        }
     }
 
     func toggle() {
@@ -215,7 +245,8 @@ final class MediaAmplifyController: ObservableObject {
                 LocalAmplifyEngine.shared.start(
                     profile: self.profile,
                     device: device,
-                    preferredBundleID: bundle
+                    preferredBundleID: bundle,
+                    contentImmersiveHint: self.lastContentImmersiveHint
                 )
                 self.syncFromEngine()
                 self.startPolling()
@@ -225,6 +256,8 @@ final class MediaAmplifyController: ObservableObject {
             }
         }
     }
+
+    private var lastContentImmersiveHint = false
 
     private static func guessPlayerBundleID() -> String? {
         let apps = NSWorkspace.shared.runningApplications
@@ -257,7 +290,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private func startPolling() {
         pollTimer?.invalidate()
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.syncFromEngine() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -269,7 +302,19 @@ final class MediaAmplifyController: ObservableObject {
         let engine = LocalAmplifyEngine.shared
         if engine.isRunning {
             statusLine = engine.statusLine
-            activePresetName = "Local EQ"
+            // Prefer Atmos/Spatial-aware label when path is immersive.
+            switch engine.spatialPath {
+            case .atmosBed:
+                activePresetName = "Atmos EQ"
+            case .spatialBinaural:
+                activePresetName = "Spatial EQ"
+            case .multichannel:
+                activePresetName = "Surround EQ"
+            case .stereoMixFallback:
+                activePresetName = "Stereo-mix EQ"
+            case .stereo:
+                activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
+            }
             lastError = engine.lastError
         } else if isEnabled {
             statusLine = engine.statusLine

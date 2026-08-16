@@ -26,7 +26,7 @@ final class CallSessionProbe {
     func start(onChange: @escaping () -> Void) {
         self.onChange = onChange
         refresh()
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)

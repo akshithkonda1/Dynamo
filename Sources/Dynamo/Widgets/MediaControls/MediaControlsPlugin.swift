@@ -390,10 +390,10 @@ private struct ExpandedMediaView: View {
                         timelineBar
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Nothing playing")
+                            Text("Ready when you are")
                                 .font(NotchTheme.body.weight(.semibold))
                                 .foregroundStyle(NotchTheme.textPrimary)
-                            Text("Start Music or Spotify — transport still works.")
+                            Text("Queue something in Music or Spotify — skip & volume still work.")
                                 .font(NotchTheme.micro)
                                 .foregroundStyle(NotchTheme.textTertiary)
                             Button {
@@ -653,7 +653,14 @@ private struct ExpandedMediaView: View {
             amplify.reapplyForSource()
         }
         .onChange(of: plugin.info.title) { _ in
-            amplify.reapplyForTrack(title: plugin.info.title, artist: plugin.info.artist)
+            amplify.reapplyForTrack(
+                title: plugin.info.title,
+                artist: plugin.info.artist,
+                album: plugin.info.album,
+                genre: plugin.info.genre,
+                playlist: plugin.info.playlistName,
+                sourceApp: plugin.info.sourceApp
+            )
         }
     }
 

@@ -72,15 +72,23 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 | | |
 |--|--|
 | **Realtime** | `LocalAmplifyEngine` — process tap → multi-band EQ → output (macOS **14.2+**) |
-| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` — pure Python 3 stdlib |
-| **Profiles** | **Symphony** (adaptive default) · Presence · Cinema · Impact |
-| **Spatial / Atmos** | Post-render EQ; same curve per channel; no mono fold |
-| **UI** | Green = on · red = off; device picker in Preferences → Feel & alerts |
+| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v3 — pure Python 3 stdlib |
+| **Profiles** | **Reference** (transparent) · **Symphony** (mild default) · Presence · Cinema · Impact (width OK) |
+| **Fidelity** | Linked true-peak (−1 dBTP) · live adaptive trims · headroom staging · dry loudness match |
+| **Seamless** | Equal-power dual-bank crossfade (~90 ms); wet engage / soft stop |
+| **Dolby Atmos** | Device-stream tap; multi-ch layout; LFE/height roles; mid-side off; status “Dolby Atmos bed” |
+| **Spatial Audio** | Binaural path; no MS; stereo-mix fallback labeled honestly |
+| **UI** | Status: path · ch · tap mode · live media hint; device cal (AirPods/MacBook/monitors) |
 
 ```bash
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
 python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000
-python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --sr 48000 < stereo.f32le
+python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device external --path atmosBed --sr 48000
+python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --path spatialBinaural --sr 48000 < stereo.f32le
+# Seamless offline morph cinema → symphony with engage ramp:
+python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symphony \
+  --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le
+python3 Tools/DynamoEQ/dynamo_eq.py morph --from-profile cinema --to-profile impact --steps 5
 ```
 
 ### Peek as notification surface
@@ -206,7 +214,18 @@ No credentials in repo — see script headers for secrets.
 
 ---
 
-## Smoke test
+## Tests
+
+Mixed suite — **Python** (DynamoEQ), **Swift** (XCTest), **shell** (sanity):
+
+```bash
+./scripts/test.sh           # all
+./scripts/test.sh python    # DynamoEQ unit tests
+./scripts/test.sh swift     # Package XCTest
+./scripts/test.sh shell     # project greps / version / syntax
+```
+
+See **[Tests/README.md](Tests/README.md)** for layout. Manual UI smoke remains in **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)**.
 
 ```bash
 open dist/Dynamo.app

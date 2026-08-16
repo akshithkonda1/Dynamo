@@ -5,16 +5,20 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-/// Real-time local multi-band EQ amplifier — **Atmos / Spatial Audio compatible**.
+/// Real-time local multi-band EQ amplifier — **full Dolby Atmos + Apple Spatial support**.
 ///
-/// Design for Dolby Atmos & Apple Spatial Audio:
-/// - Taps the **post-render** player mix (after Atmos → Spatial headphone/speaker render)
-/// - Mutes only the tapped process while we re-output the **EQ’d multi-channel feed**
-/// - Applies the **same linear EQ per channel** (no mono fold, no mid/side collapse)
-/// - Preserves channel count / layout from the tap (stereo, 5.1, 7.1, etc.)
-/// - Does not change device sample rate, Spatial settings, or force stereo-only I/O
+/// Routing strategy:
+/// 1. Prefer a **device-stream process tap** (no mixdown) so multi-channel Atmos beds
+///    (5.1 / 7.1 / …) keep their channel count and layout.
+/// 2. Fall back to stereo process mixdown for binaural Spatial / stereo renders.
+/// 3. Apply path-aware Symphony curves:
+///    - **Atmos bed**: mid-side off; LFE uses sub-only EQ; full-range channels share linear EQ
+///    - **Spatial binaural**: mid-side off / tiny; preserve elevation HF cues
+///    - **Stereo**: gentle mid-side stage when profile asks for it
 ///
-/// Curves match `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs).
+/// Never disables system Spatial/Atmos settings; rides the post-render mix only.
+///
+/// Seamless transitions match `Tools/DynamoEQ/dynamo_eq.py` (dual-bank crossfade + wet ramps).
 @available(macOS 14.2, *)
 final class LocalAmplifyEngine: @unchecked Sendable {
     static let shared = LocalAmplifyEngine()
@@ -26,14 +30,64 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var ioProcID: AudioDeviceIOProcID?
     private var format = AudioStreamBasicDescription()
 
-    /// One filter chain per channel (identical coefficients, independent state).
+    /// Active (A) full-range filter chain per channel.
     private var channelFilters: [[Biquad]] = []
+    /// Active (A) LFE-only chains (sub/lowshelf) — used on typical LFE index in 5.1/7.1 beds.
+    private var lfeFilters: [[Biquad]] = []
     private var makeup: Float = 1.0
-    /// Mid-side width 0…0.4 — immersive stage for headphones/speakers (stereo only).
+    /// Mid-side width 0…0.4 — stereo immersion only (forced 0 on Atmos / Spatial beds).
     private var stereoWidth: Float = 0.0
+
+    /// Target (B) bank during profile/device crossfade; nil when settled.
+    private var targetChannelFilters: [[Biquad]]?
+    private var targetLFEFilters: [[Biquad]]?
+    private var targetMakeup: Float = 1.0
+    private var targetStereoWidth: Float = 0.0
+    /// 0 = full A, 1 = full B. Advances each sample while transitioning.
+    private var crossfadePos: Float = 1.0
+    private var crossfadeInc: Float = 0.0
+
+    /// Wet blend: 0 = dry passthrough, 1 = full Symphony EQ (seamless engage/disengage).
+    private var wetGain: Float = 0.0
+    private var wetTarget: Float = 1.0
+    private var wetInc: Float = 0.0
+    private var pendingStopAfterWet = false
+
+    /// Default transition lengths — long enough to hide filter swaps, short enough to feel snappy.
+    private static let profileTransitionSeconds: Float = 0.09
+    private static let engageSeconds: Float = 0.12
+    private static let disengageSeconds: Float = 0.08
+
     private var profileRaw: String = "symphony"
     private var deviceRaw: String = "auto"
     private var preferredBundleID: String?
+    /// Content-side Atmos/Spatial hint from now-playing metadata (Music “Dolby Atmos”, etc.).
+    private var contentImmersiveHint = false
+    private var sourceAppHint: String = "" // "music" | "spotify" | …
+
+    /// Per-channel roles from stream layout (LFE / height / full-range).
+    private var channelRoles: [AmplifyChannelRole] = []
+
+    // Linked true-peak style limiter (shared GR across channels → no image shift).
+    private var limiterEnvelope: Float = 0
+    private var limiterGain: Float = 1
+    private static let limiterCeiling: Float = 0.891_250_9 // ≈ −1 dBTP
+    private static let limiterAttack: Float = 0.02         // fast peak catch
+    private static let limiterRelease: Float = 0.0025      // ~smooth release coeff
+
+    // Live adaptive analysis (Tier A) — light RMS/crest/HF every ~0.75s.
+    private var analysisEnergy: Float = 0
+    private var analysisPeak: Float = 0
+    private var analysisHighEnergy: Float = 0
+    private var analysisFrames: Int = 0
+    private var analysisZCR: Int = 0
+    private var analysisPrevSample: Float = 0
+    private var liveMakeupMul: Float = 1.0
+    private var liveMakeupTarget: Float = 1.0
+    private var liveHFMul: Float = 1.0
+    private var liveHFTarget: Float = 1.0
+    private var dryLoudnessMul: Float = 1.0 // match dry A/B roughly to wet level
+    private static let analysisIntervalSeconds: Float = 0.75
 
     private(set) var isRunning = false
     private(set) var lastError: String?
@@ -42,23 +96,34 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private(set) var channelCount: Int = 2
     private(set) var spatialHint: String = ""
     private(set) var deviceHint: String = ""
+    private(set) var spatialPath: AmplifySpatialPath = .stereo
+    private(set) var tapModeLabel: String = ""
+    private(set) var liveMediaHint: String = ""
 
     private init() {}
 
     func start(
         profile: MediaAmplifyProfile,
         device: AmplifyOutputDevice,
-        preferredBundleID: String?
+        preferredBundleID: String?,
+        contentImmersiveHint: Bool = false
     ) {
         queue.async {
+            self.pendingStopAfterWet = false
             self.preferredBundleID = preferredBundleID
             self.profileRaw = profile.rawValue
             self.deviceRaw = device.rawValue
-            self.applyProfileLocked(profile, device: device, sampleRate: 48_000, channels: 2)
+            self.contentImmersiveHint = contentImmersiveHint
+            // Instant bank load (not yet audible) — wet ramp engages without a hard edge.
+            self.applyProfileLocked(profile, device: device, sampleRate: 48_000, channels: 2, seamless: false)
+            self.wetGain = 0
+            self.wetTarget = 1
+            self.wetInc = 0
             do {
                 try self.startLocked()
                 self.isRunning = true
                 self.lastError = nil
+                self.beginWetRamp(to: 1, seconds: Self.engageSeconds)
                 self.statusLine = self.makeStatus(profile: profile)
             } catch {
                 self.isRunning = false
@@ -75,8 +140,40 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             self.deviceRaw = device.rawValue
             let sr = self.format.mSampleRate > 0 ? self.format.mSampleRate : 48_000
             let ch = max(2, self.channelCount)
-            self.applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
+            self.applyProfileLocked(
+                profile,
+                device: device,
+                sampleRate: sr,
+                channels: ch,
+                seamless: self.isRunning
+            )
             if self.isRunning {
+                self.statusLine = self.makeStatus(profile: profile)
+            }
+        }
+    }
+
+    /// Update Atmos/Spatial content hint (e.g. track metadata). May retune path without restart.
+    func setContentImmersiveHint(_ hint: Bool, sourceApp: String? = nil) {
+        queue.async {
+            var changed = self.contentImmersiveHint != hint
+            self.contentImmersiveHint = hint
+            if let sourceApp, self.sourceAppHint != sourceApp {
+                self.sourceAppHint = sourceApp
+                changed = true
+            }
+            guard changed else { return }
+            self.refreshSpatialPathLocked()
+            if self.isRunning, let profile = MediaAmplifyProfile(rawValue: self.profileRaw) {
+                let device = AmplifyOutputDevice(rawValue: self.deviceRaw) ?? .auto
+                let sr = self.format.mSampleRate > 0 ? self.format.mSampleRate : 48_000
+                self.applyProfileLocked(
+                    profile,
+                    device: device,
+                    sampleRate: sr,
+                    channels: max(1, self.channelCount),
+                    seamless: true
+                )
                 self.statusLine = self.makeStatus(profile: profile)
             }
         }
@@ -84,53 +181,175 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     func stop() {
         queue.async {
-            self.teardownLocked()
-            self.isRunning = false
-            self.statusLine = "Off"
-            self.lastError = nil
-            self.spatialHint = ""
+            guard self.isRunning else {
+                self.teardownLocked()
+                self.statusLine = "Off"
+                self.lastError = nil
+                self.spatialHint = ""
+                self.spatialPath = .stereo
+                self.tapModeLabel = ""
+                return
+            }
+            // Soft disengage so muting the EQ doesn’t click, then tear the graph down.
+            self.pendingStopAfterWet = true
+            self.beginWetRamp(to: 0, seconds: Self.disengageSeconds)
+            self.statusLine = "Fading out…"
         }
     }
 
     private func makeStatus(profile: MediaAmplifyProfile) -> String {
-        var parts = ["\(profile.title)", "Symphony EQ"]
+        var parts = ["\(profile.title)", "Fidelity EQ"]
         if !deviceHint.isEmpty {
             parts.append(deviceHint)
         }
-        if !spatialHint.isEmpty {
-            parts.append(spatialHint)
-        }
+        // Auto path surface: Dolby Atmos bed · Spatial · Stereo · stereo-mix fallback
+        parts.append(spatialPath.statusLabel)
         if channelCount > 2 {
             parts.append("\(channelCount)ch")
+        }
+        if !tapModeLabel.isEmpty {
+            parts.append(tapModeLabel)
+        }
+        if !liveMediaHint.isEmpty {
+            parts.append(liveMediaHint)
         }
         return parts.joined(separator: " · ")
     }
 
     // MARK: - Profile / DSP
 
+    private func resolveCurve(
+        profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        sampleRate: Double,
+        path: AmplifySpatialPath
+    ) -> AmplifyEQCurve {
+        if let fromPy = DynamoEQPython.coeffs(
+            profile: profile.rawValue,
+            device: device.rawValue,
+            sampleRate: sampleRate,
+            path: path.rawValue
+        ) {
+            return fromPy
+        }
+        return DynamoEQCurves.curve(for: profile, device: device, sampleRate: sampleRate, path: path)
+    }
+
     private func applyProfileLocked(
         _ profile: MediaAmplifyProfile,
         device: AmplifyOutputDevice,
         sampleRate: Double,
-        channels: Int
+        channels: Int,
+        seamless: Bool
     ) {
         let ch = max(1, channels)
-        deviceHint = device.statusLabel
-        if let fromPy = DynamoEQPython.coeffs(
-            profile: profile.rawValue,
-            device: device.rawValue,
-            sampleRate: sampleRate
-        ) {
-            makeup = fromPy.makeup
-            stereoWidth = fromPy.width
-            channelFilters = (0..<ch).map { _ in fromPy.filters.map { $0.clone() } }
+        deviceHint = device.calibrationLabel
+        refreshSpatialPathLocked(channels: ch, sampleRate: sampleRate)
+        refreshChannelRolesLocked(count: ch)
+        let curve = resolveCurve(profile: profile, device: device, sampleRate: sampleRate, path: spatialPath)
+        // Width: Impact only + pure stereo path (never Atmos/Spatial/multi-ch).
+        let width: Float = (profile.allowsStereoWidth && spatialPath.allowsMidSide && ch == 2)
+            ? curve.width
+            : 0
+        let newFull = (0..<ch).map { _ in curve.filters.map { $0.clone() } }
+        let newLFE = (0..<ch).map { _ in curve.lfeFilters.map { $0.clone() } }
+
+        if seamless, isRunning, !channelFilters.isEmpty {
+            promoteTargetIfNeeded(force: true)
+            targetChannelFilters = newFull
+            targetLFEFilters = newLFE
+            targetMakeup = curve.makeup
+            targetStereoWidth = width
+            beginCrossfade(seconds: Self.profileTransitionSeconds)
         } else {
-            let built = DynamoEQCurves.filters(for: profile, device: device, sampleRate: sampleRate)
-            makeup = built.makeup
-            stereoWidth = built.width
-            channelFilters = (0..<ch).map { _ in built.filters.map { $0.clone() } }
+            channelFilters = newFull
+            lfeFilters = newLFE
+            makeup = curve.makeup
+            stereoWidth = width
+            targetChannelFilters = nil
+            targetLFEFilters = nil
+            crossfadePos = 1
+            crossfadeInc = 0
         }
         channelCount = ch
+    }
+
+    private func refreshSpatialPathLocked(channels: Int? = nil, sampleRate: Double? = nil) {
+        let ch = channels ?? max(1, channelCount)
+        let sr = sampleRate ?? (format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        spatialPath = AmplifySpatialPath.detect(
+            channels: ch,
+            sampleRate: sr,
+            contentImmersiveHint: contentImmersiveHint,
+            deviceRaw: deviceRaw,
+            sourceApp: sourceAppHint,
+            tapIsStereoMix: tapModeLabel == "stereo-mix"
+        )
+        spatialHint = spatialPath.statusLabel
+        spatialCompatible = true
+    }
+
+    private func refreshChannelRolesLocked(count: Int) {
+        channelRoles = AmplifyChannelLayout.roles(
+            channelCount: count,
+            layoutFromDevice: AmplifyChannelLayout.readDefaultOutputLayout()
+        )
+    }
+
+    private func beginCrossfade(seconds: Float) {
+        let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        let samples = max(1, Int(seconds * sr))
+        crossfadePos = 0
+        crossfadeInc = 1.0 / Float(samples)
+    }
+
+    private func beginWetRamp(to target: Float, seconds: Float) {
+        wetTarget = max(0, min(1, target))
+        let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        let samples = max(1, Int(seconds * sr))
+        let delta = wetTarget - wetGain
+        wetInc = abs(delta) < 1e-6 ? 0 : delta / Float(samples)
+        if wetInc == 0 {
+            wetGain = wetTarget
+            finishPendingStopIfNeeded()
+        }
+    }
+
+    /// When crossfade completes (or is forced), B becomes A and target is cleared.
+    private func promoteTargetIfNeeded(force: Bool = false) {
+        guard let target = targetChannelFilters else { return }
+        if force || crossfadePos >= 1.0 - 1e-5 {
+            channelFilters = target
+            if let lfe = targetLFEFilters { lfeFilters = lfe }
+            makeup = targetMakeup
+            stereoWidth = targetStereoWidth
+            targetChannelFilters = nil
+            targetLFEFilters = nil
+            crossfadePos = 1
+            crossfadeInc = 0
+        }
+    }
+
+    private func finishPendingStopIfNeeded() {
+        guard pendingStopAfterWet, wetGain <= 0.001 else { return }
+        pendingStopAfterWet = false
+        teardownLocked()
+        isRunning = false
+        statusLine = "Off"
+        lastError = nil
+        spatialHint = ""
+        spatialPath = .stereo
+        tapModeLabel = ""
+        wetGain = 0
+        wetInc = 0
+    }
+
+    /// Equal-power crossfade weights (seamless A↔B without mid-fade dips).
+    private static func equalPower(_ t: Float) -> (Float, Float) {
+        let x = max(0, min(1, t))
+        let a = cos(x * Float.pi * 0.5)
+        let b = sin(x * Float.pi * 0.5)
+        return (a, b)
     }
 
     // MARK: - Audio graph
@@ -139,44 +358,101 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         teardownLocked()
 
         let processIDs = resolveProcessObjectIDs(preferredBundleID: preferredBundleID)
-        let description: CATapDescription
+        let outputUID = try defaultOutputDeviceUID()
+        let (description, modeLabel) = try makeTapDescription(
+            processIDs: processIDs,
+            outputUID: outputUID
+        )
+        tapModeLabel = modeLabel
+
+        var newTap = AudioObjectID(kAudioObjectUnknown)
+        var err = AudioHardwareCreateProcessTap(description, &newTap)
+        // Device-stream taps can fail on some devices — fall back to stereo mixdown.
+        if err != noErr || newTap == kAudioObjectUnknown {
+            let fallback = makeStereoFallbackDescription(processIDs: processIDs)
+            tapModeLabel = "stereo-mix"
+            err = AudioHardwareCreateProcessTap(fallback, &newTap)
+            guard err == noErr, newTap != kAudioObjectUnknown else {
+                throw AmplifyError.failed("Process tap failed (\(err)) — allow audio capture for Dynamo")
+            }
+            // Use fallback description UUID for aggregate.
+            try finishGraph(with: fallback, tap: newTap, outputUID: outputUID)
+            return
+        }
+        try finishGraph(with: description, tap: newTap, outputUID: outputUID)
+    }
+
+    /// Prefer full-channel device-stream tap (Atmos beds). Fallback: stereo mixdown of process.
+    private func makeTapDescription(
+        processIDs: [AudioObjectID],
+        outputUID: String
+    ) throws -> (CATapDescription, String) {
         if !processIDs.isEmpty {
-            // Stereo mixdown of the *rendered* player output — post Atmos→Spatial
-            // virtualization when the player already spatialized to the device.
-            description = CATapDescription(stereoMixdownOfProcesses: processIDs)
+            // Device-stream process tap: format matches hardware stream (multi-ch Atmos-ready).
+            let desc = CATapDescription(processes: processIDs, deviceUID: outputUID, stream: 0)
+            configureTap(desc, name: "Dynamo Amplify EQ (Atmos-ready)")
+            desc.isMixdown = false
+            desc.isMono = false
+            return (desc, "device-stream")
+        }
+        var exclude: [AudioObjectID] = []
+        if let selfObj = audioProcessObjectID(forPID: pid_t(ProcessInfo.processInfo.processIdentifier)) {
+            exclude.append(selfObj)
+        }
+        // Global exclude + device stream when no player PID (still multi-channel capable).
+        let desc = CATapDescription(excludingProcesses: exclude, deviceUID: outputUID, stream: 0)
+        configureTap(desc, name: "Dynamo Amplify EQ (Atmos global)")
+        desc.isMixdown = false
+        desc.isMono = false
+        return (desc, "global-stream")
+    }
+
+    private func makeStereoFallbackDescription(processIDs: [AudioObjectID]) -> CATapDescription {
+        let desc: CATapDescription
+        if !processIDs.isEmpty {
+            desc = CATapDescription(stereoMixdownOfProcesses: processIDs)
+            configureTap(desc, name: "Dynamo Amplify EQ (Spatial stereo)")
         } else {
             var exclude: [AudioObjectID] = []
             if let selfObj = audioProcessObjectID(forPID: pid_t(ProcessInfo.processInfo.processIdentifier)) {
                 exclude.append(selfObj)
             }
-            description = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
+            desc = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
+            configureTap(desc, name: "Dynamo Amplify EQ (Spatial global)")
         }
+        return desc
+    }
+
+    private func configureTap(_ description: CATapDescription, name: String) {
         description.uuid = UUID()
-        description.name = "Dynamo Amplify EQ (Spatial-safe)"
+        description.name = name
         description.isPrivate = true
         // Mute only while tapped so the user hears our EQ’d feed once (no double path).
         description.muteBehavior = .mutedWhenTapped
-
-        var newTap = AudioObjectID(kAudioObjectUnknown)
-        var err = AudioHardwareCreateProcessTap(description, &newTap)
-        guard err == noErr, newTap != kAudioObjectUnknown else {
-            throw AmplifyError.failed("Process tap failed (\(err)) — allow audio capture for Dynamo")
+        if #available(macOS 26.0, *) {
+            description.isProcessRestoreEnabled = true
         }
-        tapID = newTap
+    }
+
+    private func finishGraph(
+        with description: CATapDescription,
+        tap: AudioObjectID,
+        outputUID: String
+    ) throws {
+        tapID = tap
         format = try readTapStreamDescription(tapID: tapID)
 
         let sr = format.mSampleRate > 0 ? format.mSampleRate : 48_000
         let ch = max(1, Int(format.mChannelsPerFrame != 0 ? format.mChannelsPerFrame : 2))
         channelCount = ch
-        spatialHint = Self.detectSpatialHint(channels: ch, sampleRate: sr)
-        spatialCompatible = true
 
         let device = AmplifyOutputDevice(rawValue: deviceRaw) ?? .auto
         if let profile = MediaAmplifyProfile(rawValue: profileRaw) {
-            applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
+            applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch, seamless: false)
+        } else {
+            refreshSpatialPathLocked(channels: ch, sampleRate: sr)
         }
 
-        let outputUID = try defaultOutputDeviceUID()
         // Private aggregate: default output + process tap. Does not steal Spatial
         // configuration from the system device — we only ride its mix.
         let dict: [String: Any] = [
@@ -198,13 +474,12 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         ]
 
         var agg = AudioObjectID(kAudioObjectUnknown)
-        err = AudioHardwareCreateAggregateDevice(dict as CFDictionary, &agg)
+        var err = AudioHardwareCreateAggregateDevice(dict as CFDictionary, &agg)
         guard err == noErr else {
             throw AmplifyError.failed("Aggregate device failed (\(err))")
         }
         aggregateID = agg
 
-        // Signature matches Core Audio IO proc block (same as MusicAudioSampler).
         err = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, queue) {
             [weak self] _, inInputData, _, outOutputData, _ in
             self?.render(input: inInputData, output: outOutputData)
@@ -216,16 +491,6 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         guard err == noErr else {
             throw AmplifyError.failed("Device start failed (\(err))")
         }
-    }
-
-    /// Soft Spatial / Atmos awareness for status (does not disable Spatial Audio).
-    private static func detectSpatialHint(channels: Int, sampleRate: Double) -> String {
-        // Multi-channel bed often accompanies Atmos / surround output paths.
-        if channels >= 6 { return "Atmos/surround bed" }
-        if channels > 2 { return "Multi-channel" }
-        // High-rate stereo is common after Spatial headphone render.
-        if sampleRate >= 48_000 { return "Spatial-ready" }
-        return "Stereo"
     }
 
     private func teardownLocked() {
@@ -242,12 +507,38 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
-        for chain in channelFilters {
-            chain.forEach { $0.reset() }
+        for chain in channelFilters { chain.forEach { $0.reset() } }
+        for chain in lfeFilters { chain.forEach { $0.reset() } }
+        if let target = targetChannelFilters {
+            for chain in target { chain.forEach { $0.reset() } }
         }
+        if let target = targetLFEFilters {
+            for chain in target { chain.forEach { $0.reset() } }
+        }
+        targetChannelFilters = nil
+        targetLFEFilters = nil
+        crossfadePos = 1
+        crossfadeInc = 0
+        wetInc = 0
+        pendingStopAfterWet = false
+        tapModeLabel = ""
+        limiterEnvelope = 0
+        limiterGain = 1
+        analysisFrames = 0
+        analysisEnergy = 0
+        analysisPeak = 0
+        analysisHighEnergy = 0
+        liveMakeupMul = 1
+        liveMakeupTarget = 1
+        liveHFMul = 1
+        liveHFTarget = 1
+        dryLoudnessMul = 1
+        liveMediaHint = ""
+        channelRoles = []
     }
 
     /// Process every channel with the same EQ curve (preserves spatial image / bed).
+    /// Order: EQ → wet blend (with dry loudness match) → linked multi-channel limiter.
     private func render(input: UnsafePointer<AudioBufferList>?, output: UnsafeMutablePointer<AudioBufferList>?) {
         guard let input, let output else { return }
         let inABL = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
@@ -259,6 +550,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
         let channels = max(1, Int(format.mChannelsPerFrame != 0 ? format.mChannelsPerFrame : inBuf.mNumberChannels))
         ensureChannelFilters(count: max(channels, inABL.count))
+        if channelRoles.count != channels {
+            refreshChannelRolesLocked(count: channels)
+        }
 
         let isFloat = format.mFormatID == kAudioFormatLinearPCM
             && (format.mFormatFlags & kAudioFormatFlagIsFloat) != 0
@@ -269,54 +563,91 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             if nonInterleaved, inABL.count >= 1 {
                 let frames = bytes / MemoryLayout<Float>.size
                 let nCh = min(inABL.count, outABL.count, channelFilters.count)
-                for c in 0..<nCh {
-                    guard let iPtr = inABL[c].mData?.assumingMemoryBound(to: Float.self),
-                          let oPtr = outABL[c].mData?.assumingMemoryBound(to: Float.self)
-                    else { continue }
-                    let filters = channelFilters[c]
-                    for f in 0..<frames {
-                        oPtr[f] = process(iPtr[f], filters: filters)
+                var frameBuf = [Float](repeating: 0, count: nCh)
+                for f in 0..<frames {
+                    let wetG = wetGain
+                    var peak: Float = 0
+                    for c in 0..<nCh {
+                        guard let iPtr = inABL[c].mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let dry = iPtr[f]
+                        let wet = processEQ(dry: dry, channel: c)
+                        let dryMatched = dry * dryLoudnessMul
+                        let mixed = dryMatched * (1 - wetG) + wet * wetG
+                        frameBuf[c] = mixed
+                        peak = max(peak, abs(mixed))
+                        accumulateAnalysis(sample: dry, channel: c)
                     }
-                    outABL[c].mDataByteSize = inABL[c].mDataByteSize
+                    let gr = linkedLimiterGain(framePeak: peak)
+                    for c in 0..<nCh {
+                        guard let oPtr = outABL[c].mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        oPtr[f] = max(-1, min(1, frameBuf[c] * gr))
+                        outABL[c].mDataByteSize = inABL[c].mDataByteSize
+                    }
+                    advanceFrameRamps()
                 }
+                finishPendingStopIfNeeded()
                 return
             }
 
-            // Interleaved float — stereo path uses mid-side width for “symphony” stage.
+            // Interleaved float — mid-side only Impact + pure stereo (never Atmos multi-ch).
             if let outRaw = outABL.first?.mData?.assumingMemoryBound(to: Float.self) {
                 let inSamples = inRaw.assumingMemoryBound(to: Float.self)
                 let frameCount = bytes / (MemoryLayout<Float>.size * channels)
-                let w = stereoWidth
+                let allowMS = spatialPath.allowsMidSide
+                    && channels == 2
+                    && (MediaAmplifyProfile(rawValue: profileRaw)?.allowsStereoWidth == true)
+                var frameBuf = [Float](repeating: 0, count: channels)
                 for f in 0..<frameCount {
-                    if channels >= 2, w > 0.001 {
+                    let widthNow = allowMS ? currentWidth() : 0
+                    let wetG = wetGain
+                    var peak: Float = 0
+
+                    if channels >= 2, widthNow > 0.001 {
                         let li = f * channels
                         let ri = li + 1
-                        var l = inSamples[li]
-                        var r = inSamples[ri]
-                        // Mid-side encode → widen → decode (preserves mono bass)
+                        let dryL = inSamples[li]
+                        let dryR = inSamples[ri]
+                        var l = dryL
+                        var r = dryR
                         let mid = 0.5 * (l + r)
                         var side = 0.5 * (l - r)
-                        side *= (1.0 + w)
+                        side *= (1.0 + widthNow)
                         l = mid + side
                         r = mid - side
-                        let fl = channelFilters[0]
-                        let fr = channelFilters[min(1, channelFilters.count - 1)]
-                        outRaw[li] = process(l, filters: fl)
-                        outRaw[ri] = process(r, filters: fr)
+                        let wL = processEQ(dry: l, channel: 0)
+                        let wR = processEQ(dry: r, channel: 1)
+                        frameBuf[0] = dryL * dryLoudnessMul * (1 - wetG) + wL * wetG
+                        frameBuf[1] = dryR * dryLoudnessMul * (1 - wetG) + wR * wetG
+                        peak = max(abs(frameBuf[0]), abs(frameBuf[1]))
+                        accumulateAnalysis(sample: dryL, channel: 0)
+                        accumulateAnalysis(sample: dryR, channel: 1)
                         for c in 2..<channels {
                             let idx = f * channels + c
-                            let chain = channelFilters[min(c, channelFilters.count - 1)]
-                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                            let dry = inSamples[idx]
+                            let wet = processEQ(dry: dry, channel: c)
+                            frameBuf[c] = dry * dryLoudnessMul * (1 - wetG) + wet * wetG
+                            peak = max(peak, abs(frameBuf[c]))
+                            accumulateAnalysis(sample: dry, channel: c)
                         }
                     } else {
                         for c in 0..<channels {
                             let idx = f * channels + c
-                            let chain = channelFilters[min(c, channelFilters.count - 1)]
-                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                            let dry = inSamples[idx]
+                            let wet = processEQ(dry: dry, channel: c)
+                            frameBuf[c] = dry * dryLoudnessMul * (1 - wetG) + wet * wetG
+                            peak = max(peak, abs(frameBuf[c]))
+                            accumulateAnalysis(sample: dry, channel: c)
                         }
                     }
+
+                    let gr = linkedLimiterGain(framePeak: peak)
+                    for c in 0..<channels {
+                        outRaw[f * channels + c] = max(-1, min(1, frameBuf[c] * gr))
+                    }
+                    advanceFrameRamps()
                 }
                 outABL[0].mDataByteSize = inBuf.mDataByteSize
+                finishPendingStopIfNeeded()
             }
         } else {
             // Unexpected format: bit-copy (never mute user to silence on exotic streams).
@@ -328,13 +659,32 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     }
 
     private func ensureChannelFilters(count: Int) {
-        guard count > channelFilters.count else { return }
-        let template = channelFilters.first
-            ?? DynamoEQCurves.filters(for: .cinema, device: .auto, sampleRate: 48_000).filters
-        while channelFilters.count < count {
-            channelFilters.append(template.map { $0.clone() })
+        let fallback = DynamoEQCurves.curve(
+            for: .symphony, device: .auto, sampleRate: 48_000, path: spatialPath
+        )
+        if count > channelFilters.count {
+            let template = channelFilters.first ?? fallback.filters
+            let lfeTemplate = lfeFilters.first ?? fallback.lfeFilters
+            while channelFilters.count < count {
+                channelFilters.append(template.map { $0.clone() })
+                lfeFilters.append(lfeTemplate.map { $0.clone() })
+            }
         }
-        channelCount = channelFilters.count
+        if var target = targetChannelFilters, count > target.count {
+            let template = target.first ?? fallback.filters
+            while target.count < count {
+                target.append(template.map { $0.clone() })
+            }
+            targetChannelFilters = target
+        }
+        if var targetLFE = targetLFEFilters, count > targetLFE.count {
+            let template = targetLFE.first ?? fallback.lfeFilters
+            while targetLFE.count < count {
+                targetLFE.append(template.map { $0.clone() })
+            }
+            targetLFEFilters = targetLFE
+        }
+        channelCount = max(channelFilters.count, targetChannelFilters?.count ?? 0)
     }
 
     private func silence(_ outABL: UnsafeMutableAudioBufferListPointer) {
@@ -345,20 +695,190 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         }
     }
 
-    private func process(_ x: Float, filters: [Biquad]) -> Float {
-        var y = x
-        for f in filters {
-            y = f.process(y)
+    private func currentWidth() -> Float {
+        guard targetChannelFilters != nil else { return stereoWidth }
+        let (gA, gB) = Self.equalPower(crossfadePos)
+        return stereoWidth * gA + targetStereoWidth * gB
+    }
+
+    private func role(for channel: Int) -> AmplifyChannelRole {
+        guard channel >= 0, channel < channelRoles.count else {
+            return AmplifyChannelLayout.fallbackRole(channel: channel, total: channelCount)
         }
-        y *= makeup
-        // Soft limiter — stereo-linked would need max(|L|,|R|); per-channel soft clip
-        // is milder on spatial beds and avoids hard mono coupling.
-        if y > 0.97 {
-            y = 0.97 + 0.03 * tanh((y - 0.97) * 8)
-        } else if y < -0.97 {
-            y = -0.97 + 0.03 * tanh((y + 0.97) * 8)
+        return channelRoles[channel]
+    }
+
+    /// EQ only (no soft-clip). LFE → sub filters; height → HF-softened scale.
+    private func processEQ(dry: Float, channel: Int) -> Float {
+        let role = role(for: channel)
+        let idx = channelFilters.isEmpty ? 0 : min(channel, channelFilters.count - 1)
+        let useLFE = role == .lfe && !lfeFilters.isEmpty
+        let aChain: [Biquad] = {
+            if useLFE { return lfeFilters[min(channel, lfeFilters.count - 1)] }
+            return channelFilters.isEmpty ? [] : channelFilters[idx]
+        }()
+
+        var yA = dry
+        for f in aChain { yA = f.process(yA) }
+
+        var eq: Float
+        if let target = targetChannelFilters, !target.isEmpty {
+            let tIdx = min(channel, target.count - 1)
+            let bChain: [Biquad] = {
+                if useLFE, let tl = targetLFEFilters, !tl.isEmpty {
+                    return tl[min(channel, tl.count - 1)]
+                }
+                return target[tIdx]
+            }()
+            var yB = dry
+            for f in bChain { yB = f.process(yB) }
+            let (gA, gB) = Self.equalPower(crossfadePos)
+            let mA = makeup * liveMakeupMul
+            let mB = targetMakeup * liveMakeupMul
+            eq = yA * mA * gA + yB * mB * gB
+        } else {
+            eq = yA * makeup * liveMakeupMul
         }
-        return max(-1, min(1, y))
+
+        // Height beds: gently pull HF energy without a second filter bank.
+        if role == .height {
+            eq = dry + (eq - dry) * 0.72
+        } else if role == .surround {
+            eq = dry + (eq - dry) * 0.88
+        }
+        // Live HF trim (adaptive analysis) — mild tilt toward dry when content is bright.
+        if liveHFMul < 0.999, role != .lfe {
+            eq = dry + (eq - dry) * liveHFMul
+        }
+        return eq
+    }
+
+    /// Shared gain reduction from frame peak — preserves multi-channel image.
+    private func linkedLimiterGain(framePeak: Float) -> Float {
+        let ceiling = Self.limiterCeiling
+        if framePeak > limiterEnvelope {
+            limiterEnvelope += (framePeak - limiterEnvelope) * Self.limiterAttack
+        } else {
+            limiterEnvelope += (framePeak - limiterEnvelope) * Self.limiterRelease
+        }
+        let needed: Float
+        if limiterEnvelope > ceiling && limiterEnvelope > 1e-9 {
+            needed = ceiling / limiterEnvelope
+        } else {
+            needed = 1
+        }
+        // Smooth GR so we don’t zipper.
+        limiterGain += (needed - limiterGain) * 0.35
+        return max(0.05, min(1, limiterGain))
+    }
+
+    private func accumulateAnalysis(sample: Float, channel: Int) {
+        // Skip pure LFE for media-type heuristics (bass channel skews classification).
+        if role(for: channel) == .lfe { return }
+        let x = sample
+        analysisEnergy += x * x
+        analysisPeak = max(analysisPeak, abs(x))
+        // Crude HF proxy: difference energy (high-passed-ish).
+        let hp = x - analysisPrevSample
+        analysisHighEnergy += hp * hp
+        if (analysisPrevSample >= 0) != (x >= 0) { analysisZCR += 1 }
+        analysisPrevSample = x
+        analysisFrames += 1
+
+        let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        let need = Int(Self.analysisIntervalSeconds * sr) * max(1, channelCount / 2)
+        if analysisFrames >= need {
+            finalizeLiveAnalysis()
+        }
+    }
+
+    private func finalizeLiveAnalysis() {
+        let n = max(1, analysisFrames)
+        let rms = sqrt(analysisEnergy / Float(n)) + 1e-9
+        let crest = analysisPeak / rms
+        let highRatio = (sqrt(analysisHighEnergy / Float(n)) + 1e-9) / rms
+        let zcr = Float(analysisZCR) / Float(n)
+
+        // Map to small trims (Tier A) — never aggressive.
+        var makeupT: Float = 1.0
+        var hfT: Float = 1.0
+        var hint = "music"
+
+        if zcr > 0.18 && highRatio > 0.55 {
+            // Speech-ish: mild presence preference via higher wet HF keep, lower sub makeup.
+            makeupT = 0.96
+            hfT = 1.0
+            hint = "speech"
+        } else if highRatio < 0.35 && crest < 6 {
+            // Bass-heavy / dull: slight body, don’t boost air.
+            makeupT = 1.02
+            hfT = 0.92
+            hint = "bass"
+        } else if highRatio > 0.85 {
+            // Bright: pull HF wet blend.
+            makeupT = 0.97
+            hfT = 0.85
+            hint = "bright"
+        } else if crest > 12 {
+            // High DR master: less makeup.
+            makeupT = 0.94
+            hfT = 0.95
+            hint = "dynamic"
+        } else if rms < 0.02 {
+            makeupT = 1.0
+            hfT = 1.0
+            hint = "quiet"
+        }
+
+        // Reference profile: almost no live coloration.
+        if profileRaw == "reference" {
+            makeupT = 1.0 + (makeupT - 1.0) * 0.25
+            hfT = 1.0 + (hfT - 1.0) * 0.25
+        }
+
+        liveMakeupTarget = max(0.88, min(1.08, makeupT))
+        liveHFTarget = max(0.8, min(1.05, hfT))
+        liveMediaHint = hint
+
+        // Dry loudness match (Tier B): scale dry toward wet energy so A/B isn’t “louder wins”.
+        // Approximate: wet often slightly hotter — pull dry up a touch when makeup > 1.
+        let targetDry = min(1.12, max(0.92, liveMakeupTarget))
+        dryLoudnessMul += (targetDry - dryLoudnessMul) * 0.35
+
+        analysisEnergy = 0
+        analysisPeak = 0
+        analysisHighEnergy = 0
+        analysisFrames = 0
+        analysisZCR = 0
+    }
+
+    /// Advance crossfade + wet + live adaptive ramps once per audio frame.
+    private func advanceFrameRamps() {
+        if targetChannelFilters != nil, crossfadeInc > 0 {
+            crossfadePos = min(1, crossfadePos + crossfadeInc)
+            if crossfadePos >= 1 {
+                promoteTargetIfNeeded(force: true)
+            }
+        }
+        if wetInc != 0 || abs(wetGain - wetTarget) > 1e-5 {
+            wetGain = advanceToward(wetGain, target: wetTarget, inc: &wetInc)
+        }
+        // Smooth live trims (~30 ms @ 48k).
+        let liveSmooth: Float = 0.002
+        liveMakeupMul += (liveMakeupTarget - liveMakeupMul) * liveSmooth
+        liveHFMul += (liveHFTarget - liveHFMul) * liveSmooth
+    }
+
+    private func advanceToward(_ value: Float, target: Float, inc: inout Float) -> Float {
+        if abs(inc) < 1e-12 {
+            return target
+        }
+        let next = value + inc
+        if (inc > 0 && next >= target) || (inc < 0 && next <= target) {
+            inc = 0
+            return target
+        }
+        return next
     }
 
     // MARK: - Core Audio helpers
@@ -481,7 +1001,184 @@ final class Biquad {
     }
 }
 
-// MARK: - Output device voicing (symphony path)
+// MARK: - Channel roles (layout-aware)
+
+enum AmplifyChannelRole: String {
+    case fullRange
+    case lfe
+    case height
+    case surround
+}
+
+enum AmplifyChannelLayout {
+    /// Build per-channel roles from Core Audio layout tags when available.
+    static func roles(channelCount: Int, layoutFromDevice: [AmplifyChannelRole]?) -> [AmplifyChannelRole] {
+        if let layoutFromDevice, layoutFromDevice.count == channelCount {
+            return layoutFromDevice
+        }
+        return (0..<channelCount).map { fallbackRole(channel: $0, total: channelCount) }
+    }
+
+    static func fallbackRole(channel: Int, total: Int) -> AmplifyChannelRole {
+        // ITU 5.1: L R C LFE Ls Rs · 7.1: + Lb Rb · common Atmos bed 7.1.4 may put height later.
+        if total >= 6, channel == 3 { return .lfe }
+        if total >= 8, channel >= 6 { return .height } // often rear/height-ish extras
+        if total >= 6, channel >= 4 { return .surround }
+        return .fullRange
+    }
+
+    /// Read default output device preferred layout tag → ordered roles.
+    static func readDefaultOutputLayout() -> [AmplifyChannelRole]? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address, 0, nil, &size, &deviceID
+        ) == noErr, deviceID != kAudioObjectUnknown else { return nil }
+
+        address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyPreferredChannelLayout,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var layoutSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &layoutSize) == noErr,
+              layoutSize >= MemoryLayout<AudioChannelLayout>.size else { return nil }
+
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(layoutSize), alignment: 8)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &layoutSize, raw) == noErr else {
+            return nil
+        }
+        let tag = raw.assumingMemoryBound(to: AudioChannelLayout.self).pointee.mChannelLayoutTag
+        return roles(forLayoutTag: tag)
+    }
+
+    /// Known Core Audio layout tags → channel roles (L R C LFE …).
+    static func roles(forLayoutTag tag: AudioChannelLayoutTag) -> [AmplifyChannelRole]? {
+        // Compare via raw bit patterns; tag helpers differ slightly across SDKs.
+        let t = tag
+        // Stereo
+        if t == kAudioChannelLayoutTag_Stereo || t == kAudioChannelLayoutTag_StereoHeadphones {
+            return [.fullRange, .fullRange]
+        }
+        // MPEG 5.1 A: L R C LFE Ls Rs
+        if t == kAudioChannelLayoutTag_MPEG_5_1_A || t == kAudioChannelLayoutTag_MPEG_5_1_B
+            || t == kAudioChannelLayoutTag_MPEG_5_1_C || t == kAudioChannelLayoutTag_MPEG_5_1_D {
+            return [.fullRange, .fullRange, .fullRange, .lfe, .surround, .surround]
+        }
+        // MPEG 7.1 A: L R C LFE Ls Rs Lc Rc  (or similar)
+        if t == kAudioChannelLayoutTag_MPEG_7_1_A || t == kAudioChannelLayoutTag_MPEG_7_1_B
+            || t == kAudioChannelLayoutTag_MPEG_7_1_C {
+            return [
+                .fullRange, .fullRange, .fullRange, .lfe,
+                .surround, .surround, .surround, .surround
+            ]
+        }
+        // Atmos / HOA beds often appear as discrete — fall back to nil (caller uses heuristics).
+        return nil
+    }
+}
+
+// MARK: - Spatial / Atmos path
+
+/// How Symphony EQ should treat the current feed (detected from channels + content + device).
+enum AmplifySpatialPath: String, CaseIterable, Identifiable {
+    case stereo
+    case spatialBinaural
+    case atmosBed
+    case multichannel
+    case stereoMixFallback
+
+    var id: String { rawValue }
+
+    var statusLabel: String {
+        switch self {
+        case .stereo: return "Stereo"
+        case .spatialBinaural: return "Spatial"
+        case .atmosBed: return "Dolby Atmos bed"
+        case .multichannel: return "Surround"
+        case .stereoMixFallback: return "stereo-mix fallback"
+        }
+    }
+
+    /// Mid-side imaging only on plain stereo (never re-spatialize Atmos/Spatial).
+    var allowsMidSide: Bool { self == .stereo }
+
+    var widthScale: Float {
+        switch self {
+        case .stereo: return 1.0
+        default: return 0.0
+        }
+    }
+
+    var usesLFERole: Bool {
+        self == .atmosBed || self == .multichannel
+    }
+
+    static func detect(
+        channels: Int,
+        sampleRate: Double,
+        contentImmersiveHint: Bool,
+        deviceRaw: String,
+        sourceApp: String = "",
+        tapIsStereoMix: Bool = false
+    ) -> AmplifySpatialPath {
+        // Never pretend multi-ch if we fell back to stereo mixdown.
+        if tapIsStereoMix {
+            if contentImmersiveHint { return .spatialBinaural }
+            return .stereoMixFallback
+        }
+        // Auto path policy (Tier A)
+        if channels >= 6 {
+            return contentImmersiveHint || channels >= 8 || sourceApp == "music"
+                ? .atmosBed
+                : .multichannel
+        }
+        if channels > 2 {
+            return .multichannel
+        }
+        let device = AmplifyOutputDevice(rawValue: deviceRaw) ?? .auto
+        if contentImmersiveHint {
+            return .spatialBinaural
+        }
+        // Music + headphones often means Spatial binaural post-render.
+        if sourceApp == "music", device == .wireless || device == .headphones, sampleRate >= 44_100 {
+            return .spatialBinaural
+        }
+        if device == .wireless, sampleRate >= 44_100 {
+            return .spatialBinaural
+        }
+        return .stereo
+    }
+
+    /// Heuristic from now-playing strings + optional format fields.
+    static func contentLooksImmersive(
+        title: String,
+        artist: String,
+        album: String,
+        genre: String? = nil,
+        playlist: String? = nil
+    ) -> Bool {
+        let blob = "\(title) \(artist) \(album) \(genre ?? "") \(playlist ?? "")".lowercased()
+        let keys = [
+            "dolby atmos", "dolby audio", "atmos", "spatial audio", "spatial",
+            "360 reality", "mpeg-h", "immersive", "apple spatial"
+        ]
+        // Avoid false positives on song titles that just say "space"
+        if blob.contains("spatial audio") || blob.contains("dolby") || blob.contains("atmos") {
+            return true
+        }
+        return keys.contains { blob.contains($0) }
+    }
+}
+
+// MARK: - Output device voicing (mild calibration, not aggressive “immersive”)
 
 enum AmplifyOutputDevice: String, CaseIterable, Identifiable {
     case auto
@@ -498,7 +1195,7 @@ enum AmplifyOutputDevice: String, CaseIterable, Identifiable {
         case .headphones: return "Headphones (wired)"
         case .wireless: return "Wireless / BT"
         case .speakers: return "Mac speakers"
-        case .external: return "External speakers"
+        case .external: return "Studio / external"
         }
     }
 
@@ -506,9 +1203,32 @@ enum AmplifyOutputDevice: String, CaseIterable, Identifiable {
         switch self {
         case .auto: return "Auto"
         case .headphones: return "Wired"
-        case .wireless: return "Wireless"
-        case .speakers: return "Speakers"
-        case .external: return "External"
+        case .wireless: return "AirPods/BT"
+        case .speakers: return "MacBook"
+        case .external: return "Monitors"
+        }
+    }
+
+    /// Short label for status line (calibration family).
+    var calibrationLabel: String { statusLabel }
+
+    /// Mild measured-style dB offsets (Tier B) — small, not bombastic.
+    var calibrationBias: [String: Float] {
+        switch self {
+        case .headphones:
+            // Slight presence; tame sub a touch on closed-backs.
+            return ["sub": -0.3, "presence": 0.6, "air": 0.4, "mud": -0.3]
+        case .wireless:
+            // BT often dull + codec HF loss — mild restore only.
+            return ["sub": 0.3, "presence": 0.5, "air": 0.35, "mud": -0.4, "punch": 0.3]
+        case .speakers:
+            // MacBook: thin low end, harsh 2–4k — gentle.
+            return ["sub": 0.5, "body": 0.3, "mud": -0.5, "presence": 0.3, "air": -0.2]
+        case .external:
+            // Studio monitors: near-flat bias.
+            return ["mud": -0.2, "presence": 0.15]
+        case .auto:
+            return [:]
         }
     }
 
@@ -528,88 +1248,146 @@ enum AmplifyOutputDevice: String, CaseIterable, Identifiable {
         }
         if n.contains("speaker") || n.contains("soundbar") || n.contains("homePod")
             || n.contains("homepod") || n.contains("display") || n.contains("hdmi")
-            || n.contains("usb") || n.contains("dac") {
+            || n.contains("usb") || n.contains("dac") || n.contains("studio")
+            || n.contains("interface") || n.contains("scarlett") || n.contains("focusrite") {
             return .external
         }
         return .auto
     }
 }
 
-// MARK: - Embedded curves (match Tools/DynamoEQ/dynamo_eq.py)
+// MARK: - EQ curve payload
+
+struct AmplifyEQCurve {
+    var filters: [Biquad]
+    /// Sub/lowshelf-only for LFE channels in Atmos/surround beds.
+    var lfeFilters: [Biquad]
+    var makeup: Float
+    var width: Float
+}
+
+// MARK: - Embedded curves (match Tools/DynamoEQ/dynamo_eq.py) — fidelity-capped
 
 enum DynamoEQCurves {
-    static func filters(
+    static func curve(
         for profile: MediaAmplifyProfile,
         device: AmplifyOutputDevice,
-        sampleRate: Double
-    ) -> (filters: [Biquad], makeup: Float, width: Float) {
+        sampleRate: Double,
+        path: AmplifySpatialPath = .stereo
+    ) -> AmplifyEQCurve {
         let sr = Float(sampleRate)
         var bands: [(String, Float, Float, Float, String)] // kind, freq, gain, q, label
         var makeupDB: Float
-        var width: Float = 0.08
+        var width: Float = 0
+        let gainCap: Float
 
         switch profile {
+        case .reference:
+            // Max fidelity: tiny mud cut + optional sub, no air boost, makeup ≤ 0.2 dB.
+            bands = [
+                ("lowshelf", 70, 0.4, 0.7, "sub"),
+                ("peak", 700, -0.8, 1.0, "mud"),
+                ("peak", 2200, 0.5, 1.0, "presence"),
+                ("highshelf", 10000, 0.0, 0.7, "air")
+            ]
+            makeupDB = 0.12
+            gainCap = 1.5
         case .presence:
             bands = [
-                ("lowshelf", 90, -1.2, 0.7, "sub"),
-                ("peak", 350, -1.0, 0.9, "body"),
-                ("peak", 1800, 2.8, 1.1, "presence"),
-                ("peak", 3500, 2.2, 1.0, "air"),
-                ("highshelf", 8000, 1.8, 0.7, "brilliance")
+                ("lowshelf", 90, -0.6, 0.7, "sub"),
+                ("peak", 350, -0.6, 0.9, "body"),
+                ("peak", 1800, 1.6, 1.1, "presence"),
+                ("peak", 3500, 1.0, 1.0, "air"),
+                ("highshelf", 8000, 0.6, 0.7, "brilliance")
             ]
-            makeupDB = 0.35
+            makeupDB = 0.2
+            gainCap = 2.0
         case .cinema:
             bands = [
-                ("lowshelf", 70, 2.4, 0.7, "sub"),
-                ("peak", 250, 0.8, 0.9, "warmth"),
-                ("peak", 900, -1.8, 1.0, "mud"),
-                ("peak", 3200, 1.4, 1.0, "presence"),
-                ("highshelf", 9000, 2.2, 0.7, "air")
+                ("lowshelf", 70, 1.2, 0.7, "sub"),
+                ("peak", 250, 0.4, 0.9, "warmth"),
+                ("peak", 900, -1.2, 1.0, "mud"),
+                ("peak", 3200, 0.8, 1.0, "presence"),
+                ("highshelf", 9000, 0.6, 0.7, "air")
             ]
-            makeupDB = 0.5
+            makeupDB = 0.2
+            gainCap = 2.0
         case .impact:
             bands = [
-                ("lowshelf", 60, 3.8, 0.7, "sub"),
-                ("peak", 110, 2.6, 1.0, "punch"),
-                ("peak", 220, 1.5, 1.0, "body"),
-                ("peak", 800, -1.2, 0.9, "mud"),
-                ("highshelf", 7000, 1.0, 0.7, "air")
+                ("lowshelf", 60, 2.0, 0.7, "sub"),
+                ("peak", 110, 1.5, 1.0, "punch"),
+                ("peak", 220, 0.8, 1.0, "body"),
+                ("peak", 800, -0.8, 0.9, "mud"),
+                ("highshelf", 7000, 0.4, 0.7, "air")
             ]
-            makeupDB = 0.65
+            makeupDB = 0.25
+            width = 0.08 // only Impact may widen (and only on pure stereo)
+            gainCap = 2.5
         case .symphony:
+            // Mild concert contour — quieter than original “loudness bias” curves.
             bands = [
-                ("lowshelf", 65, 2.0, 0.7, "sub"),
-                ("peak", 180, 1.2, 0.95, "body"),
-                ("peak", 700, -1.4, 1.0, "mud"),
-                ("peak", 2200, 2.0, 1.05, "presence"),
-                ("peak", 4500, 1.3, 1.0, "sheen"),
-                ("highshelf", 10000, 1.6, 0.7, "air")
+                ("lowshelf", 65, 0.9, 0.7, "sub"),
+                ("peak", 180, 0.5, 0.95, "body"),
+                ("peak", 700, -0.9, 1.0, "mud"),
+                ("peak", 2200, 0.9, 1.05, "presence"),
+                ("peak", 4500, 0.4, 1.0, "sheen"),
+                ("highshelf", 10000, 0.5, 0.7, "air")
             ]
-            makeupDB = 0.45
-            width = 0.12
+            makeupDB = 0.18
+            width = 0
+            gainCap = 1.8
         }
 
-        // Device voicing — “you are there” on each transducer type
-        let bias: [String: Float]
-        switch device {
-        case .headphones:
-            bias = ["presence": 1.2, "air": 1.4, "brilliance": 1.0, "sub": -0.4]
-            width = max(width, 0.12)
-        case .wireless:
-            bias = ["sub": 0.6, "presence": 0.9, "air": 0.5, "mud": -0.5, "punch": 0.8]
-            width = max(width, 0.08)
-            makeupDB += 0.15
-        case .speakers:
-            bias = ["sub": 0.8, "body": 0.6, "mud": -0.8, "presence": 0.7]
-            width = max(width, 0.05)
-        case .external:
-            bias = ["sub": 1.0, "presence": 0.5, "air": 0.6, "mud": -0.6]
-            width = max(width, 0.10)
-        case .auto:
-            bias = [:]
-        }
+        // Mild device calibration (Tier B) — not aggressive immersive.
+        let bias = device.calibrationBias
         bands = bands.map { kind, freq, gain, q, label in
             (kind, freq, gain + (bias[label] ?? 0), q, label)
+        }
+
+        // Path voicing — Atmos/Spatial: gentle sub + mud only; no air boost.
+        switch path {
+        case .atmosBed, .multichannel:
+            width = 0
+            makeupDB = min(makeupDB, 0.15)
+            bands = bands.map { kind, freq, gain, q, label in
+                var g = gain
+                if label == "air" || label == "brilliance" || label == "sheen" {
+                    g = min(0, g * 0.2) // no HF lift on beds
+                }
+                if label == "presence" { g = min(g, 0.4) }
+                if label == "sub" || label == "punch" { g = min(g, 0.8) }
+                if label == "mud" { g = min(g, -0.4) }
+                return (kind, freq, g, q, label)
+            }
+        case .spatialBinaural, .stereoMixFallback:
+            width = 0
+            makeupDB = min(makeupDB, 0.15)
+            bands = bands.map { kind, freq, gain, q, label in
+                var g = gain
+                if label == "air" || label == "brilliance" || label == "sheen" {
+                    g = min(0, g * 0.25) // protect elevation cues
+                }
+                if label == "presence" { g = min(g, 0.5) }
+                return (kind, freq, g, q, label)
+            }
+        case .stereo:
+            break
+        }
+
+        // Cap per-band gains for fidelity.
+        bands = bands.map { kind, freq, gain, q, label in
+            (kind, freq, max(-gainCap, min(gainCap, gain)), q, label)
+        }
+        makeupDB = min(makeupDB, profile == .reference ? 0.2 : 0.3)
+
+        // Headroom-first staging (Tier B): scale so sum of positive boosts stays modest.
+        let posSum = bands.reduce(Float(0)) { $0 + max(0, $1.2) }
+        if posSum + makeupDB > 3.5 {
+            let scale = 3.5 / (posSum + makeupDB)
+            bands = bands.map { kind, freq, gain, q, label in
+                (kind, freq, gain * scale, q, label)
+            }
+            makeupDB *= scale
         }
 
         let filters = bands.map { kind, freq, gain, q, _ -> Biquad in
@@ -619,8 +1397,30 @@ enum DynamoEQCurves {
             default: return peaking(sr: sr, freq: freq, gainDB: gain, q: q)
             }
         }
+        let lfeFilters = bands.compactMap { kind, freq, gain, q, _ -> Biquad? in
+            guard freq <= 150 || kind == "lowshelf" else { return nil }
+            switch kind {
+            case "lowshelf": return lowshelf(sr: sr, freq: freq, gainDB: gain * 0.85, q: q)
+            default: return peaking(sr: sr, freq: min(freq, 120), gainDB: gain * 0.7, q: q)
+            }
+        }
         let makeup = pow(10.0, makeupDB / 20.0)
-        return (filters, makeup, width)
+        return AmplifyEQCurve(
+            filters: filters,
+            lfeFilters: lfeFilters.isEmpty ? [lowshelf(sr: sr, freq: 80, gainDB: 0, q: 0.7)] : lfeFilters,
+            makeup: makeup,
+            width: width
+        )
+    }
+
+    /// Back-compat helper for tests.
+    static func filters(
+        for profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        sampleRate: Double
+    ) -> (filters: [Biquad], makeup: Float, width: Float) {
+        let c = curve(for: profile, device: device, sampleRate: sampleRate, path: .stereo)
+        return (c.filters, c.makeup, c.width)
     }
 
     private static func peaking(sr: Float, freq: Float, gainDB: Float, q: Float) -> Biquad {
@@ -674,13 +1474,12 @@ enum DynamoEQCurves {
 // MARK: - Optional Python coeff load (offline designer, no network)
 
 enum DynamoEQPython {
-    struct Result {
-        var filters: [Biquad]
-        var makeup: Float
-        var width: Float
-    }
-
-    static func coeffs(profile: String, device: String, sampleRate: Double) -> Result? {
+    static func coeffs(
+        profile: String,
+        device: String,
+        sampleRate: Double,
+        path: String = "stereo"
+    ) -> AmplifyEQCurve? {
         let script = scriptURL()
         guard FileManager.default.isReadableFile(atPath: script.path) else { return nil }
         let proc = Process()
@@ -689,6 +1488,7 @@ enum DynamoEQPython {
             script.path, "coeffs",
             "--profile", profile,
             "--device", device,
+            "--path", path,
             "--sr", String(sampleRate)
         ]
         let out = Pipe()
@@ -705,20 +1505,30 @@ enum DynamoEQPython {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let biquads = json["biquads"] as? [[String: Any]]
         else { return nil }
-        var filters: [Biquad] = []
-        for b in biquads {
-            guard let b0 = b["b0"] as? Double,
-                  let b1 = b["b1"] as? Double,
-                  let b2 = b["b2"] as? Double,
-                  let a1 = b["a1"] as? Double,
-                  let a2 = b["a2"] as? Double
-            else { continue }
-            filters.append(Biquad(b0: Float(b0), b1: Float(b1), b2: Float(b2), a1: Float(a1), a2: Float(a2)))
+        func parse(_ arr: [[String: Any]]) -> [Biquad] {
+            var out: [Biquad] = []
+            for b in arr {
+                guard let b0 = b["b0"] as? Double,
+                      let b1 = b["b1"] as? Double,
+                      let b2 = b["b2"] as? Double,
+                      let a1 = b["a1"] as? Double,
+                      let a2 = b["a2"] as? Double
+                else { continue }
+                out.append(Biquad(b0: Float(b0), b1: Float(b1), b2: Float(b2), a1: Float(a1), a2: Float(a2)))
+            }
+            return out
         }
+        let filters = parse(biquads)
         guard !filters.isEmpty else { return nil }
+        let lfeArr = (json["lfe_biquads"] as? [[String: Any]]) ?? []
+        var lfe = parse(lfeArr)
+        if lfe.isEmpty {
+            // Fallback: first filter only if it looks low-shelf-ish (b0~1) — else identity-ish lowshelf from curve.
+            lfe = Array(filters.prefix(1))
+        }
         let makeup = Float((json["makeup"] as? Double) ?? 1.0)
         let width = Float((json["width"] as? Double) ?? 0.0)
-        return Result(filters: filters, makeup: makeup, width: width)
+        return AmplifyEQCurve(filters: filters, lfeFilters: lfe, makeup: makeup, width: width)
     }
 
     private static func scriptURL() -> URL {

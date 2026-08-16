@@ -39,7 +39,7 @@ final class ClipboardStore: ObservableObject {
         load()
         lastChangeCount = NSPasteboard.general.changeCount
         // changeCount is cheap; 2s is enough without burning a 1Hz timer.
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollPasteboard()
             }

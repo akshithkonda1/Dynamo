@@ -62,11 +62,27 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             }
         }
         refreshAll()
-        // MediaRemote notifications drive most updates; poll is a safety net only.
-        // Snappier transport status; still far lighter than 4–10 Hz.
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // MediaRemote notifications drive most updates; adaptive poll is a sparse safety net.
+        scheduleAdaptivePoll()
+    }
+
+    /// Faster while something is playing; back off when idle to save CPU.
+    private func scheduleAdaptivePoll() {
+        pollTimer?.invalidate()
+        let playing = latestMRInfo?.isPlaying == true
+            || latestHelperInfo?.isPlaying == true
+        let interval: TimeInterval = playing ? 1.2 : 2.5
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshAll()
+                guard let self else { return }
+                self.refreshAll()
+                // Reschedule if play-state flipped (interval change).
+                let nowPlaying = self.latestMRInfo?.isPlaying == true
+                    || self.latestHelperInfo?.isPlaying == true
+                let want: TimeInterval = nowPlaying ? 1.2 : 2.5
+                if abs((self.pollTimer?.timeInterval ?? 0) - want) > 0.2 {
+                    self.scheduleAdaptivePoll()
+                }
             }
         }
         RunLoop.main.add(t, forMode: .common)

@@ -312,7 +312,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            Text("DynamoEQ (local): (1) amplify by media type/quality, (2) tune each spectral “note” region, (3) device-aware symphony path for headphones, wireless, Mac speakers, or external. Spatial/Atmos-safe post-render EQ. No cloud APIs. macOS 14.2+.")
+            Text("Fidelity Amplify (local): Reference = transparent; Symphony = mild contour; live adaptive trims; linked true-peak limiter (−1 dBTP). Auto path: Dolby Atmos bed / Spatial / Stereo / stereo-mix fallback. Width only on Impact. Device calibration is mild (AirPods, MacBook, monitors). Works with Atmos/Spatial — does not decode Dolby codecs. macOS 14.2+.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

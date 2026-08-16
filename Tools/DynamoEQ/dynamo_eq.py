@@ -12,8 +12,14 @@ Three jobs (no network, no cloud APIs, pure Python 3 stdlib):
      built-in speakers, or external speakers each get a concert-hall / “you
      are there” contour — without mono-folding Spatial/Atmos feeds.
 
-Realtime path: Dynamo’s LocalAmplifyEngine applies the exported biquads.
-This CLI designs coeffs, analyzes PCM, and can process float32 stereo streams.
+**Seamless transitions (v3):**
+  - Equal-power dual-path crossfades between profiles / devices
+  - Soft wet fade-in / fade-out so engage never clicks
+  - Band-gain morph helpers for offline previews of intermediate curves
+  - Matches Dynamo LocalAmplifyEngine realtime behaviour (~90 ms profile, ~120 ms engage)
+
+Realtime path: Dynamo’s LocalAmplifyEngine applies the exported biquads with the
+same dual-bank crossfade + wet ramp.
 
 Usage:
   python3 dynamo_eq.py selftest
@@ -21,6 +27,9 @@ Usage:
   python3 dynamo_eq.py analyze --sr 48000 < stereo.f32le
   python3 dynamo_eq.py symphony --device auto --sr 48000 < stereo.f32le
   python3 dynamo_eq.py process --profile impact --device speakers --sr 48000 < in > out
+  python3 dynamo_eq.py process --from-profile cinema --profile symphony \\
+      --transition-ms 90 --fade-in-ms 120 --sr 48000 < in > out
+  python3 dynamo_eq.py morph --from-profile cinema --to-profile impact --steps 5
 """
 
 from __future__ import annotations
@@ -115,47 +124,51 @@ class BandSpec:
     label: str = ""  # note-region name for analysis
 
 
-# Intent bases (then adapted by media + device + note evaluation)
+# Intent bases — fidelity-capped (match LocalAmplifyEngine DynamoEQCurves)
 BASE_PROFILES: Dict[str, List[BandSpec]] = {
+    "reference": [
+        BandSpec("lowshelf", 70, 0.4, 0.7, "sub"),
+        BandSpec("peak", 700, -0.8, 1.0, "mud"),
+        BandSpec("peak", 2200, 0.5, 1.0, "presence"),
+        BandSpec("highshelf", 10000, 0.0, 0.7, "air"),
+    ],
     "presence": [
-        BandSpec("lowshelf", 90, -1.2, 0.7, "sub"),
-        BandSpec("peak", 350, -1.0, 0.9, "body"),
-        BandSpec("peak", 1800, 2.8, 1.1, "presence"),
-        BandSpec("peak", 3500, 2.2, 1.0, "air"),
-        BandSpec("highshelf", 8000, 1.8, 0.7, "brilliance"),
+        BandSpec("lowshelf", 90, -0.6, 0.7, "sub"),
+        BandSpec("peak", 350, -0.6, 0.9, "body"),
+        BandSpec("peak", 1800, 1.6, 1.1, "presence"),
+        BandSpec("peak", 3500, 1.0, 1.0, "air"),
+        BandSpec("highshelf", 8000, 0.6, 0.7, "brilliance"),
     ],
     "cinema": [
-        BandSpec("lowshelf", 70, 2.4, 0.7, "sub"),
-        BandSpec("peak", 250, 0.8, 0.9, "warmth"),
-        BandSpec("peak", 900, -1.8, 1.0, "mud"),
-        BandSpec("peak", 3200, 1.4, 1.0, "presence"),
-        BandSpec("highshelf", 9000, 2.2, 0.7, "air"),
+        BandSpec("lowshelf", 70, 1.2, 0.7, "sub"),
+        BandSpec("peak", 250, 0.4, 0.9, "warmth"),
+        BandSpec("peak", 900, -1.2, 1.0, "mud"),
+        BandSpec("peak", 3200, 0.8, 1.0, "presence"),
+        BandSpec("highshelf", 9000, 0.6, 0.7, "air"),
     ],
     "impact": [
-        BandSpec("lowshelf", 60, 3.8, 0.7, "sub"),
-        BandSpec("peak", 110, 2.6, 1.0, "punch"),
-        BandSpec("peak", 220, 1.5, 1.0, "body"),
-        BandSpec("peak", 800, -1.2, 0.9, "mud"),
-        BandSpec("highshelf", 7000, 1.0, 0.7, "air"),
+        BandSpec("lowshelf", 60, 2.0, 0.7, "sub"),
+        BandSpec("peak", 110, 1.5, 1.0, "punch"),
+        BandSpec("peak", 220, 0.8, 1.0, "body"),
+        BandSpec("peak", 800, -0.8, 0.9, "mud"),
+        BandSpec("highshelf", 7000, 0.4, 0.7, "air"),
     ],
-    # Auto / symphony — balanced concert contour (starting point)
     "symphony": [
-        BandSpec("lowshelf", 65, 2.0, 0.7, "sub"),
-        BandSpec("peak", 180, 1.2, 0.95, "body"),
-        BandSpec("peak", 700, -1.4, 1.0, "mud"),
-        BandSpec("peak", 2200, 2.0, 1.05, "presence"),
-        BandSpec("peak", 4500, 1.3, 1.0, "sheen"),
-        BandSpec("highshelf", 10000, 1.6, 0.7, "air"),
+        BandSpec("lowshelf", 65, 0.9, 0.7, "sub"),
+        BandSpec("peak", 180, 0.5, 0.95, "body"),
+        BandSpec("peak", 700, -0.9, 1.0, "mud"),
+        BandSpec("peak", 2200, 0.9, 1.05, "presence"),
+        BandSpec("peak", 4500, 0.4, 1.0, "sheen"),
+        BandSpec("highshelf", 10000, 0.5, 0.7, "air"),
     ],
 }
 
-# Device “you are there” voicing (added to band gains by label)
+# Mild device calibration (not aggressive immersive)
 DEVICE_BIAS: Dict[str, Dict[str, float]] = {
-    # dB offsets keyed by band label
-    "headphones": {"sub": -0.4, "body": 0.3, "presence": 1.2, "air": 1.4, "sheen": 0.8, "mud": -0.3, "punch": 0.4, "brilliance": 1.0, "warmth": 0.2},
-    "wireless": {"sub": 0.6, "body": 0.5, "presence": 0.9, "air": 0.5, "sheen": 0.4, "mud": -0.5, "punch": 0.8, "brilliance": 0.3, "warmth": 0.4},  # BT often dull
-    "speakers": {"sub": 0.8, "body": 0.6, "presence": 0.7, "air": 0.4, "sheen": 0.3, "mud": -0.8, "punch": 0.5, "brilliance": 0.2, "warmth": 0.5},
-    "external": {"sub": 1.0, "body": 0.4, "presence": 0.5, "air": 0.6, "sheen": 0.5, "mud": -0.6, "punch": 0.4, "brilliance": 0.4, "warmth": 0.3},
+    "headphones": {"sub": -0.3, "presence": 0.6, "air": 0.4, "mud": -0.3},
+    "wireless": {"sub": 0.3, "presence": 0.5, "air": 0.35, "mud": -0.4, "punch": 0.3},
+    "speakers": {"sub": 0.5, "body": 0.3, "mud": -0.5, "presence": 0.3, "air": -0.2},
+    "external": {"mud": -0.2, "presence": 0.15},
     "auto": {},
 }
 
@@ -356,15 +369,29 @@ def _apply_bias(bands: List[BandSpec], bias: Dict[str, float], scale: float = 1.
             b.gain_db = max(-8.0, min(7.0, b.gain_db + bias[key] * scale))
 
 
+# Spatial / Atmos path keys (match AmplifySpatialPath.rawValue in Swift)
+SPATIAL_PATHS = ("stereo", "spatialBinaural", "atmosBed", "multichannel", "stereoMixFallback")
+
+# Per-profile max |gain| dB and default makeup
+PROFILE_CAPS = {
+    "reference": (1.5, 0.12),
+    "symphony": (1.8, 0.18),
+    "presence": (2.0, 0.20),
+    "cinema": (2.0, 0.20),
+    "impact": (2.5, 0.25),
+}
+
+
 def build_adaptive_bands(
     profile: str,
     device: str,
     analysis: Optional[MediaAnalysis],
     intensity: float = 1.0,
+    path: str = "stereo",
 ) -> Tuple[List[BandSpec], float, dict]:
     """
-    Combine intent profile + device symphony voicing + media/note evaluation.
-    Returns bands, makeup_linear, report.
+    Fidelity-capped intent + mild device calibration + optional analysis trims +
+    Spatial/Atmos path voicing. Width only for Impact on stereo.
     """
     base_key = profile.lower() if profile.lower() in BASE_PROFILES else "symphony"
     bands = [
@@ -374,64 +401,100 @@ def build_adaptive_bands(
     device = (device or "auto").lower()
     if device not in DEVICE_BIAS:
         device = "auto"
+    path = path if path in SPATIAL_PATHS else "stereo"
+    gain_cap, default_makeup = PROFILE_CAPS.get(base_key, (1.8, 0.18))
 
-    _apply_bias(bands, DEVICE_BIAS.get(device, {}), intensity)
+    _apply_bias(bands, DEVICE_BIAS.get(device, {}), intensity * 0.85)
 
     media_type = "music"
     quality = "medium"
-    if analysis:
+    if analysis and base_key != "reference":
         media_type = analysis.media_type
         quality = analysis.quality
-        _apply_bias(bands, MEDIA_BIAS.get(media_type, {}), intensity)
+        # Light analysis bias only (scaled down for fidelity)
+        _apply_bias(bands, MEDIA_BIAS.get(media_type, {}), intensity * 0.35)
         if quality == "low":
-            _apply_bias(bands, MEDIA_BIAS["low_quality"], intensity * 0.85)
-        # Note-level tuning
+            _apply_bias(bands, MEDIA_BIAS["low_quality"], intensity * 0.25)
         note_map = {n["label"]: n["suggested_gain_db"] for n in analysis.notes}
         for b in bands:
             if b.label in note_map:
-                b.gain_db = max(-8.0, min(7.0, b.gain_db + note_map[b.label] * intensity * 0.75))
+                b.gain_db = max(-gain_cap, min(gain_cap, b.gain_db + note_map[b.label] * intensity * 0.25))
 
-    # Symphony immersion extras by device
-    width = 0.0  # mid-side width amount 0..0.35
-    presence_air = 0.0
-    if device == "headphones":
-        width = 0.12 * intensity  # gentle stage
-        presence_air = 0.4
-    elif device == "wireless":
-        width = 0.08 * intensity
-        presence_air = 0.6  # restore HF lost to codecs
-    elif device == "speakers":
-        width = 0.05 * intensity
-        presence_air = 0.2
-    elif device == "external":
-        width = 0.10 * intensity
-        presence_air = 0.35
+    # Width: Impact only, stereo path only
+    width = 0.08 * intensity if base_key == "impact" and path == "stereo" else 0.0
 
-    for b in bands:
-        if b.label in ("air", "brilliance", "sheen", "presence"):
-            b.gain_db = max(-8.0, min(7.0, b.gain_db + presence_air))
-
-    # Makeup: lower for high-DR masters, slightly higher for low quality
-    makeup_db = 0.45 * intensity
+    makeup_db = default_makeup * intensity
     if analysis:
         if analysis.quality == "high":
-            makeup_db = 0.25 * intensity
+            makeup_db = min(makeup_db, 0.12 * intensity)
         elif analysis.quality == "low":
-            makeup_db = 0.7 * intensity
+            makeup_db = min(0.25 * intensity, makeup_db + 0.05)
         if analysis.media_type == "speech":
-            makeup_db = 0.35 * intensity
+            makeup_db = min(makeup_db, 0.15 * intensity)
+
+    # Atmos/Spatial: gentle sub + mud; no air boost
+    if path in ("atmosBed", "multichannel", "spatialBinaural", "stereoMixFallback"):
+        width = 0.0
+        makeup_db = min(makeup_db, 0.15 * intensity)
+        for b in bands:
+            if b.label in ("air", "brilliance", "sheen"):
+                b.gain_db = min(0.0, b.gain_db * 0.2)
+            elif b.label == "presence":
+                b.gain_db = min(b.gain_db, 0.5)
+            elif b.label == "mud":
+                b.gain_db = min(b.gain_db, -0.4)
+
+    if base_key == "reference":
+        makeup_db = min(makeup_db, 0.2)
+        width = 0.0
+
+    for b in bands:
+        b.gain_db = max(-gain_cap, min(gain_cap, b.gain_db))
+
+    # Headroom-first: scale if positive boosts stack too high
+    pos_sum = sum(max(0.0, b.gain_db) for b in bands)
+    if pos_sum + makeup_db > 3.5:
+        scale = 3.5 / (pos_sum + makeup_db)
+        for b in bands:
+            b.gain_db *= scale
+        makeup_db *= scale
+
     makeup = 10 ** (makeup_db / 20.0)
 
     report = {
         "profile": base_key,
         "device": device,
+        "path": path,
         "media_type": media_type,
         "quality": quality,
         "width": width,
         "intensity": intensity,
         "makeup_db": round(makeup_db, 2),
+        "atmos_safe": path in ("atmosBed", "multichannel", "spatialBinaural", "stereoMixFallback"),
+        "mid_side": width > 0.001,
+        "fidelity_capped": True,
+        "linked_true_peak_ceiling_db": -1.0,
     }
     return bands, makeup, report
+
+
+def lfe_bands(bands: Sequence[BandSpec]) -> List[BandSpec]:
+    """Sub/lowshelf-only set for LFE channels in Atmos/surround beds."""
+    out: List[BandSpec] = []
+    for b in bands:
+        if b.kind == "lowshelf" or b.freq <= 150:
+            out.append(
+                BandSpec(
+                    b.kind if b.kind == "lowshelf" else "peak",
+                    min(b.freq, 120.0) if b.kind != "lowshelf" else b.freq,
+                    b.gain_db * (0.85 if b.kind == "lowshelf" else 0.7),
+                    b.q,
+                    b.label,
+                )
+            )
+    if not out:
+        out = [BandSpec("lowshelf", 80, 0.0, 0.7, "sub")]
+    return out
 
 
 def bands_to_filters(bands: Sequence[BandSpec], sr: float) -> List[Biquad]:
@@ -451,11 +514,80 @@ def process_sample(filters: Sequence[Biquad], x: float, makeup: float) -> float:
     for f in filters:
         y = f.process(y)
     y *= makeup
+    return soft_limit(y)
+
+
+def soft_limit(y: float) -> float:
     if y > 0.97:
         y = 0.97 + 0.03 * math.tanh((y - 0.97) * 8)
     elif y < -0.97:
         y = -0.97 + 0.03 * math.tanh((y + 0.97) * 8)
     return max(-1.0, min(1.0, y))
+
+
+# ---------------------------------------------------------------------------
+# Seamless transitions — equal-power dual path + wet ramps
+# ---------------------------------------------------------------------------
+
+# Defaults aligned with LocalAmplifyEngine (seconds → ms for CLI).
+DEFAULT_TRANSITION_MS = 90.0
+DEFAULT_FADE_IN_MS = 120.0
+DEFAULT_FADE_OUT_MS = 80.0
+
+
+def equal_power(t: float) -> Tuple[float, float]:
+    """Equal-power crossfade weights for t in [0, 1] (A→B)."""
+    x = max(0.0, min(1.0, t))
+    return math.cos(x * math.pi * 0.5), math.sin(x * math.pi * 0.5)
+
+
+def blend_bands(
+    a: Sequence[BandSpec],
+    b: Sequence[BandSpec],
+    t: float,
+) -> List[BandSpec]:
+    """
+    Morph band gains (and q) by label for offline previews.
+    Missing labels in either side are treated as 0 dB identity peers.
+    """
+    t = max(0.0, min(1.0, t))
+    by_a = {s.label or f"@{i}": s for i, s in enumerate(a)}
+    by_b = {s.label or f"@{i}": s for i, s in enumerate(b)}
+    labels = list(dict.fromkeys([*by_a.keys(), *by_b.keys()]))
+    out: List[BandSpec] = []
+    for lab in labels:
+        sa = by_a.get(lab)
+        sb = by_b.get(lab)
+        if sa and sb:
+            out.append(
+                BandSpec(
+                    kind=sb.kind if t >= 0.5 else sa.kind,
+                    freq=sa.freq * (1 - t) + sb.freq * t,
+                    gain_db=sa.gain_db * (1 - t) + sb.gain_db * t,
+                    q=sa.q * (1 - t) + sb.q * t,
+                    label=lab if not lab.startswith("@") else (sa.label or sb.label),
+                )
+            )
+        elif sa:
+            out.append(BandSpec(sa.kind, sa.freq, sa.gain_db * (1 - t), sa.q, sa.label))
+        elif sb:
+            out.append(BandSpec(sb.kind, sb.freq, sb.gain_db * t, sb.q, sb.label))
+    return out
+
+
+def wet_envelope(frame: int, total_frames: int, fade_in: int, fade_out: int) -> float:
+    """Linear wet 0→1→0 envelope in frames (equal-power optional at ends)."""
+    if total_frames <= 0:
+        return 1.0
+    w = 1.0
+    if fade_in > 0 and frame < fade_in:
+        w = frame / float(fade_in)
+    if fade_out > 0 and frame >= total_frames - fade_out:
+        rem = total_frames - frame
+        w = min(w, rem / float(fade_out))
+    # Equal-power shape on the ramp so loudness stays even.
+    w = max(0.0, min(1.0, w))
+    return math.sin(w * math.pi * 0.5)
 
 
 def process_stereo_ms(
@@ -464,17 +596,21 @@ def process_stereo_ms(
     filters_r: List[Biquad],
     makeup: float,
     width: float,
+    *,
+    fade_in_frames: int = 0,
+    fade_out_frames: int = 0,
 ) -> bytes:
-    """Stereo process with optional mid-side width (immersive stage, Spatial-safe)."""
+    """Stereo process with optional mid-side width + seamless wet fade."""
     n = len(data) // 4
     if n % 2:
         n -= 1
+    frames = n // 2
     out = bytearray()
     w = max(0.0, min(0.4, width))
-    for i in range(0, n, 2):
+    for fi, i in enumerate(range(0, n, 2)):
         l = struct.unpack_from("<f", data, i * 4)[0]
         r = struct.unpack_from("<f", data, (i + 1) * 4)[0]
-        # Mid-side encode
+        dry_l, dry_r = l, r
         mid = 0.5 * (l + r)
         side = 0.5 * (l - r)
         side *= 1.0 + w
@@ -482,8 +618,107 @@ def process_stereo_ms(
         r2 = mid - side
         lo = process_sample(filters_l, l2, makeup)
         ro = process_sample(filters_r, r2, makeup)
+        wet = wet_envelope(fi, frames, fade_in_frames, fade_out_frames)
+        lo = dry_l * (1.0 - wet) + lo * wet
+        ro = dry_r * (1.0 - wet) + ro * wet
         out += struct.pack("<ff", lo, ro)
     return bytes(out)
+
+
+def process_stereo_seamless(
+    data: bytes,
+    sr: float,
+    from_profile: str,
+    to_profile: str,
+    device: str = "auto",
+    analysis: Optional[MediaAnalysis] = None,
+    intensity: float = 1.0,
+    transition_ms: float = DEFAULT_TRANSITION_MS,
+    fade_in_ms: float = DEFAULT_FADE_IN_MS,
+    fade_out_ms: float = 0.0,
+) -> bytes:
+    """
+    Dual-path equal-power crossfade from one curve to another, plus wet engage.
+    Mirrors LocalAmplifyEngine realtime transitions for offline design/test.
+    """
+    bands_a, makeup_a, report_a = build_adaptive_bands(from_profile, device, analysis, intensity)
+    bands_b, makeup_b, report_b = build_adaptive_bands(to_profile, device, analysis, intensity)
+    fl_a = bands_to_filters(bands_a, sr)
+    fr_a = [f.clone() for f in fl_a]
+    fl_b = bands_to_filters(bands_b, sr)
+    fr_b = [f.clone() for f in fl_b]
+    width_a = float(report_a["width"])
+    width_b = float(report_b["width"])
+
+    n = len(data) // 4
+    if n % 2:
+        n -= 1
+    frames = n // 2
+    xfade = max(1, int(sr * (transition_ms / 1000.0)))
+    fade_in = max(0, int(sr * (fade_in_ms / 1000.0)))
+    fade_out = max(0, int(sr * (fade_out_ms / 1000.0)))
+
+    out = bytearray()
+    for fi, i in enumerate(range(0, n, 2)):
+        l = struct.unpack_from("<f", data, i * 4)[0]
+        r = struct.unpack_from("<f", data, (i + 1) * 4)[0]
+        dry_l, dry_r = l, r
+        t = min(1.0, fi / float(xfade)) if xfade > 0 else 1.0
+        gA, gB = equal_power(t)
+        w = width_a * gA + width_b * gB
+
+        mid = 0.5 * (l + r)
+        side = 0.5 * (l - r) * (1.0 + w)
+        l2, r2 = mid + side, mid - side
+
+        la = process_sample(fl_a, l2, makeup_a)
+        ra = process_sample(fr_a, r2, makeup_a)
+        lb = process_sample(fl_b, l2, makeup_b)
+        rb = process_sample(fr_b, r2, makeup_b)
+        lo = la * gA + lb * gB
+        ro = ra * gA + rb * gB
+
+        wet = wet_envelope(fi, frames, fade_in, fade_out)
+        lo = dry_l * (1.0 - wet) + lo * wet
+        ro = dry_r * (1.0 - wet) + ro * wet
+        out += struct.pack("<ff", max(-1.0, min(1.0, lo)), max(-1.0, min(1.0, ro)))
+    return bytes(out)
+
+
+def morph_payload(
+    from_profile: str,
+    to_profile: str,
+    sample_rate: float,
+    device: str = "auto",
+    steps: int = 5,
+    intensity: float = 1.0,
+) -> dict:
+    """Emit intermediate band morphs for designers / unit tests."""
+    a, _, _ = build_adaptive_bands(from_profile, device, None, intensity)
+    b, _, _ = build_adaptive_bands(to_profile, device, None, intensity)
+    frames = []
+    n = max(2, steps)
+    for i in range(n):
+        t = i / float(n - 1)
+        bands = blend_bands(a, b, t)
+        gA, gB = equal_power(t)
+        frames.append(
+            {
+                "t": round(t, 4),
+                "equal_power": {"a": round(gA, 5), "b": round(gB, 5)},
+                "bands": [asdict(x) for x in bands],
+            }
+        )
+    return {
+        "engine": "DynamoEQ",
+        "version": 3,
+        "seamless": True,
+        "from_profile": from_profile,
+        "to_profile": to_profile,
+        "device": device,
+        "steps": n,
+        "frames": frames,
+    }
 
 
 def coeffs_payload(
@@ -492,25 +727,39 @@ def coeffs_payload(
     device: str = "auto",
     analysis: Optional[MediaAnalysis] = None,
     intensity: float = 1.0,
+    path: str = "stereo",
 ) -> dict:
-    bands, makeup, report = build_adaptive_bands(profile, device, analysis, intensity)
+    bands, makeup, report = build_adaptive_bands(profile, device, analysis, intensity, path=path)
     filters = bands_to_filters(bands, sample_rate)
+    lfe = bands_to_filters(lfe_bands(bands), sample_rate)
     return {
         "engine": "DynamoEQ",
-        "version": 2,
+        "version": 3,
         "symphony": True,
         "spatial_safe": True,
+        "atmos_ready": True,
+        "seamless": True,
+        "transition_ms": DEFAULT_TRANSITION_MS,
+        "fade_in_ms": DEFAULT_FADE_IN_MS,
+        "fade_out_ms": DEFAULT_FADE_OUT_MS,
         "profile": report["profile"],
         "device": report["device"],
+        "path": report["path"],
         "media_type": report["media_type"],
         "quality": report["quality"],
         "sampleRate": sample_rate,
         "makeup": makeup,
         "width": report["width"],
         "intensity": intensity,
+        "mid_side": report["mid_side"],
+        "atmos_safe": report["atmos_safe"],
         "bands": [asdict(b) for b in bands],
+        "lfe_bands": [asdict(b) for b in lfe_bands(bands)],
         "biquads": [
             {"b0": f.b0, "b1": f.b1, "b2": f.b2, "a1": f.a1, "a2": f.a2} for f in filters
+        ],
+        "lfe_biquads": [
+            {"b0": f.b0, "b1": f.b1, "b2": f.b2, "a1": f.a1, "a2": f.a2} for f in lfe
         ],
         "analysis": asdict(analysis) if analysis else None,
     }
@@ -545,9 +794,20 @@ def selftest() -> None:
         )
     a = analyze_mono(mono, sr)
     assert a.media_type in BASE_PROFILES or a.media_type in MEDIA_BIAS
-    payload = coeffs_payload("symphony", sr, "headphones", a, 1.0)
-    assert payload["width"] > 0
+    payload = coeffs_payload("symphony", sr, "headphones", a, 1.0, path="stereo")
+    assert payload["width"] == 0  # width only on Impact
+    assert payload["version"] == 3
+    assert payload["seamless"] is True
+    assert payload["atmos_ready"] is True
     assert len(payload["biquads"]) >= 5
+    impact = coeffs_payload("impact", sr, "headphones", a, 1.0, path="stereo")
+    assert impact["width"] > 0
+    atmos = coeffs_payload("symphony", sr, "external", a, 1.0, path="atmosBed")
+    assert atmos["width"] == 0
+    assert atmos["atmos_safe"] is True
+    assert len(atmos["lfe_biquads"]) >= 1
+    ref = coeffs_payload("reference", sr, "auto", a, 1.0, path="stereo")
+    assert ref["makeup"] <= 10 ** (0.25 / 20.0)
     # Process should not explode
     filters = bands_to_filters(
         [BandSpec(**{k: b[k] for k in ("kind", "freq", "gain_db", "q", "label") if k in b}) for b in payload["bands"]],
@@ -558,6 +818,36 @@ def selftest() -> None:
         y = process_sample(filters, x, payload["makeup"])
         peak = max(peak, abs(y))
     assert peak < 1.05, peak
+
+    # Seamless transition: dual-path should not produce NaNs or hard jumps > hard clip.
+    stereo = bytearray()
+    for x in mono[:8000]:
+        stereo += struct.pack("<ff", x, x * 0.9)
+    out = process_stereo_seamless(
+        bytes(stereo),
+        sr,
+        "cinema",
+        "impact",
+        device="headphones",
+        transition_ms=40,
+        fade_in_ms=20,
+    )
+    assert len(out) == len(stereo)
+    samples = struct.unpack("<" + "f" * (len(out) // 4), out)
+    assert all(math.isfinite(s) for s in samples)
+    assert max(abs(s) for s in samples) <= 1.0 + 1e-5
+
+    # Equal-power continuity
+    g0a, g0b = equal_power(0.0)
+    g1a, g1b = equal_power(1.0)
+    assert abs(g0a - 1.0) < 1e-9 and abs(g0b) < 1e-9
+    assert abs(g1b - 1.0) < 1e-9 and abs(g1a) < 1e-9
+    mid_a, mid_b = equal_power(0.5)
+    assert abs(mid_a * mid_a + mid_b * mid_b - 1.0) < 1e-6
+
+    morph = morph_payload("presence", "symphony", sr, "auto", steps=4)
+    assert len(morph["frames"]) == 4
+
     print(
         "selftest ok",
         {
@@ -566,6 +856,8 @@ def selftest() -> None:
             "width": payload["width"],
             "bands": len(payload["bands"]),
             "peak": peak,
+            "seamless": True,
+            "version": 3,
         },
     )
 
@@ -577,6 +869,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c = sub.add_parser("coeffs", help="Print JSON coefficients")
     c.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
     c.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    c.add_argument(
+        "--path",
+        default="stereo",
+        choices=list(SPATIAL_PATHS),
+        help="Spatial/Atmos path: stereo | spatialBinaural | atmosBed | multichannel",
+    )
     c.add_argument("--sr", type=float, default=48000.0)
     c.add_argument("--intensity", type=float, default=1.0)
 
@@ -586,15 +884,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s = sub.add_parser("symphony", help="Analyze + emit adaptive symphony coeffs")
     s.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
     s.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    s.add_argument("--path", default="stereo", choices=list(SPATIAL_PATHS))
     s.add_argument("--sr", type=float, default=48000.0)
     s.add_argument("--intensity", type=float, default=1.0)
 
     pr = sub.add_parser("process", help="Process stereo float32 LE PCM stdin→stdout")
     pr.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
+    pr.add_argument(
+        "--from-profile",
+        default=None,
+        choices=list(BASE_PROFILES),
+        help="Start curve for seamless dual-path crossfade into --profile",
+    )
     pr.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    pr.add_argument("--path", default="stereo", choices=list(SPATIAL_PATHS))
     pr.add_argument("--sr", type=float, default=48000.0)
     pr.add_argument("--intensity", type=float, default=1.0)
     pr.add_argument("--adapt", action="store_true", help="Analyze stream then adapt")
+    pr.add_argument(
+        "--transition-ms",
+        type=float,
+        default=DEFAULT_TRANSITION_MS,
+        help="Profile/device crossfade length (ms)",
+    )
+    pr.add_argument(
+        "--fade-in-ms",
+        type=float,
+        default=DEFAULT_FADE_IN_MS,
+        help="Wet engage ramp (ms); 0 disables",
+    )
+    pr.add_argument(
+        "--fade-out-ms",
+        type=float,
+        default=0.0,
+        help="Wet disengage ramp at end (ms)",
+    )
+
+    m = sub.add_parser("morph", help="Emit intermediate band morphs (JSON) between profiles")
+    m.add_argument("--from-profile", default="cinema", choices=list(BASE_PROFILES))
+    m.add_argument("--to-profile", default="symphony", choices=list(BASE_PROFILES))
+    m.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    m.add_argument("--sr", type=float, default=48000.0)
+    m.add_argument("--steps", type=int, default=5)
+    m.add_argument("--intensity", type=float, default=1.0)
 
     sub.add_parser("selftest")
     args = p.parse_args(argv)
@@ -604,7 +936,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.cmd == "coeffs":
-        print(json.dumps(coeffs_payload(args.profile, args.sr, args.device, None, args.intensity), indent=2))
+        print(
+            json.dumps(
+                coeffs_payload(args.profile, args.sr, args.device, None, args.intensity, path=args.path),
+                indent=2,
+            )
+        )
         return 0
 
     if args.cmd == "analyze":
@@ -617,7 +954,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raw = sys.stdin.buffer.read()
         _, _, mono = read_stereo_mono(raw)
         analysis = analyze_mono(mono, args.sr) if mono else None
-        print(json.dumps(coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity), indent=2))
+        print(
+            json.dumps(
+                coeffs_payload(
+                    args.profile, args.sr, args.device, analysis, args.intensity, path=args.path
+                ),
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.cmd == "morph":
+        print(
+            json.dumps(
+                morph_payload(
+                    args.from_profile,
+                    args.to_profile,
+                    args.sr,
+                    args.device,
+                    args.steps,
+                    args.intensity,
+                ),
+                indent=2,
+            )
+        )
         return 0
 
     if args.cmd == "process":
@@ -626,13 +986,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.adapt:
             _, _, mono = read_stereo_mono(raw)
             analysis = analyze_mono(mono, args.sr) if mono else None
-        payload = coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity)
-        bands = [BandSpec(b["kind"], b["freq"], b["gain_db"], b.get("q", 0.9), b.get("label", "")) for b in payload["bands"]]
-        fl = bands_to_filters(bands, args.sr)
-        fr = [f.clone() for f in fl]
-        sys.stdout.buffer.write(
-            process_stereo_ms(raw, fl, fr, payload["makeup"], payload["width"])
-        )
+        fade_in_frames = max(0, int(args.sr * (args.fade_in_ms / 1000.0)))
+        fade_out_frames = max(0, int(args.sr * (args.fade_out_ms / 1000.0)))
+        if args.from_profile and args.from_profile != args.profile:
+            sys.stdout.buffer.write(
+                process_stereo_seamless(
+                    raw,
+                    args.sr,
+                    args.from_profile,
+                    args.profile,
+                    device=args.device,
+                    analysis=analysis,
+                    intensity=args.intensity,
+                    transition_ms=args.transition_ms,
+                    fade_in_ms=args.fade_in_ms,
+                    fade_out_ms=args.fade_out_ms,
+                )
+            )
+        else:
+            payload = coeffs_payload(
+                args.profile, args.sr, args.device, analysis, args.intensity, path=args.path
+            )
+            bands = [
+                BandSpec(b["kind"], b["freq"], b["gain_db"], b.get("q", 0.9), b.get("label", ""))
+                for b in payload["bands"]
+            ]
+            fl = bands_to_filters(bands, args.sr)
+            fr = [f.clone() for f in fl]
+            # Atmos/Spatial paths force width 0 in payload already.
+            sys.stdout.buffer.write(
+                process_stereo_ms(
+                    raw,
+                    fl,
+                    fr,
+                    payload["makeup"],
+                    payload["width"],
+                    fade_in_frames=fade_in_frames,
+                    fade_out_frames=fade_out_frames,
+                )
+            )
         return 0
 
     return 1

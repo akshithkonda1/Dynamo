@@ -504,8 +504,8 @@ private struct ExpandedChecklistView: View {
             if reminders.items.isEmpty {
                 emptyStrip(
                     icon: "sparkles",
-                    title: "All clear",
-                    caption: "Add one below — it syncs to Reminders."
+                    title: "Inbox zero vibes",
+                    caption: "Type below to add one — it syncs straight to Reminders."
                 )
             } else {
                 ForEach(reminders.items) { item in
@@ -529,9 +529,9 @@ private struct ExpandedChecklistView: View {
             )
         } else if notes.items.isEmpty {
             emptyStrip(
-                icon: "note.text",
-                title: "No notes yet",
-                caption: "Add one below — it syncs to Apple Notes → Dynamo."
+                icon: "pencil.and.outline",
+                title: "Blank page energy",
+                caption: "Capture a thought below — lives in Apple Notes → Dynamo."
             )
         } else {
             ForEach(notes.items) { item in

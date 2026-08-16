@@ -12,8 +12,19 @@ All notable changes to Dynamo are documented here.
 - **Per-note spectral tuning** (sub, punch, presence, air, …)
 - **Device-aware symphony path**: wired headphones, wireless/BT, Mac speakers, external
 - Spatial / Atmos–safe: post-render EQ, same curve per channel, mid-side width on stereo
-- Profiles: **Symphony** (default adaptive) · Presence · Cinema · Impact
-- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs`, `process`)
+- Profiles: **Reference** (transparent) · **Symphony** (mild default) · Presence · Cinema · Impact (width only)
+- **Seamless transitions (v3):** equal-power dual-bank crossfade (~90 ms); wet engage / soft stop
+- **Full Dolby Atmos support:** device-stream tap; multi-ch layout; LFE/height/surround roles; Spatial path; stereo-mix fallback labeled
+- **Fidelity Tier A/B:** linked true-peak limiter (−1 dBTP); live adaptive analysis; quieter gains; headroom staging; mild device calibration; dry loudness match
+- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`reference`, `coeffs --path atmosBed`, …)
+
+
+### Performance & feel
+- Adaptive media poll (faster while playing, idle back-off)
+- Slower idle polls: notifications, calls, volume, Amplify sync, Notes, clipboard
+- Sports scoreboard poll speeds up only while games are live
+- Tray: reliable press scale (ButtonStyle), hover name previews, light haptics, bounce on select (macOS 14+)
+- Friendlier empty states across Calendar, Clipboard, Checklist, Media, Shelf, Focus
 
 ### Also in this line
 - World Clock distance / reverse / random sort

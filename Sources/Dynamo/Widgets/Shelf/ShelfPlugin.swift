@@ -145,10 +145,12 @@ private struct ExpandedShelfView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isDropTargeted ? NotchTheme.textPrimary : NotchTheme.textTertiary)
                     .scaleEffect(isDropTargeted ? 1.12 : 1.0)
-                Text(isDropTargeted ? "Drop to stash" : "Drop files here")
-                    .font(NotchTheme.caption)
+                Text(isDropTargeted ? "Drop to stash" : "Park files here")
+                    .font(NotchTheme.caption.weight(.medium))
                     .foregroundStyle(NotchTheme.textSecondary)
-                Text("Copies into Dynamo — originals can be deleted safely")
+                Text(isDropTargeted
+                    ? "Release to copy into Dynamo"
+                    : "Drag in, or click to pick — originals stay put")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }

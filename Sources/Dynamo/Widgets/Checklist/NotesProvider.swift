@@ -28,7 +28,8 @@ final class NotesProvider: ObservableObject {
 
     func start() {
         refresh()
-        let t = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
+        // Notes is user-driven; sparse background sync. Tab switch still refreshes.
+        let t = Timer(timeInterval: 45, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)
