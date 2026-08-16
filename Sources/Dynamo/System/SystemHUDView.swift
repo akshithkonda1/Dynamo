@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Compact volume / brightness meter shown over the notch tray.
@@ -19,37 +20,43 @@ struct SystemHUDView: View {
     }
 
     var body: some View {
-        HStack(spacing: NotchTheme.spaceMD) {
-            Image(systemName: iconName)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(NotchTheme.textPrimary)
-                .frame(width: 24)
+        VStack(spacing: 0) {
+            // Clear the camera housing on notched MacBooks.
+            Color.clear
+                .frame(height: NotchGeometry.peekContentTopInset(for: NSScreen.main))
 
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(NotchTheme.chipFill)
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.95), Color.white.opacity(0.75)],
-                                startPoint: .leading,
-                                endPoint: .trailing
+            HStack(spacing: NotchTheme.spaceMD) {
+                Image(systemName: iconName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .frame(width: 22)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(NotchTheme.chipFill)
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.95), Color.white.opacity(0.75)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .frame(width: max(displayMuted ? 0 : 6, geo.size.width * CGFloat(displayLevel)))
+                            .frame(width: max(displayMuted ? 0 : 6, geo.size.width * CGFloat(displayLevel)))
+                    }
                 }
-            }
-            .frame(height: 7)
+                .frame(height: 6)
 
-            Text(percentLabel)
-                .font(NotchTheme.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(NotchTheme.textPrimary)
-                .frame(width: 40, alignment: .trailing)
+                Text(percentLabel)
+                    .font(NotchTheme.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(NotchTheme.textPrimary)
+                    .frame(width: 40, alignment: .trailing)
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
         }
-        .padding(.horizontal, NotchTheme.spaceLG)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var iconName: String {

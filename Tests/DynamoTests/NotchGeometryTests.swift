@@ -30,8 +30,17 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertGreaterThan(peek.height, 0)
         XCTAssertGreaterThan(hud.width, 0)
         XCTAssertGreaterThan(hud.height, 0)
-        XCTAssertLessThanOrEqual(peek.width, 1650)
+        // Peeks flare modestly from the cutout — not banner-wide.
+        XCTAssertLessThanOrEqual(peek.width, 480)
         XCTAssertLessThanOrEqual(hud.width, peek.width + 1)
+        // Peek is taller than HUD (content row under camera band).
+        XCTAssertGreaterThanOrEqual(peek.height, hud.height)
+    }
+
+    func testPeekContentTopInsetFallsBackWithoutScreen() {
+        let inset = NotchGeometry.peekContentTopInset(for: nil)
+        XCTAssertGreaterThanOrEqual(inset, 8)
+        XCTAssertLessThanOrEqual(inset, 36)
     }
 
     func testCollapsedFallbackMetrics() {

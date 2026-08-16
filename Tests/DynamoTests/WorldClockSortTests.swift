@@ -91,7 +91,7 @@ final class WorldClockSortTests: XCTestCase {
         ]
         for mode in WorldClockSortMode.allCases {
             plugin.sortMode = mode
-            if mode == .random { plugin.randomSeed = 42 }
+            if mode == .random { plugin.setRandomSeedForTesting(42) }
             let ordered = plugin.activeEntries
             XCTAssertEqual(
                 ordered.first?.kind,

@@ -61,6 +61,11 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         didSet { UserDefaults.standard.set(String(randomSeed), forKey: Self.randomSeedKey) }
     }
 
+    /// Test / deterministic shuffle support — not exposed in the UI.
+    func setRandomSeedForTesting(_ seed: UInt64) {
+        randomSeed = seed == 0 ? 1 : seed
+    }
+
     /// Placename for “Current Location” when Core Location succeeds.
     @Published private(set) var locationPlaceName: String?
     @Published private(set) var locationStatusLine: String = "Using Mac time zone"

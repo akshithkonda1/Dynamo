@@ -153,10 +153,9 @@ private struct AmbientBatteryView: View {
     var lowPower: Bool = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: iconName)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(tint)
+        HStack(spacing: 5) {
+            // Mini fill glyph — reads at a glance in the collapsed notch.
+            AmbientBatteryGlyph(percent: snapshot.percent, tint: tint, charging: snapshot.isCharging)
             Text("\(snapshot.percent)%")
                 .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
@@ -183,14 +182,6 @@ private struct AmbientBatteryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var iconName: String {
-        if lowPower { return "leaf.fill" }
-        if snapshot.isCharging { return "bolt.fill" }
-        if snapshot.percent <= 15 { return "battery.0" }
-        if snapshot.percent <= 40 { return "battery.25" }
-        return "battery.50"
-    }
-
     private var tint: Color {
         if lowPower { return NotchTheme.caution }
         if snapshot.isCharging { return NotchTheme.positive }
@@ -200,9 +191,40 @@ private struct AmbientBatteryView: View {
     }
 }
 
+/// Compact battery shell with live fill — ambient only.
+private struct AmbientBatteryGlyph: View {
+    let percent: Int
+    let tint: Color
+    var charging: Bool = false
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+                    .frame(width: 14, height: 8)
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(tint)
+                    .frame(width: max(1.5, 10 * CGFloat(min(100, max(0, percent))) / 100), height: 4)
+                    .padding(.leading, 2)
+            }
+            Capsule()
+                .fill(tint.opacity(0.55))
+                .frame(width: 1.5, height: 4)
+            if charging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(tint)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Expanded
-// Compact peer-height layout. Metrics from this Mac’s battery firmware +
-// ProcessInfo. Local drain history is secondary; nothing invents capacity.
+// Compact peer-height layout for the expanded island (hangs below the notch).
+// Metrics from this Mac’s battery firmware + ProcessInfo. Local drain history
+// is secondary; nothing invents capacity.
 
 private struct ExpandedBatteryView: View {
     @ObservedObject var plugin: BatteryPlugin
@@ -223,9 +245,16 @@ private struct ExpandedBatteryView: View {
                 "Battery",
                 trailing: snapshot.isPresent
                     ? AnyView(
-                        Text(headerHealthLabel)
-                            .font(NotchTheme.micro.weight(.semibold))
-                            .foregroundStyle(healthColor)
+                        HStack(spacing: 6) {
+                            if power.isLowPowerModeEnabled {
+                                NotchStatusChip(text: "Low Power", kind: .soon)
+                            } else if snapshot.isCharging {
+                                NotchStatusChip(text: "Charging", kind: .success)
+                            }
+                            Text(headerHealthLabel)
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(healthColor)
+                        }
                     )
                     : nil
             )
@@ -238,32 +267,54 @@ private struct ExpandedBatteryView: View {
                     prominent: true
                 )
             } else {
-                // Charge + status — live battery values from this Mac
+                // Hero: glyph + % + status + fill bar
                 NotchCard(compact: true) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: NotchTheme.spaceSM) {
-                            Text("\(snapshot.percent)%")
-                                .font(NotchTheme.heroDigit.monospacedDigit())
-                                .foregroundStyle(barColor)
-                            VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .center, spacing: 12) {
+                            BatteryHeroGlyph(
+                                percent: snapshot.percent,
+                                tint: barColor,
+                                charging: snapshot.isCharging
+                            )
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text("\(snapshot.percent)%")
+                                        .font(NotchTheme.heroDigit.monospacedDigit())
+                                        .foregroundStyle(barColor)
+                                    if snapshot.isCharging {
+                                        Image(systemName: "bolt.fill")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(NotchTheme.positive)
+                                            .offset(y: -2)
+                                    }
+                                }
                                 Text(statusLabel)
                                     .font(NotchTheme.body)
                                     .foregroundStyle(NotchTheme.textSecondary)
+                                    .lineLimit(1)
                                 if let minutes = displayMinutes {
                                     Text(timeLabel(minutes))
                                         .font(NotchTheme.caption)
                                         .foregroundStyle(NotchTheme.textTertiary)
+                                        .lineLimit(1)
                                 }
                             }
+
                             Spacer(minLength: 0)
+
                             if let hw = hardwareHealth {
-                                VStack(alignment: .trailing, spacing: 1) {
+                                VStack(alignment: .trailing, spacing: 2) {
                                     Text("Health")
                                         .font(.system(size: 9, weight: .semibold))
                                         .foregroundStyle(NotchTheme.textQuaternary)
                                     Text("\(hw)%")
                                         .font(NotchTheme.body.weight(.semibold).monospacedDigit())
                                         .foregroundStyle(healthColor)
+                                    Text(BatteryHealthModel.healthLabel(for: hw))
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textQuaternary)
+                                        .lineLimit(1)
                                 }
                             }
                         }
@@ -272,34 +323,63 @@ private struct ExpandedBatteryView: View {
                             ZStack(alignment: .leading) {
                                 Capsule().fill(NotchTheme.chipFill)
                                 Capsule()
-                                    .fill(barColor)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [barColor, barColor.opacity(0.72)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
                                     .frame(width: max(8, geo.size.width * CGFloat(snapshot.percent) / 100))
                             }
                         }
-                        .frame(height: 6)
+                        .frame(height: 5)
+                    }
+                }
 
-                        // Read-only system metrics row
-                        HStack(spacing: 12) {
-                            if let cycles = snapshot.cycleCount {
-                                metricChip("Cycles", "\(cycles)")
-                            }
-                            if let maxC = snapshot.maxCapacity, let design = snapshot.designCapacity, design > 0 {
-                                metricChip("Capacity", "\(maxC)/\(design)")
-                            } else if let maxC = snapshot.maxCapacity {
-                                metricChip("Max cap", "\(maxC)")
-                            }
-                            if let temp = snapshot.temperatureC {
-                                metricChip("Temp", String(format: "%.0f°C", temp))
-                            }
-                            if let drain = insight.drainPercentPerHour {
-                                metricChip("Drain", String(format: "%.1f%%/h", drain))
-                            }
-                            Spacer(minLength: 0)
+                // Metrics 2×2 — scannable vitals without a long chip row
+                if hasAnyMetric {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8)
+                        ],
+                        spacing: 6
+                    ) {
+                        if let cycles = snapshot.cycleCount {
+                            metricCell(title: "Cycles", value: "\(cycles)", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        if let maxC = snapshot.maxCapacity, let design = snapshot.designCapacity, design > 0 {
+                            metricCell(title: "Capacity", value: "\(maxC)/\(design)", systemImage: "rectangle.stack")
+                        } else if let maxC = snapshot.maxCapacity {
+                            metricCell(title: "Max cap", value: "\(maxC)", systemImage: "rectangle.stack")
+                        }
+                        if let temp = snapshot.temperatureC {
+                            metricCell(
+                                title: "Temp",
+                                value: String(format: "%.0f°C", temp),
+                                systemImage: "thermometer.medium",
+                                accent: temp > 45 ? NotchTheme.caution : nil
+                            )
+                        }
+                        if let drain = insight.drainPercentPerHour, !snapshot.isCharging {
+                            metricCell(
+                                title: "Drain",
+                                value: String(format: "%.1f%%/h", drain),
+                                systemImage: "arrow.down.right",
+                                accent: drain > 18 ? NotchTheme.caution : nil
+                            )
+                        } else if snapshot.isCharging, let toFull = insight.predictedToFullMinutes {
+                            metricCell(
+                                title: "To full",
+                                value: shortDuration(toFull),
+                                systemImage: "bolt.badge.clock"
+                            )
                         }
                     }
                 }
 
-                // Power modes — Low / Auto / High (writes on explicit tap)
+                // Power modes — Low / Auto / High
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Power Mode")
                         .font(NotchTheme.micro.weight(.semibold))
@@ -357,16 +437,34 @@ private struct ExpandedBatteryView: View {
                     }
                 }
 
-                Text(footerNote)
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .lineLimit(2)
+                // Contextual tip — only when actionable
+                if let tip = compactTip {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(NotchTheme.caution.opacity(0.85))
+                            .padding(.top, 1)
+                        Text(tip)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             power.refresh()
         }
+    }
+
+    private var hasAnyMetric: Bool {
+        snapshot.cycleCount != nil
+            || snapshot.maxCapacity != nil
+            || snapshot.temperatureC != nil
+            || insight.drainPercentPerHour != nil
+            || (snapshot.isCharging && insight.predictedToFullMinutes != nil)
     }
 
     private var availableModes: [DynamoPowerMode] {
@@ -376,15 +474,40 @@ private struct ExpandedBatteryView: View {
         return [.low, .automatic]
     }
 
-    private func metricChip(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
-            Text(value)
-                .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                .foregroundStyle(NotchTheme.textSecondary)
+    private func metricCell(
+        title: String,
+        value: String,
+        systemImage: String,
+        accent: Color? = nil
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(accent ?? NotchTheme.textQuaternary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+                Text(value)
+                    .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(accent ?? NotchTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(NotchTheme.chipFill.opacity(0.65))
+        )
+    }
+
+    private func shortDuration(_ minutes: Int) -> String {
+        let h = minutes / 60
+        let m = minutes % 60
+        return h > 0 ? "~\(h)h \(m)m" : "~\(m)m"
     }
 
     /// Prefer macOS time remaining; fall back to local rate estimate.
@@ -426,11 +549,6 @@ private struct ExpandedBatteryView: View {
         return "System"
     }
 
-    private var footerNote: String {
-        if let tip = compactTip { return tip }
-        return "Power modes update this Mac’s energy profile. Settings open if a change is blocked."
-    }
-
     private var compactTip: String? {
         if snapshot.percent <= 20, !power.isLowPowerModeEnabled, !snapshot.isCharging {
             return "Enable Low Power Mode to stretch remaining charge."
@@ -440,6 +558,9 @@ private struct ExpandedBatteryView: View {
         }
         if let hw = hardwareHealth, hw < 80 {
             return "Capacity reduced — keep charge between ~20–80% when you can."
+        }
+        if let temp = snapshot.temperatureC, temp > 45 {
+            return "Battery is warm — ease load or unplug once charged."
         }
         return nil
     }
@@ -458,5 +579,52 @@ private struct ExpandedBatteryView: View {
         if s >= 70 { return NotchTheme.caution }
         if hardwareHealth == nil, insight.healthScore == 0 { return NotchTheme.textTertiary }
         return NotchTheme.negative
+    }
+}
+
+// MARK: - Hero battery glyph
+
+/// Larger battery shell with live fill for the expanded card.
+private struct BatteryHeroGlyph: View {
+    let percent: Int
+    let tint: Color
+    var charging: Bool = false
+
+    var body: some View {
+        ZStack {
+            // Body
+            HStack(spacing: 2) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(tint.opacity(0.45), lineWidth: 1.5)
+                        .frame(width: 36, height: 20)
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [tint, tint.opacity(0.75)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(
+                            width: max(3, 28 * CGFloat(min(100, max(0, percent))) / 100),
+                            height: 12
+                        )
+                        .padding(.leading, 4)
+                }
+                // Terminal nub
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(tint.opacity(0.45))
+                    .frame(width: 3, height: 8)
+            }
+            if charging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.black.opacity(0.55))
+                    .offset(x: -2)
+            }
+        }
+        .frame(width: 44, height: 28)
+        .accessibilityHidden(true)
     }
 }
