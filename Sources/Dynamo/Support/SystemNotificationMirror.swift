@@ -182,10 +182,11 @@ final class SystemNotificationMirror: ObservableObject {
             }
 
             let urgency = urgency(for: kind)
-            // Contact photo (or notification attachment) — Peek chrome tints to its palette.
+            // Message Peeks: contact photo drives island tint (primary path).
             let artwork = resolveArtwork(
                 kind: kind,
                 title: peekTitle,
+                subtitle: peekSubtitle,
                 note: note
             )
             DynamoNotificationAPI.post(
@@ -219,19 +220,29 @@ final class SystemNotificationMirror: ObservableObject {
         }
     }
 
-    /// Prefer notification attachment image; else Contacts thumbnail for call/text titles.
-    private func resolveArtwork(kind: NotificationKind, title: String, note: ParsedNote) -> Data? {
+    /// Artwork for Peek chrome. **Message peeks** always try contact photo tinting.
+    private func resolveArtwork(
+        kind: NotificationKind,
+        title: String,
+        subtitle: String,
+        note: ParsedNote
+    ) -> Data? {
+        // 1) Image embedded in the notification payload (when present).
         if let embedded = note.imageData, !embedded.isEmpty, NSImage(data: embedded) != nil {
             return embedded
         }
+
         switch kind {
-        case .call, .text:
+        case .text:
+            // Messages / iMessage / SMS / messengers — resolve contact photo aggressively
+            // so the Peek wash/ring/lip match the contact photo colors.
+            return ContactPhotoResolver.imageDataForMessage(title: title, body: subtitle)
+                ?? ContactPhotoResolver.imageDataForMessage(title: title, body: note.body)
+        case .call:
+            // Incoming call name → same photo when available.
             return ContactPhotoResolver.imageData(matchingName: title)
+                ?? ContactPhotoResolver.imageDataForMessage(title: title, body: subtitle)
         case .mail, .general:
-            // Try contact match on mail sender names too when it looks like a person.
-            if title.split(separator: " ").count <= 4 {
-                return ContactPhotoResolver.imageData(matchingName: title)
-            }
             return nil
         }
     }

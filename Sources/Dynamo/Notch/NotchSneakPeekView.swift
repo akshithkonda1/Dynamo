@@ -25,22 +25,34 @@ struct NotchSneakPeekView: View {
         return CoverArtPalette.extract(from: data)
     }
 
-    /// Contact-style peeks (calls/texts) prefer a circular crop for the photo.
-    private var isContactStyle: Bool {
+    /// Message peeks get circular contact photo + photo-driven chrome.
+    private var isMessagePeek: Bool {
         let d = peek.detail.lowercased()
-        return d.hasPrefix("call") || d.hasPrefix("text") || d.hasPrefix("mail")
-            || peek.systemImage.contains("phone")
+        return d.hasPrefix("text")
             || peek.systemImage.contains("message")
+            || peek.systemImage == "message.fill"
+    }
+
+    /// Contact-style crop for messages (and calls when a photo is present).
+    private var isContactStyle: Bool {
+        if isMessagePeek { return true }
+        let d = peek.detail.lowercased()
+        return d.hasPrefix("call")
+            || peek.systemImage.contains("phone")
             || peek.systemImage.contains("person")
     }
 
     private var accentColor: Color {
-        // Contact / artwork color wins so the island matches the photo.
+        // Message peeks (and any peek with a contact photo): match the photo.
         if let p = photoPalette {
             return p.primary.color
         }
         if isMedia {
             return mediaPulse.palette.primary.color
+        }
+        // Message without photo yet — soft blue, not generic orange urgency.
+        if isMessagePeek {
+            return Color(red: 0.25, green: 0.78, blue: 0.55)
         }
         if isCritical { return NotchTheme.caution }
         if isUrgent { return NotchTheme.caution.opacity(0.95) }

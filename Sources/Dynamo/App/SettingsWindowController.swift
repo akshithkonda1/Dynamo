@@ -248,11 +248,14 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Button("Send test text Peek") {
-                // Prefer a real contact photo so chrome tints match the photo.
-                let name = "Alex"
-                let art = ContactPhotoResolver.imageData(matchingName: name)
-                    ?? ContactPhotoResolver.imageData(matchingName: NSFullUserName())
+            Button("Send test message Peek") {
+                // Uses Contacts so the island tints to the contact photo colors.
+                let me = NSFullUserName()
+                let name = me.isEmpty ? "Alex" : me
+                let art = ContactPhotoResolver.imageDataForMessage(
+                    title: name,
+                    body: "On my way — 5 min"
+                ) ?? ContactPhotoResolver.imageData(matchingName: name)
                 DynamoNotificationAPI.post(
                     title: name,
                     subtitle: "On my way — 5 min",
@@ -265,6 +268,9 @@ struct SettingsView: View {
                 )
             }
             .controlSize(.small)
+            Text("Message Peeks tint from the contact photo (allow Contacts).")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             Divider()
 
