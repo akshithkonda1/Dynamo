@@ -154,10 +154,16 @@ final class MediaAmplifyController: ObservableObject {
         startEngine(reason: "source")
     }
 
-    func reapplyForTrack(title: String, artist: String) {
-        // Local EQ is continuous — no per-track re-script needed.
-        _ = title
-        _ = artist
+    func reapplyForTrack(title: String, artist: String, album: String = "") {
+        // Detect Dolby Atmos / Spatial badges in metadata and retune path in-engine.
+        let immersive = AmplifySpatialPath.contentLooksImmersive(
+            title: title, artist: artist, album: album
+        )
+        lastContentImmersiveHint = immersive
+        if #available(macOS 14.2, *) {
+            LocalAmplifyEngine.shared.setContentImmersiveHint(immersive)
+            if isEnabled { syncFromEngine() }
+        }
     }
 
     func toggle() {
@@ -215,7 +221,8 @@ final class MediaAmplifyController: ObservableObject {
                 LocalAmplifyEngine.shared.start(
                     profile: self.profile,
                     device: device,
-                    preferredBundleID: bundle
+                    preferredBundleID: bundle,
+                    contentImmersiveHint: self.lastContentImmersiveHint
                 )
                 self.syncFromEngine()
                 self.startPolling()
@@ -225,6 +232,8 @@ final class MediaAmplifyController: ObservableObject {
             }
         }
     }
+
+    private var lastContentImmersiveHint = false
 
     private static func guessPlayerBundleID() -> String? {
         let apps = NSWorkspace.shared.runningApplications
@@ -269,7 +278,17 @@ final class MediaAmplifyController: ObservableObject {
         let engine = LocalAmplifyEngine.shared
         if engine.isRunning {
             statusLine = engine.statusLine
-            activePresetName = "Local EQ"
+            // Prefer Atmos/Spatial-aware label when path is immersive.
+            switch engine.spatialPath {
+            case .atmosBed:
+                activePresetName = "Atmos EQ"
+            case .spatialBinaural:
+                activePresetName = "Spatial EQ"
+            case .multichannel:
+                activePresetName = "Surround EQ"
+            case .stereo:
+                activePresetName = "Local EQ"
+            }
             lastError = engine.lastError
         } else if isEnabled {
             statusLine = engine.statusLine

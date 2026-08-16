@@ -312,7 +312,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            Text("DynamoEQ (local): (1) amplify by media type/quality, (2) tune each spectral “note” region, (3) device-aware symphony path for headphones, wireless, Mac speakers, or external. Spatial/Atmos-safe post-render EQ. No cloud APIs. macOS 14.2+.")
+            Text("DynamoEQ (local): (1) amplify by media type/quality, (2) tune each spectral “note” region, (3) device-aware symphony path. Full Dolby Atmos support — multi-channel device-stream tap when available, LFE-safe EQ, Spatial binaural path that never mid-side folds the image. No cloud APIs. macOS 14.2+.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

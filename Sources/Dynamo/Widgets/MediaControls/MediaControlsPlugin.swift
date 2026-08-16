@@ -653,7 +653,11 @@ private struct ExpandedMediaView: View {
             amplify.reapplyForSource()
         }
         .onChange(of: plugin.info.title) { _ in
-            amplify.reapplyForTrack(title: plugin.info.title, artist: plugin.info.artist)
+            amplify.reapplyForTrack(
+                title: plugin.info.title,
+                artist: plugin.info.artist,
+                album: plugin.info.album
+            )
         }
     }
 

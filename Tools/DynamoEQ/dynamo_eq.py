@@ -365,14 +365,20 @@ def _apply_bias(bands: List[BandSpec], bias: Dict[str, float], scale: float = 1.
             b.gain_db = max(-8.0, min(7.0, b.gain_db + bias[key] * scale))
 
 
+# Spatial / Atmos path keys (match AmplifySpatialPath.rawValue in Swift)
+SPATIAL_PATHS = ("stereo", "spatialBinaural", "atmosBed", "multichannel")
+
+
 def build_adaptive_bands(
     profile: str,
     device: str,
     analysis: Optional[MediaAnalysis],
     intensity: float = 1.0,
+    path: str = "stereo",
 ) -> Tuple[List[BandSpec], float, dict]:
     """
-    Combine intent profile + device symphony voicing + media/note evaluation.
+    Combine intent profile + device symphony voicing + media/note evaluation +
+    Spatial/Atmos path voicing.
     Returns bands, makeup_linear, report.
     """
     base_key = profile.lower() if profile.lower() in BASE_PROFILES else "symphony"
@@ -383,6 +389,7 @@ def build_adaptive_bands(
     device = (device or "auto").lower()
     if device not in DEVICE_BIAS:
         device = "auto"
+    path = path if path in SPATIAL_PATHS else "stereo"
 
     _apply_bias(bands, DEVICE_BIAS.get(device, {}), intensity)
 
@@ -429,18 +436,69 @@ def build_adaptive_bands(
             makeup_db = 0.7 * intensity
         if analysis.media_type == "speech":
             makeup_db = 0.35 * intensity
+
+    # Path voicing — full Dolby Atmos / Spatial support (no mono fold, no MS on beds)
+    if path in ("atmosBed", "multichannel", "spatialBinaural"):
+        width = 0.0
+    if path == "atmosBed":
+        makeup_db = min(makeup_db, 0.35 * intensity)
+        for b in bands:
+            if b.label in ("air", "brilliance", "sheen"):
+                b.gain_db *= 0.55
+            elif b.label == "presence":
+                b.gain_db *= 0.75
+            elif b.label in ("sub", "punch"):
+                b.gain_db *= 0.9
+            b.gain_db = max(-8.0, min(7.0, b.gain_db))
+    elif path == "multichannel":
+        makeup_db = min(makeup_db, 0.4 * intensity)
+        for b in bands:
+            if b.label in ("air", "brilliance"):
+                b.gain_db *= 0.7
+            b.gain_db = max(-8.0, min(7.0, b.gain_db))
+    elif path == "spatialBinaural":
+        makeup_db = min(makeup_db, 0.4 * intensity)
+        for b in bands:
+            if b.label in ("air", "brilliance", "sheen"):
+                b.gain_db *= 0.5
+            elif b.label == "presence":
+                b.gain_db *= 0.85
+            b.gain_db = max(-8.0, min(7.0, b.gain_db))
+
     makeup = 10 ** (makeup_db / 20.0)
 
     report = {
         "profile": base_key,
         "device": device,
+        "path": path,
         "media_type": media_type,
         "quality": quality,
         "width": width,
         "intensity": intensity,
         "makeup_db": round(makeup_db, 2),
+        "atmos_safe": path in ("atmosBed", "multichannel", "spatialBinaural"),
+        "mid_side": width > 0.001,
     }
     return bands, makeup, report
+
+
+def lfe_bands(bands: Sequence[BandSpec]) -> List[BandSpec]:
+    """Sub/lowshelf-only set for LFE channels in Atmos/surround beds."""
+    out: List[BandSpec] = []
+    for b in bands:
+        if b.kind == "lowshelf" or b.freq <= 150:
+            out.append(
+                BandSpec(
+                    b.kind if b.kind == "lowshelf" else "peak",
+                    min(b.freq, 120.0) if b.kind != "lowshelf" else b.freq,
+                    b.gain_db * (0.85 if b.kind == "lowshelf" else 0.7),
+                    b.q,
+                    b.label,
+                )
+            )
+    if not out:
+        out = [BandSpec("lowshelf", 80, 0.0, 0.7, "sub")]
+    return out
 
 
 def bands_to_filters(bands: Sequence[BandSpec], sr: float) -> List[Biquad]:
@@ -673,29 +731,39 @@ def coeffs_payload(
     device: str = "auto",
     analysis: Optional[MediaAnalysis] = None,
     intensity: float = 1.0,
+    path: str = "stereo",
 ) -> dict:
-    bands, makeup, report = build_adaptive_bands(profile, device, analysis, intensity)
+    bands, makeup, report = build_adaptive_bands(profile, device, analysis, intensity, path=path)
     filters = bands_to_filters(bands, sample_rate)
+    lfe = bands_to_filters(lfe_bands(bands), sample_rate)
     return {
         "engine": "DynamoEQ",
         "version": 3,
         "symphony": True,
         "spatial_safe": True,
+        "atmos_ready": True,
         "seamless": True,
         "transition_ms": DEFAULT_TRANSITION_MS,
         "fade_in_ms": DEFAULT_FADE_IN_MS,
         "fade_out_ms": DEFAULT_FADE_OUT_MS,
         "profile": report["profile"],
         "device": report["device"],
+        "path": report["path"],
         "media_type": report["media_type"],
         "quality": report["quality"],
         "sampleRate": sample_rate,
         "makeup": makeup,
         "width": report["width"],
         "intensity": intensity,
+        "mid_side": report["mid_side"],
+        "atmos_safe": report["atmos_safe"],
         "bands": [asdict(b) for b in bands],
+        "lfe_bands": [asdict(b) for b in lfe_bands(bands)],
         "biquads": [
             {"b0": f.b0, "b1": f.b1, "b2": f.b2, "a1": f.a1, "a2": f.a2} for f in filters
+        ],
+        "lfe_biquads": [
+            {"b0": f.b0, "b1": f.b1, "b2": f.b2, "a1": f.a1, "a2": f.a2} for f in lfe
         ],
         "analysis": asdict(analysis) if analysis else None,
     }
@@ -730,11 +798,16 @@ def selftest() -> None:
         )
     a = analyze_mono(mono, sr)
     assert a.media_type in BASE_PROFILES or a.media_type in MEDIA_BIAS
-    payload = coeffs_payload("symphony", sr, "headphones", a, 1.0)
+    payload = coeffs_payload("symphony", sr, "headphones", a, 1.0, path="stereo")
     assert payload["width"] > 0
     assert payload["version"] == 3
     assert payload["seamless"] is True
+    assert payload["atmos_ready"] is True
     assert len(payload["biquads"]) >= 5
+    atmos = coeffs_payload("symphony", sr, "external", a, 1.0, path="atmosBed")
+    assert atmos["width"] == 0
+    assert atmos["atmos_safe"] is True
+    assert len(atmos["lfe_biquads"]) >= 1
     # Process should not explode
     filters = bands_to_filters(
         [BandSpec(**{k: b[k] for k in ("kind", "freq", "gain_db", "q", "label") if k in b}) for b in payload["bands"]],
@@ -796,6 +869,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c = sub.add_parser("coeffs", help="Print JSON coefficients")
     c.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
     c.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    c.add_argument(
+        "--path",
+        default="stereo",
+        choices=list(SPATIAL_PATHS),
+        help="Spatial/Atmos path: stereo | spatialBinaural | atmosBed | multichannel",
+    )
     c.add_argument("--sr", type=float, default=48000.0)
     c.add_argument("--intensity", type=float, default=1.0)
 
@@ -805,6 +884,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s = sub.add_parser("symphony", help="Analyze + emit adaptive symphony coeffs")
     s.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
     s.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    s.add_argument("--path", default="stereo", choices=list(SPATIAL_PATHS))
     s.add_argument("--sr", type=float, default=48000.0)
     s.add_argument("--intensity", type=float, default=1.0)
 
@@ -817,6 +897,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Start curve for seamless dual-path crossfade into --profile",
     )
     pr.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    pr.add_argument("--path", default="stereo", choices=list(SPATIAL_PATHS))
     pr.add_argument("--sr", type=float, default=48000.0)
     pr.add_argument("--intensity", type=float, default=1.0)
     pr.add_argument("--adapt", action="store_true", help="Analyze stream then adapt")
@@ -855,7 +936,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.cmd == "coeffs":
-        print(json.dumps(coeffs_payload(args.profile, args.sr, args.device, None, args.intensity), indent=2))
+        print(
+            json.dumps(
+                coeffs_payload(args.profile, args.sr, args.device, None, args.intensity, path=args.path),
+                indent=2,
+            )
+        )
         return 0
 
     if args.cmd == "analyze":
@@ -868,7 +954,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raw = sys.stdin.buffer.read()
         _, _, mono = read_stereo_mono(raw)
         analysis = analyze_mono(mono, args.sr) if mono else None
-        print(json.dumps(coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity), indent=2))
+        print(
+            json.dumps(
+                coeffs_payload(
+                    args.profile, args.sr, args.device, analysis, args.intensity, path=args.path
+                ),
+                indent=2,
+            )
+        )
         return 0
 
     if args.cmd == "morph":
@@ -911,13 +1004,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
             )
         else:
-            payload = coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity)
+            payload = coeffs_payload(
+                args.profile, args.sr, args.device, analysis, args.intensity, path=args.path
+            )
             bands = [
                 BandSpec(b["kind"], b["freq"], b["gain_db"], b.get("q", 0.9), b.get("label", ""))
                 for b in payload["bands"]
             ]
             fl = bands_to_filters(bands, args.sr)
             fr = [f.clone() for f in fl]
+            # Atmos/Spatial paths force width 0 in payload already.
             sys.stdout.buffer.write(
                 process_stereo_ms(
                     raw,

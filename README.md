@@ -75,13 +75,15 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 | **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v3 — pure Python 3 stdlib |
 | **Profiles** | **Symphony** (adaptive default) · Presence · Cinema · Impact |
 | **Seamless** | Equal-power dual-bank crossfade (~90 ms) on profile/device; wet engage (~120 ms) / soft stop (~80 ms) |
-| **Spatial / Atmos** | Post-render EQ; same curve per channel; no mono fold |
-| **UI** | Green = on · red = off; device picker in Preferences → Feel & alerts |
+| **Dolby Atmos** | Device-stream tap (no mixdown) when possible; multi-ch beds keep layout; LFE = sub-only EQ; mid-side off |
+| **Spatial Audio** | Binaural path (post-render); preserves elevation HF cues; never re-spatializes with MS |
+| **UI** | Green = on · red = off; status shows Stereo / Spatial / Dolby Atmos / Surround; device picker in Feel & alerts |
 
 ```bash
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
 python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000
-python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --sr 48000 < stereo.f32le
+python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device external --path atmosBed --sr 48000
+python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --path spatialBinaural --sr 48000 < stereo.f32le
 # Seamless offline morph cinema → symphony with engage ramp:
 python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symphony \
   --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le

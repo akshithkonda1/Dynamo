@@ -109,14 +109,26 @@ class TestSymphonyCoeffs(unittest.TestCase):
         self.assertEqual(payload["engine"], "DynamoEQ")
         self.assertEqual(payload["version"], 3)
         self.assertTrue(payload["spatial_safe"])
+        self.assertTrue(payload["atmos_ready"])
         self.assertTrue(payload["seamless"])
         self.assertIn("transition_ms", payload)
         self.assertIn("biquads", payload)
+        self.assertIn("lfe_biquads", payload)
         self.assertGreaterEqual(len(payload["biquads"]), 5)
         self.assertGreater(payload["width"], 0)
         for b in payload["biquads"]:
             for k in ("b0", "b1", "b2", "a1", "a2"):
                 self.assertIn(k, b)
+
+    def test_atmos_path_disables_midside(self):
+        stereo = eq.coeffs_payload("symphony", 48000, "headphones", None, 1.0, path="stereo")
+        atmos = eq.coeffs_payload("symphony", 48000, "external", None, 1.0, path="atmosBed")
+        spatial = eq.coeffs_payload("symphony", 48000, "wireless", None, 1.0, path="spatialBinaural")
+        self.assertGreater(stereo["width"], 0)
+        self.assertEqual(atmos["width"], 0)
+        self.assertEqual(spatial["width"], 0)
+        self.assertTrue(atmos["atmos_safe"])
+        self.assertGreaterEqual(len(atmos["lfe_biquads"]), 1)
 
     def test_adaptive_with_analysis(self):
         mono = _tone(110) + _tone(2000, amp=0.05)

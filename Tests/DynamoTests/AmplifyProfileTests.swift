@@ -85,4 +85,55 @@ final class AmplifyDeviceTests: XCTestCase {
             }
         }
     }
+
+    func testAtmosPathZeroesWidthAndHasLFE() {
+        for profile in MediaAmplifyProfile.allCases {
+            let atmos = DynamoEQCurves.curve(
+                for: profile, device: .external, sampleRate: 48_000, path: .atmosBed
+            )
+            XCTAssertEqual(atmos.width, 0, "\(profile)")
+            XCTAssertFalse(atmos.lfeFilters.isEmpty, "\(profile)")
+            let spatial = DynamoEQCurves.curve(
+                for: profile, device: .wireless, sampleRate: 48_000, path: .spatialBinaural
+            )
+            XCTAssertEqual(spatial.width, 0, "\(profile)")
+        }
+    }
+}
+
+final class AmplifySpatialPathTests: XCTestCase {
+    func testDetectAtmosBedFromChannelCount() {
+        let p = AmplifySpatialPath.detect(
+            channels: 8, sampleRate: 48_000, contentImmersiveHint: true, deviceRaw: "external"
+        )
+        XCTAssertEqual(p, .atmosBed)
+        XCTAssertTrue(p.usesLFERole)
+        XCTAssertFalse(p.allowsMidSide)
+    }
+
+    func testDetectMultichannelWithoutHint() {
+        let p = AmplifySpatialPath.detect(
+            channels: 6, sampleRate: 48_000, contentImmersiveHint: false, deviceRaw: "external"
+        )
+        XCTAssertEqual(p, .multichannel)
+    }
+
+    func testContentLooksImmersive() {
+        XCTAssertTrue(AmplifySpatialPath.contentLooksImmersive(
+            title: "Song", artist: "Artist", album: "Album (Dolby Atmos)"
+        ))
+        XCTAssertTrue(AmplifySpatialPath.contentLooksImmersive(
+            title: "Track · Spatial Audio", artist: "", album: ""
+        ))
+        XCTAssertFalse(AmplifySpatialPath.contentLooksImmersive(
+            title: "Plain Song", artist: "Band", album: "LP"
+        ))
+    }
+
+    func testLFEChannelIndex() {
+        XCTAssertTrue(AmplifySpatialPath.isLFEChannel(3, total: 6))
+        XCTAssertTrue(AmplifySpatialPath.isLFEChannel(3, total: 8))
+        XCTAssertFalse(AmplifySpatialPath.isLFEChannel(0, total: 6))
+        XCTAssertFalse(AmplifySpatialPath.isLFEChannel(3, total: 2))
+    }
 }
