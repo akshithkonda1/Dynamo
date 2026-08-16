@@ -2,11 +2,13 @@ import AppKit
 import AVFoundation
 import Foundation
 
-/// Dolby-like **intent** profiles — reshape how music *hits*, not the volume fader.
+/// Intent profiles for local Symphony EQ — fidelity-first by default options.
 ///
-/// Curves designed by `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs)
-/// and applied in real time by `LocalAmplifyEngine` (process tap + multi-band EQ).
+/// Curves from `Tools/DynamoEQ/dynamo_eq.py` + `LocalAmplifyEngine` (process tap EQ).
+/// **Reference** = transparent; **Symphony** = mild musical; Impact alone may widen stereo.
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
+    /// Transparent high-fidelity: tiny tilt, no mid-side, linked true-peak only.
+    case reference
     case symphony
     case presence
     case cinema
@@ -16,6 +18,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .reference: return "Reference"
         case .symphony: return "Symphony"
         case .presence: return "Presence"
         case .cinema: return "Cinema"
@@ -25,21 +28,26 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .symphony: return "Adaptive concert-hall path — seamless media + device morph"
-        case .presence: return "Dialogue clarity & air — soft-crossfade local EQ"
-        case .cinema: return "Loudness contour + soft mid scoop — click-free switch"
-        case .impact: return "Bass body & punch — local EQ, seamless engage"
+        case .reference: return "Max fidelity — minimal EQ, Atmos/Spatial safe, no width"
+        case .symphony: return "Mild concert contour — live adaptive + seamless morph"
+        case .presence: return "Dialogue clarity — soft air, no stereo width"
+        case .cinema: return "Soft loudness contour — mid scoop, fidelity-capped gains"
+        case .impact: return "Bass body & punch — only profile that may widen stereo"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .reference: return "waveform.badge.magnifyingglass"
         case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
         case .impact: return "waveform.path.ecg"
         }
     }
+
+    /// Mid-side stage allowed only for Impact on pure stereo.
+    var allowsStereoWidth: Bool { self == .impact }
 
     static func resolved(fromStored raw: String?) -> MediaAmplifyProfile {
         guard let raw else { return .symphony }
@@ -48,6 +56,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
         case "crisp": return .presence
         case "balanced": return .cinema
         case "visceral": return .impact
+        case "transparent", "hi-fi", "hifi": return .reference
         default: return .symphony
         }
     }
@@ -154,14 +163,29 @@ final class MediaAmplifyController: ObservableObject {
         startEngine(reason: "source")
     }
 
-    func reapplyForTrack(title: String, artist: String, album: String = "") {
-        // Detect Dolby Atmos / Spatial badges in metadata and retune path in-engine.
+    func reapplyForTrack(
+        title: String,
+        artist: String,
+        album: String = "",
+        genre: String? = nil,
+        playlist: String? = nil,
+        sourceApp: MediaPlayerApp? = nil
+    ) {
+        // Combine metadata + source app for immersive detection (Tier B).
         let immersive = AmplifySpatialPath.contentLooksImmersive(
-            title: title, artist: artist, album: album
+            title: title, artist: artist, album: album, genre: genre, playlist: playlist
         )
         lastContentImmersiveHint = immersive
+        let appHint: String = {
+            switch sourceApp {
+            case .music: return "music"
+            case .spotify: return "spotify"
+            case .other: return "other"
+            case .none: return ""
+            }
+        }()
         if #available(macOS 14.2, *) {
-            LocalAmplifyEngine.shared.setContentImmersiveHint(immersive)
+            LocalAmplifyEngine.shared.setContentImmersiveHint(immersive, sourceApp: appHint)
             if isEnabled { syncFromEngine() }
         }
     }
@@ -286,8 +310,10 @@ final class MediaAmplifyController: ObservableObject {
                 activePresetName = "Spatial EQ"
             case .multichannel:
                 activePresetName = "Surround EQ"
+            case .stereoMixFallback:
+                activePresetName = "Stereo-mix EQ"
             case .stereo:
-                activePresetName = "Local EQ"
+                activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
             }
             lastError = engine.lastError
         } else if isEnabled {

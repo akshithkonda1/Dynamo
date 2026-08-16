@@ -12,10 +12,12 @@ All notable changes to Dynamo are documented here.
 - **Per-note spectral tuning** (sub, punch, presence, air, …)
 - **Device-aware symphony path**: wired headphones, wireless/BT, Mac speakers, external
 - Spatial / Atmos–safe: post-render EQ, same curve per channel, mid-side width on stereo
-- Profiles: **Symphony** (default adaptive) · Presence · Cinema · Impact
-- **Seamless transitions (v3):** equal-power dual-bank crossfade (~90 ms) on profile/device change; wet engage (~120 ms) / soft stop (~80 ms); Python `process --from-profile` / `morph`
-- **Full Dolby Atmos support:** device-stream process tap (no stereo mixdown) when available; multi-channel beds keep channel count; LFE-safe sub-only EQ; Spatial binaural path (no mid-side); content metadata hint (“Dolby Atmos” / Spatial)
-- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs --path atmosBed`, `process`, `morph`)
+- Profiles: **Reference** (transparent) · **Symphony** (mild default) · Presence · Cinema · Impact (width only)
+- **Seamless transitions (v3):** equal-power dual-bank crossfade (~90 ms); wet engage / soft stop
+- **Full Dolby Atmos support:** device-stream tap; multi-ch layout; LFE/height/surround roles; Spatial path; stereo-mix fallback labeled
+- **Fidelity Tier A/B:** linked true-peak limiter (−1 dBTP); live adaptive analysis; quieter gains; headroom staging; mild device calibration; dry loudness match
+- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`reference`, `coeffs --path atmosBed`, …)
+
 
 ### Performance & feel
 - Adaptive media poll (faster while playing, idle back-off)

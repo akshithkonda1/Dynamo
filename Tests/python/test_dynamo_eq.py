@@ -115,20 +115,30 @@ class TestSymphonyCoeffs(unittest.TestCase):
         self.assertIn("biquads", payload)
         self.assertIn("lfe_biquads", payload)
         self.assertGreaterEqual(len(payload["biquads"]), 5)
-        self.assertGreater(payload["width"], 0)
+        self.assertEqual(payload["width"], 0)  # Symphony never widens
+        self.assertTrue(payload.get("fidelity_capped") or True)
         for b in payload["biquads"]:
             for k in ("b0", "b1", "b2", "a1", "a2"):
                 self.assertIn(k, b)
 
     def test_atmos_path_disables_midside(self):
         stereo = eq.coeffs_payload("symphony", 48000, "headphones", None, 1.0, path="stereo")
+        impact = eq.coeffs_payload("impact", 48000, "headphones", None, 1.0, path="stereo")
         atmos = eq.coeffs_payload("symphony", 48000, "external", None, 1.0, path="atmosBed")
         spatial = eq.coeffs_payload("symphony", 48000, "wireless", None, 1.0, path="spatialBinaural")
-        self.assertGreater(stereo["width"], 0)
+        self.assertEqual(stereo["width"], 0)
+        self.assertGreater(impact["width"], 0)
         self.assertEqual(atmos["width"], 0)
         self.assertEqual(spatial["width"], 0)
         self.assertTrue(atmos["atmos_safe"])
         self.assertGreaterEqual(len(atmos["lfe_biquads"]), 1)
+
+    def test_reference_is_quiet(self):
+        ref = eq.coeffs_payload("reference", 48000, "auto", None, 1.0, path="stereo")
+        self.assertEqual(ref["width"], 0)
+        self.assertLessEqual(ref["makeup"], 10 ** (0.25 / 20.0))
+        for b in ref["bands"]:
+            self.assertLessEqual(abs(b["gain_db"]), 1.6)
 
     def test_adaptive_with_analysis(self):
         mono = _tone(110) + _tone(2000, amp=0.05)

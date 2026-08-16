@@ -14,6 +14,7 @@ final class AmplifyProfileTests: XCTestCase {
     }
 
     func testResolvedKnownRawValues() {
+        XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "reference"), .reference)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "symphony"), .symphony)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "presence"), .presence)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "cinema"), .cinema)
@@ -24,6 +25,7 @@ final class AmplifyProfileTests: XCTestCase {
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "crisp"), .presence)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "balanced"), .cinema)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "visceral"), .impact)
+        XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "hifi"), .reference)
     }
 
     func testResolvedNilAndUnknownDefaultToSymphony() {
@@ -31,9 +33,15 @@ final class AmplifyProfileTests: XCTestCase {
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "not-a-profile"), .symphony)
     }
 
-    func testSymphonyIsDefaultAdaptiveProfile() {
+    func testOnlyImpactAllowsStereoWidth() {
+        XCTAssertFalse(MediaAmplifyProfile.reference.allowsStereoWidth)
+        XCTAssertFalse(MediaAmplifyProfile.symphony.allowsStereoWidth)
+        XCTAssertTrue(MediaAmplifyProfile.impact.allowsStereoWidth)
+    }
+
+    func testReferenceIsFirstCase() {
+        XCTAssertEqual(MediaAmplifyProfile.allCases.first, .reference)
         XCTAssertTrue(MediaAmplifyProfile.allCases.contains(.symphony))
-        XCTAssertEqual(MediaAmplifyProfile.allCases.first, .symphony)
     }
 }
 
@@ -99,6 +107,16 @@ final class AmplifyDeviceTests: XCTestCase {
             XCTAssertEqual(spatial.width, 0, "\(profile)")
         }
     }
+
+    func testOnlyImpactHasWidthOnStereo() {
+        let impact = DynamoEQCurves.curve(for: .impact, device: .headphones, sampleRate: 48_000, path: .stereo)
+        let symphony = DynamoEQCurves.curve(for: .symphony, device: .headphones, sampleRate: 48_000, path: .stereo)
+        let reference = DynamoEQCurves.curve(for: .reference, device: .auto, sampleRate: 48_000, path: .stereo)
+        XCTAssertGreaterThan(impact.width, 0)
+        XCTAssertEqual(symphony.width, 0)
+        XCTAssertEqual(reference.width, 0)
+        XCTAssertLessThanOrEqual(reference.makeup, pow(10.0, 0.25 / 20.0))
+    }
 }
 
 final class AmplifySpatialPathTests: XCTestCase {
@@ -109,13 +127,24 @@ final class AmplifySpatialPathTests: XCTestCase {
         XCTAssertEqual(p, .atmosBed)
         XCTAssertTrue(p.usesLFERole)
         XCTAssertFalse(p.allowsMidSide)
+        XCTAssertEqual(p.statusLabel, "Dolby Atmos bed")
     }
 
     func testDetectMultichannelWithoutHint() {
         let p = AmplifySpatialPath.detect(
-            channels: 6, sampleRate: 48_000, contentImmersiveHint: false, deviceRaw: "external"
+            channels: 6, sampleRate: 48_000, contentImmersiveHint: false, deviceRaw: "external",
+            sourceApp: ""
         )
         XCTAssertEqual(p, .multichannel)
+    }
+
+    func testStereoMixFallbackWhenTapIsStereoMix() {
+        let p = AmplifySpatialPath.detect(
+            channels: 2, sampleRate: 48_000, contentImmersiveHint: false,
+            deviceRaw: "speakers", tapIsStereoMix: true
+        )
+        XCTAssertEqual(p, .stereoMixFallback)
+        XCTAssertEqual(p.statusLabel, "stereo-mix fallback")
     }
 
     func testContentLooksImmersive() {
@@ -130,10 +159,15 @@ final class AmplifySpatialPathTests: XCTestCase {
         ))
     }
 
-    func testLFEChannelIndex() {
-        XCTAssertTrue(AmplifySpatialPath.isLFEChannel(3, total: 6))
-        XCTAssertTrue(AmplifySpatialPath.isLFEChannel(3, total: 8))
-        XCTAssertFalse(AmplifySpatialPath.isLFEChannel(0, total: 6))
-        XCTAssertFalse(AmplifySpatialPath.isLFEChannel(3, total: 2))
+    func testLFEFallbackRole() {
+        XCTAssertEqual(AmplifyChannelLayout.fallbackRole(channel: 3, total: 6), .lfe)
+        XCTAssertEqual(AmplifyChannelLayout.fallbackRole(channel: 0, total: 6), .fullRange)
+        XCTAssertEqual(AmplifyChannelLayout.fallbackRole(channel: 5, total: 6), .surround)
+    }
+
+    func testMPEG51LayoutRoles() {
+        let roles = AmplifyChannelLayout.roles(forLayoutTag: kAudioChannelLayoutTag_MPEG_5_1_A)
+        XCTAssertEqual(roles?.count, 6)
+        XCTAssertEqual(roles?[3], .lfe)
     }
 }

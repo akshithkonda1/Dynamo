@@ -656,7 +656,10 @@ private struct ExpandedMediaView: View {
             amplify.reapplyForTrack(
                 title: plugin.info.title,
                 artist: plugin.info.artist,
-                album: plugin.info.album
+                album: plugin.info.album,
+                genre: plugin.info.genre,
+                playlist: plugin.info.playlistName,
+                sourceApp: plugin.info.sourceApp
             )
         }
     }

@@ -124,47 +124,51 @@ class BandSpec:
     label: str = ""  # note-region name for analysis
 
 
-# Intent bases (then adapted by media + device + note evaluation)
+# Intent bases — fidelity-capped (match LocalAmplifyEngine DynamoEQCurves)
 BASE_PROFILES: Dict[str, List[BandSpec]] = {
+    "reference": [
+        BandSpec("lowshelf", 70, 0.4, 0.7, "sub"),
+        BandSpec("peak", 700, -0.8, 1.0, "mud"),
+        BandSpec("peak", 2200, 0.5, 1.0, "presence"),
+        BandSpec("highshelf", 10000, 0.0, 0.7, "air"),
+    ],
     "presence": [
-        BandSpec("lowshelf", 90, -1.2, 0.7, "sub"),
-        BandSpec("peak", 350, -1.0, 0.9, "body"),
-        BandSpec("peak", 1800, 2.8, 1.1, "presence"),
-        BandSpec("peak", 3500, 2.2, 1.0, "air"),
-        BandSpec("highshelf", 8000, 1.8, 0.7, "brilliance"),
+        BandSpec("lowshelf", 90, -0.6, 0.7, "sub"),
+        BandSpec("peak", 350, -0.6, 0.9, "body"),
+        BandSpec("peak", 1800, 1.6, 1.1, "presence"),
+        BandSpec("peak", 3500, 1.0, 1.0, "air"),
+        BandSpec("highshelf", 8000, 0.6, 0.7, "brilliance"),
     ],
     "cinema": [
-        BandSpec("lowshelf", 70, 2.4, 0.7, "sub"),
-        BandSpec("peak", 250, 0.8, 0.9, "warmth"),
-        BandSpec("peak", 900, -1.8, 1.0, "mud"),
-        BandSpec("peak", 3200, 1.4, 1.0, "presence"),
-        BandSpec("highshelf", 9000, 2.2, 0.7, "air"),
+        BandSpec("lowshelf", 70, 1.2, 0.7, "sub"),
+        BandSpec("peak", 250, 0.4, 0.9, "warmth"),
+        BandSpec("peak", 900, -1.2, 1.0, "mud"),
+        BandSpec("peak", 3200, 0.8, 1.0, "presence"),
+        BandSpec("highshelf", 9000, 0.6, 0.7, "air"),
     ],
     "impact": [
-        BandSpec("lowshelf", 60, 3.8, 0.7, "sub"),
-        BandSpec("peak", 110, 2.6, 1.0, "punch"),
-        BandSpec("peak", 220, 1.5, 1.0, "body"),
-        BandSpec("peak", 800, -1.2, 0.9, "mud"),
-        BandSpec("highshelf", 7000, 1.0, 0.7, "air"),
+        BandSpec("lowshelf", 60, 2.0, 0.7, "sub"),
+        BandSpec("peak", 110, 1.5, 1.0, "punch"),
+        BandSpec("peak", 220, 0.8, 1.0, "body"),
+        BandSpec("peak", 800, -0.8, 0.9, "mud"),
+        BandSpec("highshelf", 7000, 0.4, 0.7, "air"),
     ],
-    # Auto / symphony — balanced concert contour (starting point)
     "symphony": [
-        BandSpec("lowshelf", 65, 2.0, 0.7, "sub"),
-        BandSpec("peak", 180, 1.2, 0.95, "body"),
-        BandSpec("peak", 700, -1.4, 1.0, "mud"),
-        BandSpec("peak", 2200, 2.0, 1.05, "presence"),
-        BandSpec("peak", 4500, 1.3, 1.0, "sheen"),
-        BandSpec("highshelf", 10000, 1.6, 0.7, "air"),
+        BandSpec("lowshelf", 65, 0.9, 0.7, "sub"),
+        BandSpec("peak", 180, 0.5, 0.95, "body"),
+        BandSpec("peak", 700, -0.9, 1.0, "mud"),
+        BandSpec("peak", 2200, 0.9, 1.05, "presence"),
+        BandSpec("peak", 4500, 0.4, 1.0, "sheen"),
+        BandSpec("highshelf", 10000, 0.5, 0.7, "air"),
     ],
 }
 
-# Device “you are there” voicing (added to band gains by label)
+# Mild device calibration (not aggressive immersive)
 DEVICE_BIAS: Dict[str, Dict[str, float]] = {
-    # dB offsets keyed by band label
-    "headphones": {"sub": -0.4, "body": 0.3, "presence": 1.2, "air": 1.4, "sheen": 0.8, "mud": -0.3, "punch": 0.4, "brilliance": 1.0, "warmth": 0.2},
-    "wireless": {"sub": 0.6, "body": 0.5, "presence": 0.9, "air": 0.5, "sheen": 0.4, "mud": -0.5, "punch": 0.8, "brilliance": 0.3, "warmth": 0.4},  # BT often dull
-    "speakers": {"sub": 0.8, "body": 0.6, "presence": 0.7, "air": 0.4, "sheen": 0.3, "mud": -0.8, "punch": 0.5, "brilliance": 0.2, "warmth": 0.5},
-    "external": {"sub": 1.0, "body": 0.4, "presence": 0.5, "air": 0.6, "sheen": 0.5, "mud": -0.6, "punch": 0.4, "brilliance": 0.4, "warmth": 0.3},
+    "headphones": {"sub": -0.3, "presence": 0.6, "air": 0.4, "mud": -0.3},
+    "wireless": {"sub": 0.3, "presence": 0.5, "air": 0.35, "mud": -0.4, "punch": 0.3},
+    "speakers": {"sub": 0.5, "body": 0.3, "mud": -0.5, "presence": 0.3, "air": -0.2},
+    "external": {"mud": -0.2, "presence": 0.15},
     "auto": {},
 }
 
@@ -366,7 +370,16 @@ def _apply_bias(bands: List[BandSpec], bias: Dict[str, float], scale: float = 1.
 
 
 # Spatial / Atmos path keys (match AmplifySpatialPath.rawValue in Swift)
-SPATIAL_PATHS = ("stereo", "spatialBinaural", "atmosBed", "multichannel")
+SPATIAL_PATHS = ("stereo", "spatialBinaural", "atmosBed", "multichannel", "stereoMixFallback")
+
+# Per-profile max |gain| dB and default makeup
+PROFILE_CAPS = {
+    "reference": (1.5, 0.12),
+    "symphony": (1.8, 0.18),
+    "presence": (2.0, 0.20),
+    "cinema": (2.0, 0.20),
+    "impact": (2.5, 0.25),
+}
 
 
 def build_adaptive_bands(
@@ -377,9 +390,8 @@ def build_adaptive_bands(
     path: str = "stereo",
 ) -> Tuple[List[BandSpec], float, dict]:
     """
-    Combine intent profile + device symphony voicing + media/note evaluation +
-    Spatial/Atmos path voicing.
-    Returns bands, makeup_linear, report.
+    Fidelity-capped intent + mild device calibration + optional analysis trims +
+    Spatial/Atmos path voicing. Width only for Impact on stereo.
     """
     base_key = profile.lower() if profile.lower() in BASE_PROFILES else "symphony"
     bands = [
@@ -390,80 +402,62 @@ def build_adaptive_bands(
     if device not in DEVICE_BIAS:
         device = "auto"
     path = path if path in SPATIAL_PATHS else "stereo"
+    gain_cap, default_makeup = PROFILE_CAPS.get(base_key, (1.8, 0.18))
 
-    _apply_bias(bands, DEVICE_BIAS.get(device, {}), intensity)
+    _apply_bias(bands, DEVICE_BIAS.get(device, {}), intensity * 0.85)
 
     media_type = "music"
     quality = "medium"
-    if analysis:
+    if analysis and base_key != "reference":
         media_type = analysis.media_type
         quality = analysis.quality
-        _apply_bias(bands, MEDIA_BIAS.get(media_type, {}), intensity)
+        # Light analysis bias only (scaled down for fidelity)
+        _apply_bias(bands, MEDIA_BIAS.get(media_type, {}), intensity * 0.35)
         if quality == "low":
-            _apply_bias(bands, MEDIA_BIAS["low_quality"], intensity * 0.85)
-        # Note-level tuning
+            _apply_bias(bands, MEDIA_BIAS["low_quality"], intensity * 0.25)
         note_map = {n["label"]: n["suggested_gain_db"] for n in analysis.notes}
         for b in bands:
             if b.label in note_map:
-                b.gain_db = max(-8.0, min(7.0, b.gain_db + note_map[b.label] * intensity * 0.75))
+                b.gain_db = max(-gain_cap, min(gain_cap, b.gain_db + note_map[b.label] * intensity * 0.25))
 
-    # Symphony immersion extras by device
-    width = 0.0  # mid-side width amount 0..0.35
-    presence_air = 0.0
-    if device == "headphones":
-        width = 0.12 * intensity  # gentle stage
-        presence_air = 0.4
-    elif device == "wireless":
-        width = 0.08 * intensity
-        presence_air = 0.6  # restore HF lost to codecs
-    elif device == "speakers":
-        width = 0.05 * intensity
-        presence_air = 0.2
-    elif device == "external":
-        width = 0.10 * intensity
-        presence_air = 0.35
+    # Width: Impact only, stereo path only
+    width = 0.08 * intensity if base_key == "impact" and path == "stereo" else 0.0
 
-    for b in bands:
-        if b.label in ("air", "brilliance", "sheen", "presence"):
-            b.gain_db = max(-8.0, min(7.0, b.gain_db + presence_air))
-
-    # Makeup: lower for high-DR masters, slightly higher for low quality
-    makeup_db = 0.45 * intensity
+    makeup_db = default_makeup * intensity
     if analysis:
         if analysis.quality == "high":
-            makeup_db = 0.25 * intensity
+            makeup_db = min(makeup_db, 0.12 * intensity)
         elif analysis.quality == "low":
-            makeup_db = 0.7 * intensity
+            makeup_db = min(0.25 * intensity, makeup_db + 0.05)
         if analysis.media_type == "speech":
-            makeup_db = 0.35 * intensity
+            makeup_db = min(makeup_db, 0.15 * intensity)
 
-    # Path voicing — full Dolby Atmos / Spatial support (no mono fold, no MS on beds)
-    if path in ("atmosBed", "multichannel", "spatialBinaural"):
+    # Atmos/Spatial: gentle sub + mud; no air boost
+    if path in ("atmosBed", "multichannel", "spatialBinaural", "stereoMixFallback"):
         width = 0.0
-    if path == "atmosBed":
-        makeup_db = min(makeup_db, 0.35 * intensity)
+        makeup_db = min(makeup_db, 0.15 * intensity)
         for b in bands:
             if b.label in ("air", "brilliance", "sheen"):
-                b.gain_db *= 0.55
+                b.gain_db = min(0.0, b.gain_db * 0.2)
             elif b.label == "presence":
-                b.gain_db *= 0.75
-            elif b.label in ("sub", "punch"):
-                b.gain_db *= 0.9
-            b.gain_db = max(-8.0, min(7.0, b.gain_db))
-    elif path == "multichannel":
-        makeup_db = min(makeup_db, 0.4 * intensity)
+                b.gain_db = min(b.gain_db, 0.5)
+            elif b.label == "mud":
+                b.gain_db = min(b.gain_db, -0.4)
+
+    if base_key == "reference":
+        makeup_db = min(makeup_db, 0.2)
+        width = 0.0
+
+    for b in bands:
+        b.gain_db = max(-gain_cap, min(gain_cap, b.gain_db))
+
+    # Headroom-first: scale if positive boosts stack too high
+    pos_sum = sum(max(0.0, b.gain_db) for b in bands)
+    if pos_sum + makeup_db > 3.5:
+        scale = 3.5 / (pos_sum + makeup_db)
         for b in bands:
-            if b.label in ("air", "brilliance"):
-                b.gain_db *= 0.7
-            b.gain_db = max(-8.0, min(7.0, b.gain_db))
-    elif path == "spatialBinaural":
-        makeup_db = min(makeup_db, 0.4 * intensity)
-        for b in bands:
-            if b.label in ("air", "brilliance", "sheen"):
-                b.gain_db *= 0.5
-            elif b.label == "presence":
-                b.gain_db *= 0.85
-            b.gain_db = max(-8.0, min(7.0, b.gain_db))
+            b.gain_db *= scale
+        makeup_db *= scale
 
     makeup = 10 ** (makeup_db / 20.0)
 
@@ -476,8 +470,10 @@ def build_adaptive_bands(
         "width": width,
         "intensity": intensity,
         "makeup_db": round(makeup_db, 2),
-        "atmos_safe": path in ("atmosBed", "multichannel", "spatialBinaural"),
+        "atmos_safe": path in ("atmosBed", "multichannel", "spatialBinaural", "stereoMixFallback"),
         "mid_side": width > 0.001,
+        "fidelity_capped": True,
+        "linked_true_peak_ceiling_db": -1.0,
     }
     return bands, makeup, report
 
@@ -799,15 +795,19 @@ def selftest() -> None:
     a = analyze_mono(mono, sr)
     assert a.media_type in BASE_PROFILES or a.media_type in MEDIA_BIAS
     payload = coeffs_payload("symphony", sr, "headphones", a, 1.0, path="stereo")
-    assert payload["width"] > 0
+    assert payload["width"] == 0  # width only on Impact
     assert payload["version"] == 3
     assert payload["seamless"] is True
     assert payload["atmos_ready"] is True
     assert len(payload["biquads"]) >= 5
+    impact = coeffs_payload("impact", sr, "headphones", a, 1.0, path="stereo")
+    assert impact["width"] > 0
     atmos = coeffs_payload("symphony", sr, "external", a, 1.0, path="atmosBed")
     assert atmos["width"] == 0
     assert atmos["atmos_safe"] is True
     assert len(atmos["lfe_biquads"]) >= 1
+    ref = coeffs_payload("reference", sr, "auto", a, 1.0, path="stereo")
+    assert ref["makeup"] <= 10 ** (0.25 / 20.0)
     # Process should not explode
     filters = bands_to_filters(
         [BandSpec(**{k: b[k] for k in ("kind", "freq", "gain_db", "q", "label") if k in b}) for b in payload["bands"]],

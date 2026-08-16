@@ -73,11 +73,12 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 |--|--|
 | **Realtime** | `LocalAmplifyEngine` — process tap → multi-band EQ → output (macOS **14.2+**) |
 | **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v3 — pure Python 3 stdlib |
-| **Profiles** | **Symphony** (adaptive default) · Presence · Cinema · Impact |
-| **Seamless** | Equal-power dual-bank crossfade (~90 ms) on profile/device; wet engage (~120 ms) / soft stop (~80 ms) |
-| **Dolby Atmos** | Device-stream tap (no mixdown) when possible; multi-ch beds keep layout; LFE = sub-only EQ; mid-side off |
-| **Spatial Audio** | Binaural path (post-render); preserves elevation HF cues; never re-spatializes with MS |
-| **UI** | Green = on · red = off; status shows Stereo / Spatial / Dolby Atmos / Surround; device picker in Feel & alerts |
+| **Profiles** | **Reference** (transparent) · **Symphony** (mild default) · Presence · Cinema · Impact (width OK) |
+| **Fidelity** | Linked true-peak (−1 dBTP) · live adaptive trims · headroom staging · dry loudness match |
+| **Seamless** | Equal-power dual-bank crossfade (~90 ms); wet engage / soft stop |
+| **Dolby Atmos** | Device-stream tap; multi-ch layout; LFE/height roles; mid-side off; status “Dolby Atmos bed” |
+| **Spatial Audio** | Binaural path; no MS; stereo-mix fallback labeled honestly |
+| **UI** | Status: path · ch · tap mode · live media hint; device cal (AirPods/MacBook/monitors) |
 
 ```bash
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
