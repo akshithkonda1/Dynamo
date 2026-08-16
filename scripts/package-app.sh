@@ -53,10 +53,14 @@ if [[ -f "${ROOT}/Sources/Dynamo/Resources/AppIcon.icns" ]]; then
     || /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "${CONTENTS}/Info.plist"
 fi
 
-# Local Amplify EQ designer (pure Python, optional at runtime — embedded curves always work).
+# Local Amplify EQ designer + on-device Tone AI (pure Python, optional at runtime).
 if [[ -f "${ROOT}/Tools/DynamoEQ/dynamo_eq.py" ]]; then
   python3 -c "from pathlib import Path; Path('${RESOURCES}/dynamo_eq.py').write_bytes(Path('${ROOT}/Tools/DynamoEQ/dynamo_eq.py').read_bytes())"
   echo "  copied dynamo_eq.py"
+fi
+if [[ -f "${ROOT}/Tools/DynamoEQ/dynamo_tone_ai.py" ]]; then
+  python3 -c "from pathlib import Path; Path('${RESOURCES}/dynamo_tone_ai.py').write_bytes(Path('${ROOT}/Tools/DynamoEQ/dynamo_tone_ai.py').read_bytes())"
+  echo "  copied dynamo_tone_ai.py"
 fi
 
 /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string Dynamo" "${CONTENTS}/Info.plist" 2>/dev/null \

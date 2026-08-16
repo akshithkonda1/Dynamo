@@ -80,13 +80,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
-        registry.register(WorldClockPlugin())
+        let clocks = WorldClockPlugin()
+        registry.register(clocks)
         registry.register(BatteryPlugin())
         registry.register(FocusPlugin())
         registry.register(SportsPlugin())
         registry.register(SystemHealthPlugin())
         registry.register(ShelfPlugin())
         registry.register(WebcamPlugin())
+
+        // World Clock “Here” needs When-In-Use Location. Prompt once on boot so
+        // distance sort + city label work without digging into Preferences.
+        // Safe if already granted/denied — Core Location no-ops appropriately.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            clocks.requestCurrentLocation()
+        }
 
         WidgetSettingsStore.shared.apply(to: registry)
         // Drop any legacy "weather" id from saved tray prefs.

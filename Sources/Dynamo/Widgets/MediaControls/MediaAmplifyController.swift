@@ -186,6 +186,13 @@ final class MediaAmplifyController: ObservableObject {
         }()
         if #available(macOS 14.2, *) {
             LocalAmplifyEngine.shared.setContentImmersiveHint(immersive, sourceApp: appHint)
+            // Tone AI metadata prior — local now-playing strings only (no network).
+            LocalAmplifyEngine.shared.setToneMetadata(
+                title: title,
+                artist: artist,
+                album: album,
+                genre: genre
+            )
             if isEnabled { syncFromEngine() }
         }
     }
@@ -315,7 +322,12 @@ final class MediaAmplifyController: ObservableObject {
             case .stereoMixFallback:
                 activePresetName = "Stereo-mix EQ"
             case .stereo:
-                activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
+                if !engine.toneGenre.isEmpty, engine.toneGenre != "unknown" {
+                    let pretty = engine.toneGenre.prefix(1).uppercased() + engine.toneGenre.dropFirst()
+                    activePresetName = "AI \(pretty)"
+                } else {
+                    activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
+                }
             }
             lastError = engine.lastError
         } else if isEnabled {

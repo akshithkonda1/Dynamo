@@ -103,6 +103,11 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private(set) var spatialPath: AmplifySpatialPath = .stereo
     private(set) var tapModeLabel: String = ""
     private(set) var liveMediaHint: String = ""
+    /// On-device Tone AI genre label (pop / classical / …).
+    private(set) var toneGenre: String = ""
+    private(set) var toneConfidence: Float = 0
+    /// Local now-playing genre/title/artist blob for metadata prior (never uploaded).
+    private var metadataToneText: String = ""
 
     private init() {}
 
@@ -234,10 +239,25 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         if !tapModeLabel.isEmpty {
             parts.append(tapModeLabel)
         }
-        if !liveMediaHint.isEmpty {
+        if !toneGenre.isEmpty, toneGenre != "unknown" {
+            let pretty = toneGenre.prefix(1).uppercased() + toneGenre.dropFirst()
+            parts.append("AI \(pretty)")
+        } else if !liveMediaHint.isEmpty {
             parts.append(liveMediaHint)
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// Feed local now-playing metadata into Tone AI (genre/title/artist — on-device only).
+    func setToneMetadata(title: String, artist: String, album: String, genre: String?) {
+        queue.async {
+            var parts: [String] = []
+            if let genre, !genre.isEmpty { parts.append(genre) }
+            if !title.isEmpty { parts.append(title) }
+            if !artist.isEmpty { parts.append(artist) }
+            if !album.isEmpty { parts.append(album) }
+            self.metadataToneText = parts.joined(separator: " ")
+        }
     }
 
     // MARK: - Profile / DSP
@@ -252,7 +272,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             profile: profile.rawValue,
             device: device.rawValue,
             sampleRate: sampleRate,
-            path: path.rawValue
+            path: path.rawValue,
+            genre: toneGenre.isEmpty ? nil : toneGenre,
+            metadata: metadataToneText.isEmpty ? nil : metadataToneText
         ) {
             return fromPy
         }
@@ -364,6 +386,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         spatialHint = ""
         spatialPath = .stereo
         tapModeLabel = ""
+        toneGenre = ""
+        toneConfidence = 0
+        metadataToneText = ""
+        AmplifyToneAI.session.reset()
         wetGain = 0
         wetInc = 0
     }
@@ -848,30 +874,47 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         let highRatio = (sqrt(analysisHighEnergy / Float(n)) + 1e-9) / rms
         let zcr = Float(analysisZCR) / Float(n)
 
-        var makeupT: Float = 1.0
-        var hfT: Float = 1.0
-        var hint = "music"
+        // On-device Tone AI: classify live features + optional local metadata.
+        let feats = AmplifyToneAI.featuresFromLive(
+            rms: rms,
+            crest: crest,
+            highRatio: highRatio,
+            zcr: zcr
+        )
+        let verdict = AmplifyToneAI.classify(
+            features: feats,
+            metadataText: metadataToneText.isEmpty ? nil : metadataToneText
+        )
+        toneGenre = verdict.genre
+        toneConfidence = verdict.confidence
 
-        if zcr > 0.18 && highRatio > 0.55 {
-            makeupT = 0.96
-            hfT = 1.0
-            hint = "speech"
-        } else if highRatio < 0.35 && crest < 6 {
-            makeupT = 1.02
-            hfT = 0.92
-            hint = "bass"
-        } else if highRatio > 0.85 {
-            makeupT = 0.97
-            hfT = 0.85
-            hint = "bright"
-        } else if crest > 12 {
-            makeupT = 0.94
-            hfT = 0.95
-            hint = "dynamic"
-        } else if rms < 0.02 {
-            makeupT = 1.0
-            hfT = 1.0
-            hint = "quiet"
+        var makeupT = verdict.makeupMul
+        var hfT = verdict.hfMul
+        var hint = verdict.genre
+
+        // Legacy media-type fallbacks blend lightly when AI is low-confidence.
+        if verdict.confidence < 0.35 {
+            if zcr > 0.18 && highRatio > 0.55 {
+                makeupT = 0.96
+                hfT = 1.0
+                hint = "speech"
+            } else if highRatio < 0.35 && crest < 6 {
+                makeupT = 1.02
+                hfT = 0.92
+                hint = "bass"
+            } else if highRatio > 0.85 {
+                makeupT = 0.97
+                hfT = 0.85
+                hint = "bright"
+            } else if crest > 12 {
+                makeupT = 0.94
+                hfT = 0.95
+                hint = "dynamic"
+            } else if rms < 0.02 {
+                makeupT = 1.0
+                hfT = 1.0
+                hint = "quiet"
+            }
         }
 
         if profileRaw == "reference" {
@@ -1521,19 +1564,28 @@ enum DynamoEQPython {
         profile: String,
         device: String,
         sampleRate: Double,
-        path: String = "stereo"
+        path: String = "stereo",
+        genre: String? = nil,
+        metadata: String? = nil
     ) -> AmplifyEQCurve? {
         let script = scriptURL()
         guard FileManager.default.isReadableFile(atPath: script.path) else { return nil }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        proc.arguments = [
+        var args = [
             script.path, "coeffs",
             "--profile", profile,
             "--device", device,
             "--path", path,
             "--sr", String(sampleRate)
         ]
+        if let genre, !genre.isEmpty {
+            args += ["--genre", genre]
+        }
+        if let metadata, !metadata.isEmpty {
+            args += ["--metadata", metadata]
+        }
+        proc.arguments = args
         let out = Pipe()
         proc.standardOutput = out
         proc.standardError = Pipe()

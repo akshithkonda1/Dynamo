@@ -28,6 +28,7 @@ run_python() {
     return 1
   fi
   python3 Tools/DynamoEQ/dynamo_eq.py selftest || return 1
+  python3 Tools/DynamoEQ/dynamo_tone_ai.py selftest || return 1
   python3 -m unittest discover -s Tests/python -p 'test_*.py' -v || return 1
   green "Python tests passed"
   return 0

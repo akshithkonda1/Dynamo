@@ -6,12 +6,12 @@ Dynamo turns the notch into an interactive tray with a plugin architecture (widg
 
 | | |
 |---|---|
-| **Version** | **1.1.1** |
+| **Version** | **1.1.1** (Tone AI + notch polish) |
 | **Platform** | macOS 13+ (14.2+ for live process-tap EQ / Symphony Amplify) |
 | **Daily driver** | `dist/Dynamo.app` only (single-instance) |
 | **License** | MIT |
 
-> Personal daily-driver project. Production ships **World Clock** instead of Weather (WeatherKit needs a paid Apple team). Amplify EQ is **local DSP** — no Music Automation dependency, no network APIs.
+> Personal daily-driver project. Production ships **World Clock** instead of Weather (WeatherKit needs a paid Apple team). Amplify EQ is **local DSP + on-device Tone AI** — no Music Automation, **no cloud APIs**, no on-device storage of audio or training corpora.
 
 ---
 
@@ -21,25 +21,41 @@ Registered in `AppDelegate.bootstrap()`:
 
 | Widget | What it does |
 |--------|----------------|
-| **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ), cover-art equalizer |
+| **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ + **Tone AI** genre tuning), cover-art equalizer |
 | **Calendar** | Upcoming events (EventKit full access), in-notch **create event**, open Calendar.app |
-| **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist |
+| **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist · Notes tab |
 | **Clipboard** | Recent snippets |
-| **Clocks** | **World Clock** — major cities · current location · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
-| **Battery** | Charge, health, drain estimate; **Low / Auto / High** power modes (`pmset`) |
+| **Clocks** | **World Clock** — major cities · **Here first** · GPS “Here” label · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
+| **Battery** | Charge, health, drain, vitals grid; **Low / Auto / High** power modes (`pmset`); ambient fill glyph |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
 | **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
 | **System Health** | Local Mac health score + deep links to System Settings / updates |
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
-**Background systems (not tray tabs):** Peek notification center, Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** local amplify engine.
+**Background systems (not tray tabs):** Peek notification center (incl. calls/texts via optional system mirror), Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** + **Tone AI** local amplify engine.
 
 > **Production note:** **Weather** is **not registered** (WeatherKit needs a paid team). Source remains under `Widgets/Weather/` for a future opt-in build. **Clocks** is the free replacement.
 
 ---
 
-## Highlights (1.0.1)
+## What’s new (since 1.0.x → 1.1.1)
+
+| Area | Change |
+|------|--------|
+| **Tone AI (Amplify)** | On-device genre/tone classifier (Python + Swift). Pop vs classical vs electronic, etc. dynamically shapes EQ. **No APIs.** Ephemeral session EMA only — **no audio or training data stored on device**. |
+| **Amplify fidelity** | Reference profile, linked true-peak (~−1 dBTP), live adaptive, Atmos/Spatial path auto, headroom staging, dry loudness match, mild device cal |
+| **Amplify UX** | Toggle always clickable; seamless dual-bank crossfades; status shows path + **AI Genre** |
+| **Battery** | Hero fill glyph, status chips, 2×2 vitals, actionable tips, ambient shell |
+| **Peek / HUD** | Notch-aware silhouette: camera-band top inset, modest flare from the cutout (not a banner toast) |
+| **Clocks** | **Here first** sort; **location permission requested on boot** for “Here” + distance modes |
+| **Notifications** | Calls / texts / general → Peek (system mirror + call-session probe) |
+| **Tray** | Icon-only + hover previews; aspect-adaptive island (cap 1650pt); snappier collapse options |
+| **Checklist** | Local + Apple Notes / Reminders polish |
+
+---
+
+## Highlights (core product)
 
 ### Preferences (not “Settings…”)
 Menu bar and gear open **Preferences**. Sections include **General**, **Feel & alerts** (collapse delay, Peek, Amplify), **Appearance**, **Widgets**, **Permissions**, and per-widget options.
@@ -51,16 +67,16 @@ Menu bar and gear open **Preferences**. Sections include **General**, **Feel & a
 - Empty Calendar stays **compact** (no giant blank sheet)
 
 ### Clocks (World Clock)
-Free, offline, no WeatherKit:
+Free, offline, no WeatherKit. **Location is requested on launch** (When In Use) so “Here” and distance sort work immediately:
 
 | Feature | Detail |
 |---------|--------|
-| References | Major cities · **Current Location** (optional GPS label) · Apple IANA time zones |
-| Sort | **Nearest first** · **Farthest first** · **Random** (shuffle) · **As picked** |
-| Distance | km from GPS (or fallback city) on distance modes |
+| References | Major cities · **Current Location / Here** · Apple IANA time zones |
+| Sort | **Here first** · **Nearest** · **Farthest** · **Random** · **As picked** |
+| Distance | km from GPS (or fallback) on distance modes — coordinate used only in memory |
 | Extras | DST badges, call-window, “when it’s X here” converter, copy time |
 
-### Media Amplify — DynamoEQ Symphony engine
+### Media Amplify — DynamoEQ + Tone AI
 Local sound processing only — **no Music Automation, no cloud APIs, not the volume fader.**
 
 | Goal | How |
@@ -68,32 +84,39 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 | **1. Amplify by media type & quality** | PCM analysis: speech / music / bass-heavy / bright / sparse / low-quality + DR/bandwidth |
 | **2. Tune each “note” region** | Spectral regions (sub, punch, presence, air, …) get suggested gains toward a musical balance |
 | **3. “You are there” / symphony** | Device voicing: wired headphones · wireless/BT · Mac speakers · external + gentle mid-side stage |
+| **4. Tone AI (genre-aware)** | On-device classifier (features + optional local Music/Spotify genre text) → Pop vs Classical vs Electronic vs Hip-hop, etc. Live makeup/HF + band bias. **Ephemeral only** |
 
 | | |
 |--|--|
-| **Realtime** | `LocalAmplifyEngine` — process tap → multi-band EQ → output (macOS **14.2+**) |
-| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v3 — pure Python 3 stdlib |
+| **Realtime** | `LocalAmplifyEngine` + `AmplifyToneAI` — process tap → multi-band EQ → output (macOS **14.2+**) |
+| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v4 + `dynamo_tone_ai.py` — pure Python 3 stdlib |
 | **Profiles** | **Reference** (transparent) · **Symphony** (mild default) · Presence · Cinema · Impact (width OK) |
 | **Fidelity** | Linked true-peak (−1 dBTP) · live adaptive trims · headroom staging · dry loudness match |
-| **Seamless** | Equal-power dual-bank crossfade (~90 ms); wet engage / soft stop |
+| **Seamless** | Equal-power dual-bank crossfade; wet engage / soft stop |
 | **Dolby Atmos** | Device-stream tap; multi-ch layout; LFE/height roles; mid-side off; status “Dolby Atmos bed” |
 | **Spatial Audio** | Binaural path; no MS; stereo-mix fallback labeled honestly |
-| **UI** | Status: path · ch · tap mode · live media hint; device cal (AirPods/MacBook/monitors) |
+| **Privacy** | Audio never recorded or uploaded. Tone AI session EMA cleared on Amplify stop. Offline `train` may read developer PCM folders and **discards samples after features** — only weight numbers can be exported. |
+| **UI** | Status: path · ch · **AI Genre** · device cal |
 
 ```bash
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
-python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000
-python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device external --path atmosBed --sr 48000
+python3 Tools/DynamoEQ/dynamo_tone_ai.py selftest
+python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000 \
+  --metadata "Mozart Symphony classical"
+python3 Tools/DynamoEQ/dynamo_tone_ai.py classify \
+  --features '{"bass_ratio":0.15,"brightness":0.3,"crest_db":14,"zcr":0.06,"dynamic_range_db":18,"speech_likelihood":0.05,"bandwidth_hz":14000,"mid_ratio":0.35}' \
+  --metadata "Mozart Piano Concerto"
+# Optional developer-side retrain (weights only — no audio written):
+python3 Tools/DynamoEQ/dynamo_tone_ai.py train --synthetic --export
 python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --path spatialBinaural --sr 48000 < stereo.f32le
-# Seamless offline morph cinema → symphony with engage ramp:
 python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symphony \
   --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le
-python3 Tools/DynamoEQ/dynamo_eq.py morph --from-profile cinema --to-profile impact --steps 5
 ```
 
 ### Peek as notification surface
 - Dynamo sources: calendar, reminders, battery, focus/meeting, media, sports, health, clipboard, clocks  
-- Optional **SystemNotificationMirror** (other apps → Peek; may need Full Disk Access)  
+- Optional **SystemNotificationMirror** (other apps → Peek; may need Full Disk Access) — calls / texts / general  
+- Notch-aware layout: content clears the camera housing; island flares modestly from the cutout  
 - API: `dynamo://notify?title=…&urgency=high` · `DynamoNotificationAPI` · distributed notifications  
 - Meeting Mode quiets low/normal peeks  
 
@@ -105,8 +128,10 @@ python3 Tools/DynamoEQ/dynamo_eq.py morph --from-profile cinema --to-profile imp
 - **Meeting** — notes, optional Listen, talk tips, volume duck; never auto-joins calls  
 - Smart enter/leave suggestions from calendar + call apps  
 
-### Battery power modes
-**Low · Auto · High** via `pmset` when the Mac supports them.
+### Battery
+- Hero % + live fill glyph, health, cycles, temp, drain grid  
+- **Low · Auto · High** power modes via `pmset` when supported  
+- Low-battery Peeks; ambient fill + LPM badge
 
 ---
 
@@ -116,7 +141,7 @@ python3 Tools/DynamoEQ/dynamo_eq.py morph --from-profile cinema --to-profile imp
 - **Xcode 15+** (or recent beta) with macOS SDK when building from source  
 - **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** only if you want the optional WeatherKit app target  
 
-**Permissions (as needed):** Calendar (full), Reminders, Microphone / audio capture (Amplify + peek EQ + Meeting Listen), Speech, Camera (Webcam), Location (optional Clocks “Here” label), Automation (transport / playlists for Music & Spotify — **not** required for Amplify EQ).
+**Permissions (as needed):** Calendar (full), Reminders, Microphone / audio capture (Amplify + peek EQ + Meeting Listen), Speech, Camera (Webcam), **Location (requested on boot for Clocks “Here” + distance sort)**, Automation (transport / playlists for Music & Spotify — **not** required for Amplify EQ).
 
 ---
 
@@ -132,8 +157,9 @@ open dist/Dynamo.app
 
 - Ad-hoc signed; suitable for Launch at Login  
 - **Only run `dist/Dynamo.app`** — it owns the single-instance daily driver  
-- Embeds `dynamo_eq.py` in Resources when present (optional; embedded EQ curves always work)  
+- Embeds `dynamo_eq.py` + `dynamo_tone_ai.py` in Resources when present (optional; embedded EQ + Tone AI curves always work)  
 - Production tray **does not** include Weather  
+- **Only one Dynamo.app** — remove older `Dynamo 2.app` / `Dynamo 3.app` copies under `dist/` so the notch is not contested  
 
 ### 2. Swift Package (fast compile / CI)
 
@@ -187,8 +213,8 @@ Signing → paid team if you enable WeatherKit.
 - **Data behind protocols** (mock vs real without UI rewrites)  
 - **`NotchWindowController`** — collapsed ↔ expanded; peeks/HUD are overlays  
 - **`PeekNotificationCenter`** — delivery policy; **`NotchSneakPeekController`** — presentation  
-- **`LocalAmplifyEngine`** + **`Tools/DynamoEQ/`** — local Amplify DSP  
-- **`NotchGeometry`** — notch cutout + aspect-adaptive expanded width (cap 1650pt)  
+- **`LocalAmplifyEngine`** + **`AmplifyToneAI`** + **`Tools/DynamoEQ/`** — local Amplify DSP + genre Tone AI  
+- **`NotchGeometry`** — notch cutout + aspect-adaptive expanded width (cap 1650pt) + notch-aware peek/HUD sizes  
 
 **SPM vs Xcode:** `Package.swift` = sources + CI; `project.yml` → signed `.app` with entitlements when needed.
 
@@ -220,9 +246,10 @@ Mixed suite — **Python** (DynamoEQ), **Swift** (XCTest), **shell** (sanity):
 
 ```bash
 ./scripts/test.sh           # all
-./scripts/test.sh python    # DynamoEQ unit tests
+./scripts/test.sh python    # DynamoEQ + Tone AI unit tests
 ./scripts/test.sh swift     # Package XCTest
 ./scripts/test.sh shell     # project greps / version / syntax
+python3 -m unittest Tests/python/test_dynamo_tone_ai.py -v
 ```
 
 See **[Tests/README.md](Tests/README.md)** for layout. Manual UI smoke remains in **[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md)**.
