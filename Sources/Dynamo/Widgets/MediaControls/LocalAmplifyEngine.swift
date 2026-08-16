@@ -14,6 +14,11 @@ import Foundation
 /// - Preserves channel count / layout from the tap (stereo, 5.1, 7.1, etc.)
 /// - Does not change device sample rate, Spatial settings, or force stereo-only I/O
 ///
+/// **Seamless transitions** (match `Tools/DynamoEQ/dynamo_eq.py`):
+/// - Profile / device changes equal-power crossfade between dual filter banks (~90 ms)
+/// - Engage ramps wet from dry→EQ; stop ramps wet down before tearing the graph down
+/// - Makeup + mid-side width are lerped with the crossfade so nothing hard-jumps
+///
 /// Curves match `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs).
 @available(macOS 14.2, *)
 final class LocalAmplifyEngine: @unchecked Sendable {
@@ -26,11 +31,31 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var ioProcID: AudioDeviceIOProcID?
     private var format = AudioStreamBasicDescription()
 
-    /// One filter chain per channel (identical coefficients, independent state).
+    /// Active (A) filter chain per channel — state preserved across renders.
     private var channelFilters: [[Biquad]] = []
     private var makeup: Float = 1.0
     /// Mid-side width 0…0.4 — immersive stage for headphones/speakers (stereo only).
     private var stereoWidth: Float = 0.0
+
+    /// Target (B) bank during profile/device crossfade; nil when settled.
+    private var targetChannelFilters: [[Biquad]]?
+    private var targetMakeup: Float = 1.0
+    private var targetStereoWidth: Float = 0.0
+    /// 0 = full A, 1 = full B. Advances each sample while transitioning.
+    private var crossfadePos: Float = 1.0
+    private var crossfadeInc: Float = 0.0
+
+    /// Wet blend: 0 = dry passthrough, 1 = full Symphony EQ (seamless engage/disengage).
+    private var wetGain: Float = 0.0
+    private var wetTarget: Float = 1.0
+    private var wetInc: Float = 0.0
+    private var pendingStopAfterWet = false
+
+    /// Default transition lengths — long enough to hide filter swaps, short enough to feel snappy.
+    private static let profileTransitionSeconds: Float = 0.09
+    private static let engageSeconds: Float = 0.12
+    private static let disengageSeconds: Float = 0.08
+
     private var profileRaw: String = "symphony"
     private var deviceRaw: String = "auto"
     private var preferredBundleID: String?
@@ -51,14 +76,20 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         preferredBundleID: String?
     ) {
         queue.async {
+            self.pendingStopAfterWet = false
             self.preferredBundleID = preferredBundleID
             self.profileRaw = profile.rawValue
             self.deviceRaw = device.rawValue
-            self.applyProfileLocked(profile, device: device, sampleRate: 48_000, channels: 2)
+            // Instant bank load (not yet audible) — wet ramp engages without a hard edge.
+            self.applyProfileLocked(profile, device: device, sampleRate: 48_000, channels: 2, seamless: false)
+            self.wetGain = 0
+            self.wetTarget = 1
+            self.wetInc = 0
             do {
                 try self.startLocked()
                 self.isRunning = true
                 self.lastError = nil
+                self.beginWetRamp(to: 1, seconds: Self.engageSeconds)
                 self.statusLine = self.makeStatus(profile: profile)
             } catch {
                 self.isRunning = false
@@ -75,7 +106,14 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             self.deviceRaw = device.rawValue
             let sr = self.format.mSampleRate > 0 ? self.format.mSampleRate : 48_000
             let ch = max(2, self.channelCount)
-            self.applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
+            // While running, dual-path crossfade; cold path snaps banks immediately.
+            self.applyProfileLocked(
+                profile,
+                device: device,
+                sampleRate: sr,
+                channels: ch,
+                seamless: self.isRunning
+            )
             if self.isRunning {
                 self.statusLine = self.makeStatus(profile: profile)
             }
@@ -84,11 +122,17 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     func stop() {
         queue.async {
-            self.teardownLocked()
-            self.isRunning = false
-            self.statusLine = "Off"
-            self.lastError = nil
-            self.spatialHint = ""
+            guard self.isRunning else {
+                self.teardownLocked()
+                self.statusLine = "Off"
+                self.lastError = nil
+                self.spatialHint = ""
+                return
+            }
+            // Soft disengage so muting the EQ doesn’t click, then tear the graph down.
+            self.pendingStopAfterWet = true
+            self.beginWetRamp(to: 0, seconds: Self.disengageSeconds)
+            self.statusLine = "Fading out…"
         }
     }
 
@@ -108,29 +152,102 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     // MARK: - Profile / DSP
 
-    private func applyProfileLocked(
-        _ profile: MediaAmplifyProfile,
+    private func resolveCurve(
+        profile: MediaAmplifyProfile,
         device: AmplifyOutputDevice,
-        sampleRate: Double,
-        channels: Int
-    ) {
-        let ch = max(1, channels)
-        deviceHint = device.statusLabel
+        sampleRate: Double
+    ) -> (filters: [Biquad], makeup: Float, width: Float) {
         if let fromPy = DynamoEQPython.coeffs(
             profile: profile.rawValue,
             device: device.rawValue,
             sampleRate: sampleRate
         ) {
-            makeup = fromPy.makeup
-            stereoWidth = fromPy.width
-            channelFilters = (0..<ch).map { _ in fromPy.filters.map { $0.clone() } }
+            return (fromPy.filters, fromPy.makeup, fromPy.width)
+        }
+        let built = DynamoEQCurves.filters(for: profile, device: device, sampleRate: sampleRate)
+        return (built.filters, built.makeup, built.width)
+    }
+
+    private func applyProfileLocked(
+        _ profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        sampleRate: Double,
+        channels: Int,
+        seamless: Bool
+    ) {
+        let ch = max(1, channels)
+        deviceHint = device.statusLabel
+        let curve = resolveCurve(profile: profile, device: device, sampleRate: sampleRate)
+        let newBanks = (0..<ch).map { _ in curve.filters.map { $0.clone() } }
+
+        if seamless, isRunning, !channelFilters.isEmpty {
+            // Promote any in-flight target so we never stack more than two banks.
+            promoteTargetIfNeeded(force: true)
+            targetChannelFilters = newBanks
+            targetMakeup = curve.makeup
+            targetStereoWidth = curve.width
+            beginCrossfade(seconds: Self.profileTransitionSeconds)
         } else {
-            let built = DynamoEQCurves.filters(for: profile, device: device, sampleRate: sampleRate)
-            makeup = built.makeup
-            stereoWidth = built.width
-            channelFilters = (0..<ch).map { _ in built.filters.map { $0.clone() } }
+            channelFilters = newBanks
+            makeup = curve.makeup
+            stereoWidth = curve.width
+            targetChannelFilters = nil
+            crossfadePos = 1
+            crossfadeInc = 0
         }
         channelCount = ch
+    }
+
+    private func beginCrossfade(seconds: Float) {
+        let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        let samples = max(1, Int(seconds * sr))
+        crossfadePos = 0
+        crossfadeInc = 1.0 / Float(samples)
+    }
+
+    private func beginWetRamp(to target: Float, seconds: Float) {
+        wetTarget = max(0, min(1, target))
+        let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
+        let samples = max(1, Int(seconds * sr))
+        let delta = wetTarget - wetGain
+        wetInc = abs(delta) < 1e-6 ? 0 : delta / Float(samples)
+        if wetInc == 0 {
+            wetGain = wetTarget
+            finishPendingStopIfNeeded()
+        }
+    }
+
+    /// When crossfade completes (or is forced), B becomes A and target is cleared.
+    private func promoteTargetIfNeeded(force: Bool = false) {
+        guard let target = targetChannelFilters else { return }
+        if force || crossfadePos >= 1.0 - 1e-5 {
+            channelFilters = target
+            makeup = targetMakeup
+            stereoWidth = targetStereoWidth
+            targetChannelFilters = nil
+            crossfadePos = 1
+            crossfadeInc = 0
+        }
+    }
+
+    private func finishPendingStopIfNeeded() {
+        guard pendingStopAfterWet, wetGain <= 0.001 else { return }
+        pendingStopAfterWet = false
+        teardownLocked()
+        isRunning = false
+        statusLine = "Off"
+        lastError = nil
+        spatialHint = ""
+        wetGain = 0
+        wetInc = 0
+    }
+
+    /// Equal-power crossfade weights (seamless A↔B without mid-fade dips).
+    private static func equalPower(_ t: Float) -> (Float, Float) {
+        let x = max(0, min(1, t))
+        let a = cos(x * Float.pi * 0.5)
+        let b = sin(x * Float.pi * 0.5)
+        return (a, b)
     }
 
     // MARK: - Audio graph
@@ -173,7 +290,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
         let device = AmplifyOutputDevice(rawValue: deviceRaw) ?? .auto
         if let profile = MediaAmplifyProfile(rawValue: profileRaw) {
-            applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
+            applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch, seamless: false)
         }
 
         let outputUID = try defaultOutputDeviceUID()
@@ -245,6 +362,16 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         for chain in channelFilters {
             chain.forEach { $0.reset() }
         }
+        if let target = targetChannelFilters {
+            for chain in target {
+                chain.forEach { $0.reset() }
+            }
+        }
+        targetChannelFilters = nil
+        crossfadePos = 1
+        crossfadeInc = 0
+        wetInc = 0
+        pendingStopAfterWet = false
     }
 
     /// Process every channel with the same EQ curve (preserves spatial image / bed).
@@ -269,16 +396,17 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             if nonInterleaved, inABL.count >= 1 {
                 let frames = bytes / MemoryLayout<Float>.size
                 let nCh = min(inABL.count, outABL.count, channelFilters.count)
-                for c in 0..<nCh {
-                    guard let iPtr = inABL[c].mData?.assumingMemoryBound(to: Float.self),
-                          let oPtr = outABL[c].mData?.assumingMemoryBound(to: Float.self)
-                    else { continue }
-                    let filters = channelFilters[c]
-                    for f in 0..<frames {
-                        oPtr[f] = process(iPtr[f], filters: filters)
+                for f in 0..<frames {
+                    let wetG = wetGain
+                    for c in 0..<nCh {
+                        guard let iPtr = inABL[c].mData?.assumingMemoryBound(to: Float.self),
+                              let oPtr = outABL[c].mData?.assumingMemoryBound(to: Float.self)
+                        else { continue }
+                        oPtr[f] = processSample(dry: iPtr[f], channel: c, wet: wetG)
                     }
-                    outABL[c].mDataByteSize = inABL[c].mDataByteSize
+                    advanceFrameRamps()
                 }
+                finishPendingStopIfNeeded()
                 return
             }
 
@@ -286,37 +414,40 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             if let outRaw = outABL.first?.mData?.assumingMemoryBound(to: Float.self) {
                 let inSamples = inRaw.assumingMemoryBound(to: Float.self)
                 let frameCount = bytes / (MemoryLayout<Float>.size * channels)
-                let w = stereoWidth
                 for f in 0..<frameCount {
-                    if channels >= 2, w > 0.001 {
+                    let widthNow = currentWidth()
+                    let wetG = wetGain
+                    if channels >= 2, widthNow > 0.001 {
                         let li = f * channels
                         let ri = li + 1
                         var l = inSamples[li]
                         var r = inSamples[ri]
-                        // Mid-side encode → widen → decode (preserves mono bass)
                         let mid = 0.5 * (l + r)
                         var side = 0.5 * (l - r)
-                        side *= (1.0 + w)
+                        side *= (1.0 + widthNow)
                         l = mid + side
                         r = mid - side
-                        let fl = channelFilters[0]
-                        let fr = channelFilters[min(1, channelFilters.count - 1)]
-                        outRaw[li] = process(l, filters: fl)
-                        outRaw[ri] = process(r, filters: fr)
+                        // Dry passthrough is pre-MS so engage never invents width from silence.
+                        outRaw[li] = processSample(
+                            dry: l, channel: 0, wet: wetG, dryPassthrough: inSamples[li]
+                        )
+                        outRaw[ri] = processSample(
+                            dry: r, channel: 1, wet: wetG, dryPassthrough: inSamples[ri]
+                        )
                         for c in 2..<channels {
                             let idx = f * channels + c
-                            let chain = channelFilters[min(c, channelFilters.count - 1)]
-                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                            outRaw[idx] = processSample(dry: inSamples[idx], channel: c, wet: wetG)
                         }
                     } else {
                         for c in 0..<channels {
                             let idx = f * channels + c
-                            let chain = channelFilters[min(c, channelFilters.count - 1)]
-                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                            outRaw[idx] = processSample(dry: inSamples[idx], channel: c, wet: wetG)
                         }
                     }
+                    advanceFrameRamps()
                 }
                 outABL[0].mDataByteSize = inBuf.mDataByteSize
+                finishPendingStopIfNeeded()
             }
         } else {
             // Unexpected format: bit-copy (never mute user to silence on exotic streams).
@@ -328,13 +459,22 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     }
 
     private func ensureChannelFilters(count: Int) {
-        guard count > channelFilters.count else { return }
-        let template = channelFilters.first
-            ?? DynamoEQCurves.filters(for: .cinema, device: .auto, sampleRate: 48_000).filters
-        while channelFilters.count < count {
-            channelFilters.append(template.map { $0.clone() })
+        if count > channelFilters.count {
+            let template = channelFilters.first
+                ?? DynamoEQCurves.filters(for: .symphony, device: .auto, sampleRate: 48_000).filters
+            while channelFilters.count < count {
+                channelFilters.append(template.map { $0.clone() })
+            }
         }
-        channelCount = channelFilters.count
+        if var target = targetChannelFilters, count > target.count {
+            let template = target.first
+                ?? DynamoEQCurves.filters(for: .symphony, device: .auto, sampleRate: 48_000).filters
+            while target.count < count {
+                target.append(template.map { $0.clone() })
+            }
+            targetChannelFilters = target
+        }
+        channelCount = max(channelFilters.count, targetChannelFilters?.count ?? 0)
     }
 
     private func silence(_ outABL: UnsafeMutableAudioBufferListPointer) {
@@ -345,20 +485,79 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         }
     }
 
-    private func process(_ x: Float, filters: [Biquad]) -> Float {
-        var y = x
-        for f in filters {
-            y = f.process(y)
+    private func currentWidth() -> Float {
+        guard targetChannelFilters != nil else { return stereoWidth }
+        let (gA, gB) = Self.equalPower(crossfadePos)
+        return stereoWidth * gA + targetStereoWidth * gB
+    }
+
+    /// One sample through A (+ B while crossfading), soft-limit, wet-blend with dry.
+    private func processSample(
+        dry: Float,
+        channel: Int,
+        wet: Float,
+        dryPassthrough: Float? = nil
+    ) -> Float {
+        let idx = channelFilters.isEmpty ? 0 : min(channel, channelFilters.count - 1)
+        var yA = dry
+        if !channelFilters.isEmpty {
+            for f in channelFilters[idx] {
+                yA = f.process(yA)
+            }
         }
-        y *= makeup
-        // Soft limiter — stereo-linked would need max(|L|,|R|); per-channel soft clip
-        // is milder on spatial beds and avoids hard mono coupling.
-        if y > 0.97 {
-            y = 0.97 + 0.03 * tanh((y - 0.97) * 8)
-        } else if y < -0.97 {
-            y = -0.97 + 0.03 * tanh((y + 0.97) * 8)
+
+        var eq: Float
+        if let target = targetChannelFilters, !target.isEmpty {
+            let tIdx = min(channel, target.count - 1)
+            var yB = dry
+            for f in target[tIdx] {
+                yB = f.process(yB)
+            }
+            let (gA, gB) = Self.equalPower(crossfadePos)
+            eq = yA * makeup * gA + yB * targetMakeup * gB
+        } else {
+            eq = yA * makeup
         }
-        return max(-1, min(1, y))
+
+        eq = softLimit(eq)
+        let dryOut = dryPassthrough ?? dry
+        let mixed = dryOut * (1 - wet) + eq * wet
+        return max(-1, min(1, mixed))
+    }
+
+    /// Advance crossfade + wet ramps once per audio frame (not per channel).
+    private func advanceFrameRamps() {
+        if targetChannelFilters != nil, crossfadeInc > 0 {
+            crossfadePos = min(1, crossfadePos + crossfadeInc)
+            if crossfadePos >= 1 {
+                promoteTargetIfNeeded(force: true)
+            }
+        }
+        if wetInc != 0 || abs(wetGain - wetTarget) > 1e-5 {
+            wetGain = advanceToward(wetGain, target: wetTarget, inc: &wetInc)
+        }
+    }
+
+    private func advanceToward(_ value: Float, target: Float, inc: inout Float) -> Float {
+        if abs(inc) < 1e-12 {
+            return target
+        }
+        let next = value + inc
+        if (inc > 0 && next >= target) || (inc < 0 && next <= target) {
+            inc = 0
+            return target
+        }
+        return next
+    }
+
+    private func softLimit(_ y: Float) -> Float {
+        var out = y
+        if out > 0.97 {
+            out = 0.97 + 0.03 * tanh((out - 0.97) * 8)
+        } else if out < -0.97 {
+            out = -0.97 + 0.03 * tanh((out + 0.97) * 8)
+        }
+        return out
     }
 
     // MARK: - Core Audio helpers

@@ -12,8 +12,14 @@ Three jobs (no network, no cloud APIs, pure Python 3 stdlib):
      built-in speakers, or external speakers each get a concert-hall / “you
      are there” contour — without mono-folding Spatial/Atmos feeds.
 
-Realtime path: Dynamo’s LocalAmplifyEngine applies the exported biquads.
-This CLI designs coeffs, analyzes PCM, and can process float32 stereo streams.
+**Seamless transitions (v3):**
+  - Equal-power dual-path crossfades between profiles / devices
+  - Soft wet fade-in / fade-out so engage never clicks
+  - Band-gain morph helpers for offline previews of intermediate curves
+  - Matches Dynamo LocalAmplifyEngine realtime behaviour (~90 ms profile, ~120 ms engage)
+
+Realtime path: Dynamo’s LocalAmplifyEngine applies the exported biquads with the
+same dual-bank crossfade + wet ramp.
 
 Usage:
   python3 dynamo_eq.py selftest
@@ -21,6 +27,9 @@ Usage:
   python3 dynamo_eq.py analyze --sr 48000 < stereo.f32le
   python3 dynamo_eq.py symphony --device auto --sr 48000 < stereo.f32le
   python3 dynamo_eq.py process --profile impact --device speakers --sr 48000 < in > out
+  python3 dynamo_eq.py process --from-profile cinema --profile symphony \\
+      --transition-ms 90 --fade-in-ms 120 --sr 48000 < in > out
+  python3 dynamo_eq.py morph --from-profile cinema --to-profile impact --steps 5
 """
 
 from __future__ import annotations
@@ -451,11 +460,80 @@ def process_sample(filters: Sequence[Biquad], x: float, makeup: float) -> float:
     for f in filters:
         y = f.process(y)
     y *= makeup
+    return soft_limit(y)
+
+
+def soft_limit(y: float) -> float:
     if y > 0.97:
         y = 0.97 + 0.03 * math.tanh((y - 0.97) * 8)
     elif y < -0.97:
         y = -0.97 + 0.03 * math.tanh((y + 0.97) * 8)
     return max(-1.0, min(1.0, y))
+
+
+# ---------------------------------------------------------------------------
+# Seamless transitions — equal-power dual path + wet ramps
+# ---------------------------------------------------------------------------
+
+# Defaults aligned with LocalAmplifyEngine (seconds → ms for CLI).
+DEFAULT_TRANSITION_MS = 90.0
+DEFAULT_FADE_IN_MS = 120.0
+DEFAULT_FADE_OUT_MS = 80.0
+
+
+def equal_power(t: float) -> Tuple[float, float]:
+    """Equal-power crossfade weights for t in [0, 1] (A→B)."""
+    x = max(0.0, min(1.0, t))
+    return math.cos(x * math.pi * 0.5), math.sin(x * math.pi * 0.5)
+
+
+def blend_bands(
+    a: Sequence[BandSpec],
+    b: Sequence[BandSpec],
+    t: float,
+) -> List[BandSpec]:
+    """
+    Morph band gains (and q) by label for offline previews.
+    Missing labels in either side are treated as 0 dB identity peers.
+    """
+    t = max(0.0, min(1.0, t))
+    by_a = {s.label or f"@{i}": s for i, s in enumerate(a)}
+    by_b = {s.label or f"@{i}": s for i, s in enumerate(b)}
+    labels = list(dict.fromkeys([*by_a.keys(), *by_b.keys()]))
+    out: List[BandSpec] = []
+    for lab in labels:
+        sa = by_a.get(lab)
+        sb = by_b.get(lab)
+        if sa and sb:
+            out.append(
+                BandSpec(
+                    kind=sb.kind if t >= 0.5 else sa.kind,
+                    freq=sa.freq * (1 - t) + sb.freq * t,
+                    gain_db=sa.gain_db * (1 - t) + sb.gain_db * t,
+                    q=sa.q * (1 - t) + sb.q * t,
+                    label=lab if not lab.startswith("@") else (sa.label or sb.label),
+                )
+            )
+        elif sa:
+            out.append(BandSpec(sa.kind, sa.freq, sa.gain_db * (1 - t), sa.q, sa.label))
+        elif sb:
+            out.append(BandSpec(sb.kind, sb.freq, sb.gain_db * t, sb.q, sb.label))
+    return out
+
+
+def wet_envelope(frame: int, total_frames: int, fade_in: int, fade_out: int) -> float:
+    """Linear wet 0→1→0 envelope in frames (equal-power optional at ends)."""
+    if total_frames <= 0:
+        return 1.0
+    w = 1.0
+    if fade_in > 0 and frame < fade_in:
+        w = frame / float(fade_in)
+    if fade_out > 0 and frame >= total_frames - fade_out:
+        rem = total_frames - frame
+        w = min(w, rem / float(fade_out))
+    # Equal-power shape on the ramp so loudness stays even.
+    w = max(0.0, min(1.0, w))
+    return math.sin(w * math.pi * 0.5)
 
 
 def process_stereo_ms(
@@ -464,17 +542,21 @@ def process_stereo_ms(
     filters_r: List[Biquad],
     makeup: float,
     width: float,
+    *,
+    fade_in_frames: int = 0,
+    fade_out_frames: int = 0,
 ) -> bytes:
-    """Stereo process with optional mid-side width (immersive stage, Spatial-safe)."""
+    """Stereo process with optional mid-side width + seamless wet fade."""
     n = len(data) // 4
     if n % 2:
         n -= 1
+    frames = n // 2
     out = bytearray()
     w = max(0.0, min(0.4, width))
-    for i in range(0, n, 2):
+    for fi, i in enumerate(range(0, n, 2)):
         l = struct.unpack_from("<f", data, i * 4)[0]
         r = struct.unpack_from("<f", data, (i + 1) * 4)[0]
-        # Mid-side encode
+        dry_l, dry_r = l, r
         mid = 0.5 * (l + r)
         side = 0.5 * (l - r)
         side *= 1.0 + w
@@ -482,8 +564,107 @@ def process_stereo_ms(
         r2 = mid - side
         lo = process_sample(filters_l, l2, makeup)
         ro = process_sample(filters_r, r2, makeup)
+        wet = wet_envelope(fi, frames, fade_in_frames, fade_out_frames)
+        lo = dry_l * (1.0 - wet) + lo * wet
+        ro = dry_r * (1.0 - wet) + ro * wet
         out += struct.pack("<ff", lo, ro)
     return bytes(out)
+
+
+def process_stereo_seamless(
+    data: bytes,
+    sr: float,
+    from_profile: str,
+    to_profile: str,
+    device: str = "auto",
+    analysis: Optional[MediaAnalysis] = None,
+    intensity: float = 1.0,
+    transition_ms: float = DEFAULT_TRANSITION_MS,
+    fade_in_ms: float = DEFAULT_FADE_IN_MS,
+    fade_out_ms: float = 0.0,
+) -> bytes:
+    """
+    Dual-path equal-power crossfade from one curve to another, plus wet engage.
+    Mirrors LocalAmplifyEngine realtime transitions for offline design/test.
+    """
+    bands_a, makeup_a, report_a = build_adaptive_bands(from_profile, device, analysis, intensity)
+    bands_b, makeup_b, report_b = build_adaptive_bands(to_profile, device, analysis, intensity)
+    fl_a = bands_to_filters(bands_a, sr)
+    fr_a = [f.clone() for f in fl_a]
+    fl_b = bands_to_filters(bands_b, sr)
+    fr_b = [f.clone() for f in fl_b]
+    width_a = float(report_a["width"])
+    width_b = float(report_b["width"])
+
+    n = len(data) // 4
+    if n % 2:
+        n -= 1
+    frames = n // 2
+    xfade = max(1, int(sr * (transition_ms / 1000.0)))
+    fade_in = max(0, int(sr * (fade_in_ms / 1000.0)))
+    fade_out = max(0, int(sr * (fade_out_ms / 1000.0)))
+
+    out = bytearray()
+    for fi, i in enumerate(range(0, n, 2)):
+        l = struct.unpack_from("<f", data, i * 4)[0]
+        r = struct.unpack_from("<f", data, (i + 1) * 4)[0]
+        dry_l, dry_r = l, r
+        t = min(1.0, fi / float(xfade)) if xfade > 0 else 1.0
+        gA, gB = equal_power(t)
+        w = width_a * gA + width_b * gB
+
+        mid = 0.5 * (l + r)
+        side = 0.5 * (l - r) * (1.0 + w)
+        l2, r2 = mid + side, mid - side
+
+        la = process_sample(fl_a, l2, makeup_a)
+        ra = process_sample(fr_a, r2, makeup_a)
+        lb = process_sample(fl_b, l2, makeup_b)
+        rb = process_sample(fr_b, r2, makeup_b)
+        lo = la * gA + lb * gB
+        ro = ra * gA + rb * gB
+
+        wet = wet_envelope(fi, frames, fade_in, fade_out)
+        lo = dry_l * (1.0 - wet) + lo * wet
+        ro = dry_r * (1.0 - wet) + ro * wet
+        out += struct.pack("<ff", max(-1.0, min(1.0, lo)), max(-1.0, min(1.0, ro)))
+    return bytes(out)
+
+
+def morph_payload(
+    from_profile: str,
+    to_profile: str,
+    sample_rate: float,
+    device: str = "auto",
+    steps: int = 5,
+    intensity: float = 1.0,
+) -> dict:
+    """Emit intermediate band morphs for designers / unit tests."""
+    a, _, _ = build_adaptive_bands(from_profile, device, None, intensity)
+    b, _, _ = build_adaptive_bands(to_profile, device, None, intensity)
+    frames = []
+    n = max(2, steps)
+    for i in range(n):
+        t = i / float(n - 1)
+        bands = blend_bands(a, b, t)
+        gA, gB = equal_power(t)
+        frames.append(
+            {
+                "t": round(t, 4),
+                "equal_power": {"a": round(gA, 5), "b": round(gB, 5)},
+                "bands": [asdict(x) for x in bands],
+            }
+        )
+    return {
+        "engine": "DynamoEQ",
+        "version": 3,
+        "seamless": True,
+        "from_profile": from_profile,
+        "to_profile": to_profile,
+        "device": device,
+        "steps": n,
+        "frames": frames,
+    }
 
 
 def coeffs_payload(
@@ -497,9 +678,13 @@ def coeffs_payload(
     filters = bands_to_filters(bands, sample_rate)
     return {
         "engine": "DynamoEQ",
-        "version": 2,
+        "version": 3,
         "symphony": True,
         "spatial_safe": True,
+        "seamless": True,
+        "transition_ms": DEFAULT_TRANSITION_MS,
+        "fade_in_ms": DEFAULT_FADE_IN_MS,
+        "fade_out_ms": DEFAULT_FADE_OUT_MS,
         "profile": report["profile"],
         "device": report["device"],
         "media_type": report["media_type"],
@@ -547,6 +732,8 @@ def selftest() -> None:
     assert a.media_type in BASE_PROFILES or a.media_type in MEDIA_BIAS
     payload = coeffs_payload("symphony", sr, "headphones", a, 1.0)
     assert payload["width"] > 0
+    assert payload["version"] == 3
+    assert payload["seamless"] is True
     assert len(payload["biquads"]) >= 5
     # Process should not explode
     filters = bands_to_filters(
@@ -558,6 +745,36 @@ def selftest() -> None:
         y = process_sample(filters, x, payload["makeup"])
         peak = max(peak, abs(y))
     assert peak < 1.05, peak
+
+    # Seamless transition: dual-path should not produce NaNs or hard jumps > hard clip.
+    stereo = bytearray()
+    for x in mono[:8000]:
+        stereo += struct.pack("<ff", x, x * 0.9)
+    out = process_stereo_seamless(
+        bytes(stereo),
+        sr,
+        "cinema",
+        "impact",
+        device="headphones",
+        transition_ms=40,
+        fade_in_ms=20,
+    )
+    assert len(out) == len(stereo)
+    samples = struct.unpack("<" + "f" * (len(out) // 4), out)
+    assert all(math.isfinite(s) for s in samples)
+    assert max(abs(s) for s in samples) <= 1.0 + 1e-5
+
+    # Equal-power continuity
+    g0a, g0b = equal_power(0.0)
+    g1a, g1b = equal_power(1.0)
+    assert abs(g0a - 1.0) < 1e-9 and abs(g0b) < 1e-9
+    assert abs(g1b - 1.0) < 1e-9 and abs(g1a) < 1e-9
+    mid_a, mid_b = equal_power(0.5)
+    assert abs(mid_a * mid_a + mid_b * mid_b - 1.0) < 1e-6
+
+    morph = morph_payload("presence", "symphony", sr, "auto", steps=4)
+    assert len(morph["frames"]) == 4
+
     print(
         "selftest ok",
         {
@@ -566,6 +783,8 @@ def selftest() -> None:
             "width": payload["width"],
             "bands": len(payload["bands"]),
             "peak": peak,
+            "seamless": True,
+            "version": 3,
         },
     )
 
@@ -591,10 +810,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     pr = sub.add_parser("process", help="Process stereo float32 LE PCM stdin→stdout")
     pr.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
+    pr.add_argument(
+        "--from-profile",
+        default=None,
+        choices=list(BASE_PROFILES),
+        help="Start curve for seamless dual-path crossfade into --profile",
+    )
     pr.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
     pr.add_argument("--sr", type=float, default=48000.0)
     pr.add_argument("--intensity", type=float, default=1.0)
     pr.add_argument("--adapt", action="store_true", help="Analyze stream then adapt")
+    pr.add_argument(
+        "--transition-ms",
+        type=float,
+        default=DEFAULT_TRANSITION_MS,
+        help="Profile/device crossfade length (ms)",
+    )
+    pr.add_argument(
+        "--fade-in-ms",
+        type=float,
+        default=DEFAULT_FADE_IN_MS,
+        help="Wet engage ramp (ms); 0 disables",
+    )
+    pr.add_argument(
+        "--fade-out-ms",
+        type=float,
+        default=0.0,
+        help="Wet disengage ramp at end (ms)",
+    )
+
+    m = sub.add_parser("morph", help="Emit intermediate band morphs (JSON) between profiles")
+    m.add_argument("--from-profile", default="cinema", choices=list(BASE_PROFILES))
+    m.add_argument("--to-profile", default="symphony", choices=list(BASE_PROFILES))
+    m.add_argument("--device", default="auto", choices=list(DEVICE_BIAS))
+    m.add_argument("--sr", type=float, default=48000.0)
+    m.add_argument("--steps", type=int, default=5)
+    m.add_argument("--intensity", type=float, default=1.0)
 
     sub.add_parser("selftest")
     args = p.parse_args(argv)
@@ -620,19 +871,64 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(json.dumps(coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity), indent=2))
         return 0
 
+    if args.cmd == "morph":
+        print(
+            json.dumps(
+                morph_payload(
+                    args.from_profile,
+                    args.to_profile,
+                    args.sr,
+                    args.device,
+                    args.steps,
+                    args.intensity,
+                ),
+                indent=2,
+            )
+        )
+        return 0
+
     if args.cmd == "process":
         raw = sys.stdin.buffer.read()
         analysis = None
         if args.adapt:
             _, _, mono = read_stereo_mono(raw)
             analysis = analyze_mono(mono, args.sr) if mono else None
-        payload = coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity)
-        bands = [BandSpec(b["kind"], b["freq"], b["gain_db"], b.get("q", 0.9), b.get("label", "")) for b in payload["bands"]]
-        fl = bands_to_filters(bands, args.sr)
-        fr = [f.clone() for f in fl]
-        sys.stdout.buffer.write(
-            process_stereo_ms(raw, fl, fr, payload["makeup"], payload["width"])
-        )
+        fade_in_frames = max(0, int(args.sr * (args.fade_in_ms / 1000.0)))
+        fade_out_frames = max(0, int(args.sr * (args.fade_out_ms / 1000.0)))
+        if args.from_profile and args.from_profile != args.profile:
+            sys.stdout.buffer.write(
+                process_stereo_seamless(
+                    raw,
+                    args.sr,
+                    args.from_profile,
+                    args.profile,
+                    device=args.device,
+                    analysis=analysis,
+                    intensity=args.intensity,
+                    transition_ms=args.transition_ms,
+                    fade_in_ms=args.fade_in_ms,
+                    fade_out_ms=args.fade_out_ms,
+                )
+            )
+        else:
+            payload = coeffs_payload(args.profile, args.sr, args.device, analysis, args.intensity)
+            bands = [
+                BandSpec(b["kind"], b["freq"], b["gain_db"], b.get("q", 0.9), b.get("label", ""))
+                for b in payload["bands"]
+            ]
+            fl = bands_to_filters(bands, args.sr)
+            fr = [f.clone() for f in fl]
+            sys.stdout.buffer.write(
+                process_stereo_ms(
+                    raw,
+                    fl,
+                    fr,
+                    payload["makeup"],
+                    payload["width"],
+                    fade_in_frames=fade_in_frames,
+                    fade_out_frames=fade_out_frames,
+                )
+            )
         return 0
 
     return 1

@@ -72,8 +72,9 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 | | |
 |--|--|
 | **Realtime** | `LocalAmplifyEngine` — process tap → multi-band EQ → output (macOS **14.2+**) |
-| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` — pure Python 3 stdlib |
+| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` v3 — pure Python 3 stdlib |
 | **Profiles** | **Symphony** (adaptive default) · Presence · Cinema · Impact |
+| **Seamless** | Equal-power dual-bank crossfade (~90 ms) on profile/device; wet engage (~120 ms) / soft stop (~80 ms) |
 | **Spatial / Atmos** | Post-render EQ; same curve per channel; no mono fold |
 | **UI** | Green = on · red = off; device picker in Preferences → Feel & alerts |
 
@@ -81,6 +82,10 @@ Local sound processing only — **no Music Automation, no cloud APIs, not the vo
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
 python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000
 python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --sr 48000 < stereo.f32le
+# Seamless offline morph cinema → symphony with engage ramp:
+python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symphony \
+  --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le
+python3 Tools/DynamoEQ/dynamo_eq.py morph --from-profile cinema --to-profile impact --steps 5
 ```
 
 ### Peek as notification surface

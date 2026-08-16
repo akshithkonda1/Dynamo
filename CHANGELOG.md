@@ -13,7 +13,8 @@ All notable changes to Dynamo are documented here.
 - **Device-aware symphony path**: wired headphones, wireless/BT, Mac speakers, external
 - Spatial / Atmos–safe: post-render EQ, same curve per channel, mid-side width on stereo
 - Profiles: **Symphony** (default adaptive) · Presence · Cinema · Impact
-- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs`, `process`)
+- **Seamless transitions (v3):** equal-power dual-bank crossfade (~90 ms) on profile/device change; wet engage (~120 ms) / soft stop (~80 ms); Python `process --from-profile` / `morph`
+- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs`, `process`, `morph`)
 
 ### Performance & feel
 - Adaptive media poll (faster while playing, idle back-off)

@@ -25,10 +25,10 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .symphony: return "Adaptive concert-hall path — media + device aware"
-        case .presence: return "Dialogue clarity & air — local multi-band EQ"
-        case .cinema: return "Loudness contour + soft mid scoop — local EQ"
-        case .impact: return "Bass body & punch — local EQ, not the volume fader"
+        case .symphony: return "Adaptive concert-hall path — seamless media + device morph"
+        case .presence: return "Dialogue clarity & air — soft-crossfade local EQ"
+        case .cinema: return "Loudness contour + soft mid scoop — click-free switch"
+        case .impact: return "Bass body & punch — local EQ, seamless engage"
         }
     }
 

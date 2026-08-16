@@ -107,8 +107,10 @@ class TestSymphonyCoeffs(unittest.TestCase):
     def test_coeffs_json_shape(self):
         payload = eq.coeffs_payload("symphony", 48000, "headphones", None, 1.0)
         self.assertEqual(payload["engine"], "DynamoEQ")
-        self.assertEqual(payload["version"], 2)
+        self.assertEqual(payload["version"], 3)
         self.assertTrue(payload["spatial_safe"])
+        self.assertTrue(payload["seamless"])
+        self.assertIn("transition_ms", payload)
         self.assertIn("biquads", payload)
         self.assertGreaterEqual(len(payload["biquads"]), 5)
         self.assertGreater(payload["width"], 0)
@@ -133,8 +135,59 @@ class TestSymphonyCoeffs(unittest.TestCase):
         bands, makeup, report = eq.build_adaptive_bands("impact", "speakers", None, 1.0)
         fl = eq.bands_to_filters(bands, 48000)
         fr = [f.clone() for f in fl]
-        out = eq.process_stereo_ms(raw, fl, fr, makeup, report["width"])
+        out = eq.process_stereo_ms(raw, fl, fr, makeup, report["width"], fade_in_frames=2)
         self.assertEqual(len(out), len(raw))
+
+
+class TestSeamlessTransitions(unittest.TestCase):
+    def test_equal_power_unity_energy(self):
+        for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+            a, b = eq.equal_power(t)
+            self.assertAlmostEqual(a * a + b * b, 1.0, places=6)
+
+    def test_blend_bands_midpoint(self):
+        a, _, _ = eq.build_adaptive_bands("presence", "auto", None, 1.0)
+        b, _, _ = eq.build_adaptive_bands("impact", "auto", None, 1.0)
+        mid = eq.blend_bands(a, b, 0.5)
+        self.assertTrue(mid)
+        # At least one gain should sit between the two curves when labels overlap
+        by_a = {s.label: s.gain_db for s in a if s.label}
+        by_b = {s.label: s.gain_db for s in b if s.label}
+        by_m = {s.label: s.gain_db for s in mid if s.label}
+        shared = set(by_a) & set(by_b) & set(by_m)
+        self.assertTrue(shared)
+        lab = next(iter(shared))
+        lo, hi = sorted((by_a[lab], by_b[lab]))
+        self.assertGreaterEqual(by_m[lab] + 1e-6, lo)
+        self.assertLessEqual(by_m[lab] - 1e-6, hi)
+
+    def test_seamless_process_finite_and_bounded(self):
+        frames = []
+        for i in range(2000):
+            frames.append(0.15 * math.sin(i * 0.05))
+            frames.append(0.12 * math.cos(i * 0.04))
+        raw = struct.pack("<" + "f" * len(frames), *frames)
+        out = eq.process_stereo_seamless(
+            raw,
+            48000,
+            "cinema",
+            "symphony",
+            device="headphones",
+            transition_ms=30,
+            fade_in_ms=15,
+        )
+        self.assertEqual(len(out), len(raw))
+        samples = struct.unpack("<" + "f" * (len(out) // 4), out)
+        self.assertTrue(all(math.isfinite(s) for s in samples))
+        self.assertLessEqual(max(abs(s) for s in samples), 1.0 + 1e-5)
+
+    def test_morph_payload_steps(self):
+        payload = eq.morph_payload("cinema", "impact", 48000, "auto", steps=5)
+        self.assertEqual(payload["version"], 3)
+        self.assertTrue(payload["seamless"])
+        self.assertEqual(len(payload["frames"]), 5)
+        self.assertEqual(payload["frames"][0]["t"], 0.0)
+        self.assertEqual(payload["frames"][-1]["t"], 1.0)
 
 
 class TestCLI(unittest.TestCase):
@@ -151,6 +204,19 @@ class TestCLI(unittest.TestCase):
             code = eq.main(["coeffs", "--profile", "cinema", "--device", "auto", "--sr", "48000"])
         self.assertEqual(code, 0)
         self.assertIn("biquads", buf.getvalue())
+        self.assertIn("seamless", buf.getvalue())
+
+    def test_morph_main(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = eq.main(
+                ["morph", "--from-profile", "presence", "--to-profile", "symphony", "--steps", "3"]
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("frames", buf.getvalue())
 
 
 if __name__ == "__main__":
