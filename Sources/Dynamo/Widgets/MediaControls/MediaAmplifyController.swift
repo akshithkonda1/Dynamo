@@ -191,6 +191,7 @@ final class MediaAmplifyController: ObservableObject {
     }
 
     func toggle() {
+        // Explicit user action — flip via isEnabled so didSet starts/stops once.
         isEnabled.toggle()
     }
 
@@ -280,7 +281,8 @@ final class MediaAmplifyController: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = nil
         if #available(macOS 14.2, *) {
-            LocalAmplifyEngine.shared.stop()
+            // Immediate teardown so toggle-off is reliable (no stuck “Fading out…”).
+            LocalAmplifyEngine.shared.stop(immediate: true)
         }
         statusLine = "Off"
         lastError = nil

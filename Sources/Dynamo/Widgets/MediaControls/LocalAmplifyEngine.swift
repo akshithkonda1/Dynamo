@@ -184,9 +184,29 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     }
 
     func stop() {
+        stop(immediate: false)
+    }
+
+    /// Soft fade by default; `immediate: true` tears down now (toggle-off / meeting enter).
+    func stop(immediate: Bool) {
         queue.async {
             guard self.isRunning else {
                 self.teardownLocked()
+                self.isRunning = false
+                self.statusLine = "Off"
+                self.lastError = nil
+                self.spatialHint = ""
+                self.spatialPath = .stereo
+                self.tapModeLabel = ""
+                self.pendingStopAfterWet = false
+                return
+            }
+            if immediate {
+                self.pendingStopAfterWet = false
+                self.wetGain = 0
+                self.wetInc = 0
+                self.teardownLocked()
+                self.isRunning = false
                 self.statusLine = "Off"
                 self.lastError = nil
                 self.spatialHint = ""
