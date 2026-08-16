@@ -33,6 +33,8 @@ enum DynamoNotificationAPI {
         var category: String = "api"
         var id: String? = nil
         var coalesce: Bool = true
+        /// Contact photo / app icon bytes — Peek chrome tints to this image’s palette.
+        var artworkData: Data? = nil
 
         var asPeek: NotchSneakPeek {
             NotchSneakPeek(
@@ -40,6 +42,7 @@ enum DynamoNotificationAPI {
                 title: title,
                 subtitle: subtitle,
                 urgency: urgency,
+                artworkData: artworkData,
                 detail: detail
             )
         }
@@ -68,7 +71,8 @@ enum DynamoNotificationAPI {
         systemImage: String = "bell.fill",
         urgency: NotchSneakPeekUrgency = .normal,
         category: String = "api",
-        id: String? = nil
+        id: String? = nil,
+        artworkData: Data? = nil
     ) {
         post(Payload(
             title: title,
@@ -77,7 +81,8 @@ enum DynamoNotificationAPI {
             systemImage: systemImage,
             urgency: urgency,
             category: category,
-            id: id
+            id: id,
+            artworkData: artworkData
         ))
     }
 

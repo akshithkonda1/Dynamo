@@ -95,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             clocks.requestCurrentLocation()
         }
+        // Contacts: so call/text Peeks can show the contact photo + matching tint.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            ContactPhotoResolver.requestAccessOnLaunchIfNeeded()
+        }
 
         WidgetSettingsStore.shared.apply(to: registry)
         // Drop any legacy "weather" id from saved tray prefs.

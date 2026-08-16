@@ -249,14 +249,19 @@ struct SettingsView: View {
                     .lineLimit(1)
             }
             Button("Send test text Peek") {
+                // Prefer a real contact photo so chrome tints match the photo.
+                let name = "Alex"
+                let art = ContactPhotoResolver.imageData(matchingName: name)
+                    ?? ContactPhotoResolver.imageData(matchingName: NSFullUserName())
                 DynamoNotificationAPI.post(
-                    title: "Alex",
+                    title: name,
                     subtitle: "On my way — 5 min",
                     detail: "Text · Messages",
                     systemImage: "message.fill",
                     urgency: .critical,
                     category: "text",
-                    id: "test-text|\(Date().timeIntervalSince1970)"
+                    id: "test-text|\(Date().timeIntervalSince1970)",
+                    artworkData: art
                 )
             }
             .controlSize(.small)

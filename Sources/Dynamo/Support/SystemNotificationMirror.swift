@@ -182,6 +182,12 @@ final class SystemNotificationMirror: ObservableObject {
             }
 
             let urgency = urgency(for: kind)
+            // Contact photo (or notification attachment) — Peek chrome tints to its palette.
+            let artwork = resolveArtwork(
+                kind: kind,
+                title: peekTitle,
+                note: note
+            )
             DynamoNotificationAPI.post(
                 title: peekTitle,
                 subtitle: peekSubtitle,
@@ -189,7 +195,8 @@ final class SystemNotificationMirror: ObservableObject {
                 systemImage: kind.systemImage,
                 urgency: urgency,
                 category: kind.category,
-                id: "system|\(kind.category)|\(uuidKey)"
+                id: "system|\(kind.category)|\(uuidKey)",
+                artworkData: artwork
             )
             mirroredCount &+= 1
             lastMirroredApp = appName
@@ -209,6 +216,23 @@ final class SystemNotificationMirror: ObservableObject {
             return .high
         case .general:
             return .normal
+        }
+    }
+
+    /// Prefer notification attachment image; else Contacts thumbnail for call/text titles.
+    private func resolveArtwork(kind: NotificationKind, title: String, note: ParsedNote) -> Data? {
+        if let embedded = note.imageData, !embedded.isEmpty, NSImage(data: embedded) != nil {
+            return embedded
+        }
+        switch kind {
+        case .call, .text:
+            return ContactPhotoResolver.imageData(matchingName: title)
+        case .mail, .general:
+            // Try contact match on mail sender names too when it looks like a person.
+            if title.split(separator: " ").count <= 4 {
+                return ContactPhotoResolver.imageData(matchingName: title)
+            }
+            return nil
         }
     }
 
@@ -298,6 +322,8 @@ final class SystemNotificationMirror: ObservableObject {
         var title: String
         var body: String
         var uuid: String
+        /// Optional image payload from the notification blob (rare).
+        var imageData: Data? = nil
     }
 
     private static func resolveDBPath() -> String? {
@@ -438,12 +464,68 @@ final class SystemNotificationMirror: ObservableObject {
             }
         }
 
+        let imageData = extractImageData(from: root)
+            ?? extractImageData(from: req)
+            ?? extractImageData(from: content)
+            ?? extractImageData(from: userInfo)
+
         return ParsedNote(
             appIdentifier: app.isEmpty ? row.appIdentifier : app,
             title: title,
             body: body,
-            uuid: uuid
+            uuid: uuid,
+            imageData: imageData
         )
+    }
+
+    /// Best-effort scan for image-bearing Data blobs (attachments / icons).
+    private static func extractImageData(from dict: [String: Any]) -> Data? {
+        let imageKeys = [
+            "image", "icon", "attachment", "attachments", "thumb", "thumbnail",
+            "imageData", "iconData", "contentImage", "avatar"
+        ]
+        for key in imageKeys {
+            if let data = dict[key] as? Data, isImageData(data) { return data }
+            if let arr = dict[key] as? [Any] {
+                for item in arr {
+                    if let data = item as? Data, isImageData(data) { return data }
+                    if let nested = item as? [String: Any],
+                       let data = extractImageData(from: nested) {
+                        return data
+                    }
+                }
+            }
+            if let nested = dict[key] as? [String: Any],
+               let data = extractImageData(from: nested) {
+                return data
+            }
+        }
+        // Shallow walk of Data values (limit to avoid heavy scans).
+        var checked = 0
+        for (_, value) in dict {
+            checked += 1
+            if checked > 40 { break }
+            if let data = value as? Data, isImageData(data) { return data }
+        }
+        return nil
+    }
+
+    private static func isImageData(_ data: Data) -> Bool {
+        guard data.count > 24, data.count < 2_500_000 else { return false }
+        // JPEG
+        if data[0] == 0xFF, data[1] == 0xD8 { return true }
+        // PNG
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return true }
+        // GIF
+        if data.starts(with: [0x47, 0x49, 0x46]) { return true }
+        // HEIC / ftyp
+        if data.count > 12 {
+            let ftyp = data.subdata(in: 4..<8)
+            if ftyp == Data("ftyp".utf8) { return true }
+        }
+        // TIFF
+        if data.starts(with: [0x49, 0x49]) || data.starts(with: [0x4D, 0x4D]) { return true }
+        return false
     }
 
     private static func firstString(in dict: [String: Any], keys: [String]) -> String? {
