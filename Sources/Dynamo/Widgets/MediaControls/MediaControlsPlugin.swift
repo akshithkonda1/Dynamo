@@ -643,7 +643,13 @@ private struct ExpandedMediaView: View {
                 }
             }
         }
-        .onChange(of: plugin.info.sourceApp) { _ in
+        .onChange(of: plugin.info.sourceApp) { newValue in
+            // Prefer tapping the active player (Music / Spotify) for Atmos/Spatial feeds.
+            switch newValue {
+            case .music: amplify.preferredPlayerBundleID = "com.apple.Music"
+            case .spotify: amplify.preferredPlayerBundleID = "com.spotify.client"
+            default: break
+            }
             amplify.reapplyForSource()
         }
         .onChange(of: plugin.info.title) { _ in

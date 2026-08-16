@@ -9,9 +9,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>Dynamo</string>
 	<key>CFBundleVersion</key>
-	<string>101</string>
+	<string>111</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.1.1</string>
 	<key>CFBundleExecutable</key>
 	<string>Dynamo</string>
 	<key>CFBundlePackageType</key>
@@ -40,10 +40,10 @@
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Dynamo controls Music and Spotify for play/pause, skip, cover art, playlists, and Amplify EQ presets in the notch.</string>
+	<string>Dynamo controls Music and Spotify for media, and Apple Notes for the Checklist Notes tab (create, list, open, and delete notes in the Dynamo folder).</string>
 	<!-- Live peek equalizer samples system / player audio (Core Audio process tap). -->
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer to the beat and tone of what’s playing. Audio is analyzed on-device only and never recorded or sent anywhere.</string>
+	<string>Dynamo samples audio from Music or Spotify to drive the notch equalizer and optional Amplify EQ (including Spatial Audio / Atmos renders). Audio is processed on-device only and never recorded or sent anywhere.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Dynamo uses the microphone only when you enable Listen in Meeting Mode for optional speech-to-text notes, or for on-device music equalizer analysis. Audio is processed on this Mac and is never uploaded by Dynamo.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

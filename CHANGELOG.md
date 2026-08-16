@@ -2,6 +2,28 @@
 
 All notable changes to Dynamo are documented here.
 
+## [1.1.1] — 2026-08-15
+
+**Symphony Amplify + polish release.**
+
+### Amplify / DynamoEQ
+- Local multi-band amplifier (no Music Automation, no network APIs)
+- **Media type & quality** analysis (speech / music / bass-heavy / bright / low-quality)
+- **Per-note spectral tuning** (sub, punch, presence, air, …)
+- **Device-aware symphony path**: wired headphones, wireless/BT, Mac speakers, external
+- Spatial / Atmos–safe: post-render EQ, same curve per channel, mid-side width on stereo
+- Profiles: **Symphony** (default adaptive) · Presence · Cinema · Impact
+- Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs`, `process`)
+
+### Also in this line
+- World Clock distance / reverse / random sort
+- Preferences rebrand, Feel & alerts, icon-only tray + hover previews
+- Calendar full-access fix, compact empty island, wider island (1650pt)
+
+### Version
+- `CFBundleShortVersionString` **1.1.1** / build **111**
+
+
 ## [1.0.1] — 2026-08-15
 
 **Snappier notch + World Clock + Preferences.**

@@ -1,23 +1,22 @@
 import AppKit
+import AVFoundation
 import Foundation
 
 /// Dolby-like **intent** profiles — reshape how music *hits*, not the volume fader.
 ///
-/// Maps to perceptual stages similar to consumer Dolby “enhancement” modes:
-/// presence (dialogue/air), cinema (perceived loudness contour), impact (body/bass).
-/// Implementation is EQ-only on Apple Music (no system volume, no virtual driver).
+/// Curves designed by `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs)
+/// and applied in real time by `LocalAmplifyEngine` (process tap + multi-band EQ).
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
-    /// Dialogue / air / vocal presence (clarity without louder fader).
+    case symphony
     case presence
-    /// Cinema-style perceived loudness contour (lows + highs; soft mid scoop).
     case cinema
-    /// Bass weight + physical impact (energy without maxing volume keys).
     case impact
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .symphony: return "Symphony"
         case .presence: return "Presence"
         case .cinema: return "Cinema"
         case .impact: return "Impact"
@@ -26,72 +25,57 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .presence: return "Dialogue clarity & air — Dolby-like presence"
-        case .cinema: return "Perceived loudness contour — not the volume keys"
-        case .impact: return "Bass body & punch — dynamics feel, not fader"
+        case .symphony: return "Adaptive concert-hall path — media + device aware"
+        case .presence: return "Dialogue clarity & air — local multi-band EQ"
+        case .cinema: return "Loudness contour + soft mid scoop — local EQ"
+        case .impact: return "Bass body & punch — local EQ, not the volume fader"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
         case .impact: return "waveform.path.ecg"
         }
     }
 
-    /// Preferred Music EQ presets in order (first available wins).
-    /// Names match Music’s built-in EQ preset list (macOS).
-    var musicEQPresetCandidates: [String] {
-        switch self {
-        case .presence:
-            return ["Vocal Booster", "Treble Booster", "Pop", "Jazz"]
-        case .cinema:
-            // “Loudness” is not always present — prefer built-ins that lift lows/highs.
-            return ["R&B", "Electronic", "Dance", "Classical", "Pop", "Flat"]
-        case .impact:
-            return ["Bass Booster", "Hip-Hop", "Electronic", "Rock", "Dance", "Deep"]
-        }
-    }
-
-    /// Migrate pre-Dolby profile raw values.
     static func resolved(fromStored raw: String?) -> MediaAmplifyProfile {
-        guard let raw else { return .cinema }
+        guard let raw else { return .symphony }
         if let p = MediaAmplifyProfile(rawValue: raw) { return p }
         switch raw {
         case "crisp": return .presence
         case "balanced": return .cinema
         case "visceral": return .impact
-        default: return .cinema
+        default: return .symphony
         }
     }
 }
 
-/// Dolby-inspired Amplify: **tone + perceived impact via EQ only**.
+/// Local Amplify controller — **no Music Automation, no cloud APIs**.
 ///
-/// Never touches system volume. Pipeline:
-/// 1. Capture prior Music EQ baseline once per enable session.
-/// 2. Apply intent-matched built-in Music EQ preset (with fallbacks).
-/// 3. Re-apply on source / track changes so skips stay consistent.
-/// 4. Restore baseline on disable.
+/// On macOS 14.2+: process-tap capture → DynamoEQ biquads → muted source + EQ’d output.
+/// Coefficients from embedded curves (always) or optional `dynamo_eq.py` helper.
 @MainActor
 final class MediaAmplifyController: ObservableObject {
     static let shared = MediaAmplifyController()
 
     private static let enabledKey = "dynamo.media.amplify.enabled"
     private static let profileKey = "dynamo.media.amplify.profile"
-    private static let savedEQKey = "dynamo.media.amplify.savedEQ"
-    private static let savedPresetKey = "dynamo.media.amplify.savedPreset"
+    private static let deviceKey = "dynamo.media.amplify.device"
     private static let legacySavedVolumeKey = "dynamo.media.amplify.savedVolume"
-    private static let activePresetKey = "dynamo.media.amplify.activePreset"
+    private static let legacySavedEQKey = "dynamo.media.amplify.savedEQ"
+    private static let legacySavedPresetKey = "dynamo.media.amplify.savedPreset"
+    private static let legacyActivePresetKey = "dynamo.media.amplify.activePreset"
 
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
             if isEnabled {
-                apply(reason: "enable")
+                startEngine(reason: "enable")
             } else {
-                restore()
+                stopEngine()
             }
         }
     }
@@ -100,7 +84,19 @@ final class MediaAmplifyController: ObservableObject {
         didSet {
             UserDefaults.standard.set(profile.rawValue, forKey: Self.profileKey)
             if isEnabled {
-                apply(reason: "profile")
+                updateEngineProfile()
+            } else {
+                statusLine = "Off"
+            }
+        }
+    }
+
+    /// Headphones / wireless / speakers / external — auto-detect from system output name.
+    @Published var outputDevice: AmplifyOutputDevice {
+        didSet {
+            UserDefaults.standard.set(outputDevice.rawValue, forKey: Self.deviceKey)
+            if isEnabled {
+                updateEngineProfile()
             }
         }
     }
@@ -108,44 +104,60 @@ final class MediaAmplifyController: ObservableObject {
     @Published private(set) var statusLine: String = "Off"
     @Published private(set) var lastError: String?
     @Published private(set) var activePresetName: String?
-    /// True when last failure looks like missing Automation permission.
     @Published private(set) var needsAutomationPermission: Bool = false
 
-    private var didCaptureBaseline = false
-    private var lastAppliedTrackKey: String = ""
-    private var cachedPresetNames: [String] = []
-    private var lastPresetListAt: Date = .distantPast
+    /// Bundle id of the player to tap (Music / Spotify); nil = auto.
+    var preferredPlayerBundleID: String?
+
+    private var pollTimer: Timer?
 
     private init() {
+        // Drop legacy Music-EQ / volume-boost state.
         UserDefaults.standard.removeObject(forKey: Self.legacySavedVolumeKey)
+        UserDefaults.standard.removeObject(forKey: Self.legacySavedEQKey)
+        UserDefaults.standard.removeObject(forKey: Self.legacySavedPresetKey)
+        UserDefaults.standard.removeObject(forKey: Self.legacyActivePresetKey)
 
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         profile = MediaAmplifyProfile.resolved(
             fromStored: UserDefaults.standard.string(forKey: Self.profileKey)
         )
-        activePresetName = UserDefaults.standard.string(forKey: Self.activePresetKey)
-        statusLine = isEnabled ? statusForEnabled() : "Off"
+        if let raw = UserDefaults.standard.string(forKey: Self.deviceKey),
+           let d = AmplifyOutputDevice(rawValue: raw) {
+            outputDevice = d
+        } else {
+            outputDevice = .auto
+        }
+        statusLine = isEnabled ? "\(profile.title) · Symphony EQ" : "Off"
         if isEnabled {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
-                self?.apply(reason: "launch")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.startEngine(reason: "launch")
             }
         }
     }
 
-    /// Source app changed (Music ↔ Spotify).
-    func reapplyForSource() {
-        guard isEnabled else { return }
-        lastAppliedTrackKey = ""
-        apply(reason: "source")
+    private var resolvedDevice: AmplifyOutputDevice {
+        if outputDevice != .auto { return outputDevice }
+        let out = AudioOutputController.shared
+        out.refresh()
+        let name: String?
+        if let sel = out.selectedID {
+            name = out.devices.first(where: { $0.id == sel })?.name
+        } else {
+            name = out.devices.first?.name
+        }
+        return AmplifyOutputDevice.infer(fromDeviceName: name)
     }
 
-    /// Track changed — re-assert EQ so skips don’t drop the contour.
-    func reapplyForTrack(title: String, artist: String) {
+    func reapplyForSource() {
         guard isEnabled else { return }
-        let key = "\(title)\u{1}\(artist)"
-        guard key != lastAppliedTrackKey else { return }
-        lastAppliedTrackKey = key
-        apply(reason: "track")
+        startEngine(reason: "source")
+    }
+
+    func reapplyForTrack(title: String, artist: String) {
+        // Local EQ is continuous — no per-track re-script needed.
+        _ = title
+        _ = artist
     }
 
     func toggle() {
@@ -161,390 +173,110 @@ final class MediaAmplifyController: ObservableObject {
         profile = all[(idx + 1) % all.count]
     }
 
-    /// Retry apply (e.g. after user grants Automation).
     func retryApply() {
         guard isEnabled else { return }
-        cachedPresetNames = []
-        lastPresetListAt = .distantPast
-        apply(reason: "retry")
+        startEngine(reason: "retry")
     }
 
     func openAutomationSettings() {
-        PermissionsStore.shared.openSystemSettings(for: .automationMusic)
+        // Legacy button — local EQ uses Audio capture privacy, not Automation.
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
-    // MARK: - Apply / Restore
+    // MARK: - Engine
 
-    private func apply(reason: String) {
-        lastError = nil
+    private func startEngine(reason: String) {
         needsAutomationPermission = false
-        captureBaselineIfNeeded()
+        lastError = nil
 
-        guard Self.isMusicRunning() else {
-            // Launch Music in background so EQ can attach next tick (no UI focus steal if already open).
+        guard #available(macOS 14.2, *) else {
+            statusLine = "\(profile.title) · needs macOS 14.2+"
+            lastError = "Local Amplify EQ requires macOS 14.2 or later (process audio tap)."
             activePresetName = nil
-            statusLine = "\(profile.title) · open Music for EQ"
-            #if DEBUG
-            print("[MediaAmplify] \(reason): armed, Music not running")
-            #endif
             return
         }
 
-        // Warm Automation: a no-op read often triggers the first TCC prompt.
-        _ = Self.pingMusicScripting()
-
-        if let preset = applyMusicEQWithFallbacks(profile.musicEQPresetCandidates) {
-            activePresetName = preset
-            UserDefaults.standard.set(preset, forKey: Self.activePresetKey)
-            statusLine = "\(profile.title) · \(preset)"
-            lastError = nil
-            needsAutomationPermission = false
-            PermissionsStore.shared.recordGranted(.automationMusic)
-        } else {
-            activePresetName = nil
-            statusLine = "\(profile.title) · EQ pending"
-            let detail = Self.lastScriptError?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if Self.looksLikeAutomationDenial(detail) {
-                needsAutomationPermission = true
-                lastError = "Couldn’t set Music EQ — allow Automation for Music in System Settings"
-            } else if let detail, !detail.isEmpty {
-                lastError = "Music EQ failed: \(detail)"
-            } else {
-                needsAutomationPermission = true
-                lastError = "Couldn’t set Music EQ — allow Automation for Music in System Settings"
-            }
-            if needsAutomationPermission {
-                PermissionsStore.shared.recordDenied(.automationMusic)
-            }
-        }
-
-        #if DEBUG
-        print("[MediaAmplify] \(reason) → \(statusLine) err=\(lastError ?? "nil")")
-        #endif
-    }
-
-    private func restore() {
-        let eqWasOn = UserDefaults.standard.object(forKey: Self.savedEQKey) as? Bool
-        let preset = UserDefaults.standard.string(forKey: Self.savedPresetKey)
-        if Self.isMusicRunning(), let eqWasOn {
-            if eqWasOn, let preset, !preset.isEmpty {
-                _ = applyMusicEQ(enabled: true, preset: preset)
-            } else {
-                _ = applyMusicEQ(enabled: false, preset: nil)
-            }
-        }
-        clearBaseline()
-        activePresetName = nil
-        lastAppliedTrackKey = ""
-        statusLine = "Off"
-        lastError = nil
-        needsAutomationPermission = false
-    }
-
-    private func statusForEnabled() -> String {
-        if let activePresetName {
-            return "\(profile.title) · \(activePresetName)"
-        }
-        return "\(profile.title) · EQ"
-    }
-
-    private func captureBaselineIfNeeded() {
-        guard !didCaptureBaseline else { return }
-        if let state = Self.readMusicEQState() {
-            UserDefaults.standard.set(state.enabled, forKey: Self.savedEQKey)
-            UserDefaults.standard.set(state.preset, forKey: Self.savedPresetKey)
-        }
-        didCaptureBaseline = true
-    }
-
-    private func clearBaseline() {
-        didCaptureBaseline = false
-        UserDefaults.standard.removeObject(forKey: Self.savedEQKey)
-        UserDefaults.standard.removeObject(forKey: Self.savedPresetKey)
-        UserDefaults.standard.removeObject(forKey: Self.legacySavedVolumeKey)
-        UserDefaults.standard.removeObject(forKey: Self.activePresetKey)
-    }
-
-    // MARK: - Music EQ
-
-    private struct MusicEQState {
-        var enabled: Bool
-        var preset: String
-    }
-
-    private static func isMusicRunning() -> Bool {
-        NSWorkspace.shared.runningApplications.contains {
-            $0.bundleIdentifier == "com.apple.Music" && !$0.isTerminated
-        }
-    }
-
-    /// Lightweight scripting probe — triggers Automation prompt if needed.
-    @discardableResult
-    private static func pingMusicScripting() -> Bool {
-        let source = """
-        try
-            tell application id "com.apple.Music"
-                return (name as text)
-            end tell
-        on error errMsg number errNum
-            return "err:" & errNum & ":" & errMsg
-        end try
-        """
-        guard let out = runAppleScript(source) else { return false }
-        if out.hasPrefix("err:") {
-            lastScriptError = String(out.dropFirst(4))
-            return false
-        }
-        return true
-    }
-
-    private static func readMusicEQState() -> MusicEQState? {
-        let source = """
-        try
-            tell application id "com.apple.Music"
-                set e to eq enabled
-                set p to ""
-                try
-                    set p to name of current EQ preset as text
-                end try
-                return (e as integer as text) & "|" & p
-            end tell
-        on error errMsg number errNum
-            return "err:" & errNum & ":" & errMsg
-        end try
-        """
-        guard let out = runAppleScript(source), !out.isEmpty else { return nil }
-        if out.hasPrefix("err:") {
-            lastScriptError = String(out.dropFirst(4))
-            return nil
-        }
-        let parts = out.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-        let enabled = (parts.first.map(String.init) ?? "0") != "0"
-        let preset = parts.count > 1 ? String(parts[1]) : ""
-        return MusicEQState(enabled: enabled, preset: preset)
-    }
-
-    /// Names of EQ presets currently in Music (cached ~30s).
-    private func musicEQPresetNames() -> [String] {
-        if !cachedPresetNames.isEmpty, Date().timeIntervalSince(lastPresetListAt) < 30 {
-            return cachedPresetNames
-        }
-        let source = """
-        try
-            tell application id "com.apple.Music"
-                set names to {}
-                repeat with p in EQ presets
-                    set end of names to (name of p as text)
-                end repeat
-                set AppleScript's text item delimiters to linefeed
-                set out to names as text
-                set AppleScript's text item delimiters to ""
-                return out
-            end tell
-        on error errMsg number errNum
-            return "err:" & errNum & ":" & errMsg
-        end try
-        """
-        guard let out = Self.runAppleScript(source), !out.isEmpty else { return cachedPresetNames }
-        if out.hasPrefix("err:") {
-            Self.lastScriptError = String(out.dropFirst(4))
-            return cachedPresetNames
-        }
-        let names = out
-            .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !names.isEmpty {
-            cachedPresetNames = names
-            lastPresetListAt = Date()
-        }
-        return cachedPresetNames
-    }
-
-    /// Resolve a candidate to an actual Music preset name (case-insensitive / fuzzy).
-    private func resolvePresetName(_ candidate: String, in available: [String]) -> String? {
-        if available.isEmpty { return candidate }
-        if let exact = available.first(where: { $0 == candidate }) { return exact }
-        if let ci = available.first(where: { $0.caseInsensitiveCompare(candidate) == .orderedSame }) {
-            return ci
-        }
-        // Hip-Hop vs Hip Hop, R&B variants, etc.
-        let norm = { (s: String) -> String in
-            s.lowercased()
-                .replacingOccurrences(of: "&", with: "and")
-                .replacingOccurrences(of: "-", with: " ")
-                .replacingOccurrences(of: "  ", with: " ")
-                .trimmingCharacters(in: .whitespaces)
-        }
-        let target = norm(candidate)
-        return available.first { norm($0) == target }
-            ?? available.first { norm($0).contains(target) || target.contains(norm($0)) }
-    }
-
-    /// Try each candidate preset; return the one that stuck.
-    private func applyMusicEQWithFallbacks(_ candidates: [String]) -> String? {
-        let available = musicEQPresetNames()
-        var tried: [String] = []
-        for name in candidates {
-            let resolved = resolvePresetName(name, in: available) ?? name
-            if tried.contains(where: { $0.caseInsensitiveCompare(resolved) == .orderedSame }) { continue }
-            tried.append(resolved)
-            if applyMusicEQ(enabled: true, preset: resolved) {
-                if let state = Self.readMusicEQState(), state.enabled {
-                    if state.preset.isEmpty { return resolved }
-                    if state.preset.localizedCaseInsensitiveContains(resolved)
-                        || resolved.localizedCaseInsensitiveContains(state.preset) {
-                        return state.preset
-                    }
-                    // EQ on under a different reported name — still success.
-                    return state.preset
+        // Request audio capture once (same path as live peek EQ).
+        AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.isEnabled else { return }
+                guard granted else {
+                    self.lastError = "Allow Microphone / audio capture for Dynamo to run Local Amplify EQ."
+                    self.statusLine = "\(self.profile.title) · audio access"
+                    self.activePresetName = nil
+                    return
                 }
-                return resolved
+                let bundle = self.preferredPlayerBundleID
+                    ?? Self.guessPlayerBundleID()
+                let device = self.resolvedDevice
+                LocalAmplifyEngine.shared.start(
+                    profile: self.profile,
+                    device: device,
+                    preferredBundleID: bundle
+                )
+                self.syncFromEngine()
+                self.startPolling()
+                #if DEBUG
+                print("[MediaAmplify] \(reason) → symphony engine device=\(device.rawValue)")
+                #endif
             }
         }
-        // Last resort: enable EQ without changing preset.
-        if applyMusicEQ(enabled: true, preset: nil) {
-            return Self.readMusicEQState()?.preset.nilIfEmpty ?? "EQ on"
+    }
+
+    private static func guessPlayerBundleID() -> String? {
+        let apps = NSWorkspace.shared.runningApplications
+        if apps.contains(where: { $0.bundleIdentifier == "com.apple.Music" && !$0.isTerminated }) {
+            return "com.apple.Music"
+        }
+        if apps.contains(where: { $0.bundleIdentifier == "com.spotify.client" && !$0.isTerminated }) {
+            return "com.spotify.client"
         }
         return nil
     }
 
-    @discardableResult
-    private func applyMusicEQ(enabled: Bool, preset: String?) -> Bool {
-        guard Self.isMusicRunning() else { return false }
-
-        let source: String
-        if enabled, let preset, !preset.isEmpty {
-            let esc = preset.appleScriptEscaped
-            // Prefer EQ preset by name; fall back to whose-name matching if direct fails.
-            source = """
-            try
-                tell application id "com.apple.Music"
-                    try
-                        set current EQ preset to EQ preset "\(esc)"
-                    on error
-                        try
-                            set current EQ preset to (first EQ preset whose name is "\(esc)")
-                        end try
-                    end try
-                    set eq enabled to true
-                end tell
-                return "ok"
-            on error errMsg number errNum
-                return "err:" & errNum & ":" & errMsg
-            end try
-            """
-        } else if enabled {
-            source = """
-            try
-                tell application id "com.apple.Music"
-                    set eq enabled to true
-                end tell
-                return "ok"
-            on error errMsg number errNum
-                return "err:" & errNum & ":" & errMsg
-            end try
-            """
-        } else {
-            source = """
-            try
-                tell application id "com.apple.Music"
-                    set eq enabled to false
-                end tell
-                return "ok"
-            on error errMsg number errNum
-                return "err:" & errNum & ":" & errMsg
-            end try
-            """
-        }
-
-        // Prefer NSAppleScript; fall back to osascript (sometimes surfaces TCC better).
-        if let out = Self.runAppleScript(source) {
-            if out.hasPrefix("ok") { return true }
-            if out.hasPrefix("err:") {
-                Self.lastScriptError = String(out.dropFirst(4))
-            }
-        }
-        if let out = Self.runOsascript(source) {
-            if out.hasPrefix("ok") { return true }
-            if out.hasPrefix("err:") {
-                Self.lastScriptError = String(out.dropFirst(4))
-            }
-            // osascript may return bare error text
-            if !out.hasPrefix("ok") && !out.isEmpty {
-                Self.lastScriptError = out
-            }
-        }
-        return false
+    private func updateEngineProfile() {
+        guard #available(macOS 14.2, *) else { return }
+        LocalAmplifyEngine.shared.setProfile(profile, device: resolvedDevice)
+        syncFromEngine()
     }
 
-    /// Last AppleScript / osascript error fragment (process-wide for this controller).
-    private static var lastScriptError: String?
-
-    private static func looksLikeAutomationDenial(_ detail: String?) -> Bool {
-        guard let d = detail?.lowercased(), !d.isEmpty else { return true }
-        if d.contains("not authorized") || d.contains("not allowed") { return true }
-        if d.contains("1002") || d.contains("-1743") || d.contains("errae") { return true }
-        if d.contains("permission") || d.contains("denied") || d.contains("access") { return true }
-        if d.contains("application isn't running") { return false }
-        return false
+    private func stopEngine() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        if #available(macOS 14.2, *) {
+            LocalAmplifyEngine.shared.stop()
+        }
+        statusLine = "Off"
+        lastError = nil
+        activePresetName = nil
+        needsAutomationPermission = false
     }
 
-    @discardableResult
-    private static func runAppleScript(_ source: String) -> String? {
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else { return nil }
-        let result = script.executeAndReturnError(&error)
-        if let error {
-            let msg = error[NSAppleScript.errorMessage] as? String
-            let num = error[NSAppleScript.errorNumber] as? Int
-            if let num, let msg {
-                lastScriptError = "\(num):\(msg)"
-            } else if let msg {
-                lastScriptError = msg
-            } else {
-                lastScriptError = "\(error)"
-            }
-            return "err:" + (lastScriptError ?? "unknown")
+    private func startPolling() {
+        pollTimer?.invalidate()
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.syncFromEngine() }
         }
-        return result.stringValue
+        RunLoop.main.add(t, forMode: .common)
+        pollTimer = t
     }
 
-    /// Shell `osascript` fallback — can prompt Automation more reliably on some macOS builds.
-    private static func runOsascript(_ source: String) -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", source]
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch {
-            lastScriptError = error.localizedDescription
-            return nil
+    private func syncFromEngine() {
+        guard #available(macOS 14.2, *) else { return }
+        let engine = LocalAmplifyEngine.shared
+        if engine.isRunning {
+            statusLine = engine.statusLine
+            activePresetName = "Local EQ"
+            lastError = engine.lastError
+        } else if isEnabled {
+            statusLine = engine.statusLine
+            lastError = engine.lastError
+            activePresetName = nil
         }
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        let out = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let err = String(data: errData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if proc.terminationStatus != 0 {
-            lastScriptError = err.isEmpty ? out : err
-            return lastScriptError.map { "err:" + $0 }
-        }
-        return out.isEmpty ? nil : out
     }
 }
 
-private extension String {
-    var appleScriptEscaped: String {
-        replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-    }
-
-    var nilIfEmpty: String? { isEmpty ? nil : self }
-}
+import AVFoundation
