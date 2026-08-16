@@ -34,8 +34,8 @@ final class SystemVolumeController: ObservableObject {
         refreshFromSystem()
         installHardwareListener()
         rebindDeviceListeners()
-        // Core Audio listeners catch most changes; poll is a sparse backup only.
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Core Audio listeners catch most changes; poll is a light backup only.
+        let t = Timer(timeInterval: 1.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshFromSystem(announceExternal: true) }
         }
         RunLoop.main.add(t, forMode: .common)

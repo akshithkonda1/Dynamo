@@ -142,8 +142,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     private func probeForTrackChange(reason: String) {
         cancelSkipProbe()
         let baseline = lastTrackKey
-        // Staggered probes: 0.15s … ~1.8s covers Music + Spotify.
-        let delays: [TimeInterval] = [0.12, 0.28, 0.5, 0.85, 1.3, 1.9]
+        // Staggered probes — front-loaded so skip feels instant.
+        let delays: [TimeInterval] = [0.06, 0.16, 0.32, 0.55, 0.9, 1.4]
         for delay in delays {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
@@ -450,8 +450,8 @@ private struct ExpandedMediaView: View {
             scrubElapsed = nil
             lastTick = .now
         }
-        // 2 Hz is enough for a smooth scrubber without 4 Hz main-thread ticks.
-        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { now in
+        // ~4 Hz scrubber for instantaneous progress without 60 Hz main-thread cost.
+        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { now in
             guard scrubElapsed == nil, plugin.info.isPlaying, plugin.info.duration > 0 else {
                 lastTick = now
                 return

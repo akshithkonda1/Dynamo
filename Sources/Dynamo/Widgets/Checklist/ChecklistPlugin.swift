@@ -344,6 +344,13 @@ private struct ExpandedChecklistView: View {
                 .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            // Instant data when opening the tab — don’t wait for sparse background polls.
+            plugin.refreshReminders()
+            if plugin.draftTarget == .notes {
+                plugin.refreshNotes()
+            }
+        }
     }
 
     // MARK: Header

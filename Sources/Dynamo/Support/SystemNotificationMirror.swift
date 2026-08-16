@@ -36,8 +36,8 @@ final class SystemNotificationMirror: ObservableObject {
     private var highWaterRecID: Int64 = 0
     private var seenUUIDs = Set<String>()
     private let maxSeen = 400
-    /// Sparse enough for battery; still catches alerts within a couple seconds.
-    private let pollInterval: TimeInterval = 2.5
+    /// Fast enough to feel instant; still light on SQLite.
+    private let pollInterval: TimeInterval = 1.5
 
     private static let selfBundleID = "com.akshithkonda.Dynamo"
 

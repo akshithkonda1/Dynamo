@@ -38,8 +38,8 @@ final class ClipboardStore: ObservableObject {
         isStarted = true
         load()
         lastChangeCount = NSPasteboard.general.changeCount
-        // changeCount is cheap; 2s is enough without burning a 1Hz timer.
-        let t = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+        // changeCount is cheap; ~1.5s keeps paste history feeling instant.
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pollPasteboard()
             }

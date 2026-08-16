@@ -54,9 +54,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var pendingStopAfterWet = false
 
     /// Default transition lengths — long enough to hide filter swaps, short enough to feel snappy.
-    private static let profileTransitionSeconds: Float = 0.09
-    private static let engageSeconds: Float = 0.12
-    private static let disengageSeconds: Float = 0.08
+    private static let profileTransitionSeconds: Float = 0.055
+    private static let engageSeconds: Float = 0.055
+    private static let disengageSeconds: Float = 0.04
 
     private var profileRaw: String = "symphony"
     private var deviceRaw: String = "auto"

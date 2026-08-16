@@ -71,7 +71,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         pollTimer?.invalidate()
         let playing = latestMRInfo?.isPlaying == true
             || latestHelperInfo?.isPlaying == true
-        let interval: TimeInterval = playing ? 1.2 : 2.5
+        // Playing: snappy track/progress safety net; idle: sparse.
+        let interval: TimeInterval = playing ? 0.75 : 2.0
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -79,8 +80,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 // Reschedule if play-state flipped (interval change).
                 let nowPlaying = self.latestMRInfo?.isPlaying == true
                     || self.latestHelperInfo?.isPlaying == true
-                let want: TimeInterval = nowPlaying ? 1.2 : 2.5
-                if abs((self.pollTimer?.timeInterval ?? 0) - want) > 0.2 {
+                let want: TimeInterval = nowPlaying ? 0.75 : 2.0
+                if abs((self.pollTimer?.timeInterval ?? 0) - want) > 0.15 {
                     self.scheduleAdaptivePoll()
                 }
             }
@@ -147,9 +148,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
             let bridge = MusicKitBridge.shared
             Task { if wantPlaying { await bridge.play() } else { bridge.pause() } }
         }
-        scheduleRefresh(after: 0.08)
-        scheduleRefresh(after: 0.28)
-        scheduleRefresh(after: 0.7)
+        scheduleRefresh(after: 0.04)
+        scheduleRefresh(after: 0.14)
+        scheduleRefresh(after: 0.35)
     }
 
     func nextTrack() {
@@ -162,10 +163,10 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
            MusicKitBridge.shared.isAuthorized {
             Task { await MusicKitBridge.shared.skipToNext() }
         }
-        scheduleRefresh(after: 0.08)
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.55)
-        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 0.04)
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.30)
+        scheduleRefresh(after: 0.65)
     }
 
     func previousTrack() {
@@ -178,10 +179,10 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
            MusicKitBridge.shared.isAuthorized {
             Task { await MusicKitBridge.shared.skipToPrevious() }
         }
-        scheduleRefresh(after: 0.08)
-        scheduleRefresh(after: 0.25)
-        scheduleRefresh(after: 0.55)
-        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 0.04)
+        scheduleRefresh(after: 0.12)
+        scheduleRefresh(after: 0.30)
+        scheduleRefresh(after: 0.65)
     }
 
     func openConnectedApp() {
@@ -194,8 +195,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
 
     func playPlaylist(named name: String) {
         AppleScriptMedia.shared.playPlaylist(named: name)
-        scheduleRefresh(after: 0.4)
-        scheduleRefresh(after: 1.0)
+        scheduleRefresh(after: 0.2)
+        scheduleRefresh(after: 0.55)
     }
 
     func seek(to elapsed: TimeInterval) {

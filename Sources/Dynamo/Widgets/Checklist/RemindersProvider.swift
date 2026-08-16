@@ -41,7 +41,7 @@ final class RemindersProvider: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)
