@@ -29,7 +29,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     /// One filter chain per channel (identical coefficients, independent state).
     private var channelFilters: [[Biquad]] = []
     private var makeup: Float = 1.0
-    private var profileRaw: String = "cinema"
+    /// Mid-side width 0…0.4 — immersive stage for headphones/speakers (stereo only).
+    private var stereoWidth: Float = 0.0
+    private var profileRaw: String = "symphony"
+    private var deviceRaw: String = "auto"
     private var preferredBundleID: String?
 
     private(set) var isRunning = false
@@ -38,14 +41,20 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private(set) var spatialCompatible = true
     private(set) var channelCount: Int = 2
     private(set) var spatialHint: String = ""
+    private(set) var deviceHint: String = ""
 
     private init() {}
 
-    func start(profile: MediaAmplifyProfile, preferredBundleID: String?) {
+    func start(
+        profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        preferredBundleID: String?
+    ) {
         queue.async {
             self.preferredBundleID = preferredBundleID
             self.profileRaw = profile.rawValue
-            self.applyProfileLocked(profile, sampleRate: 48_000, channels: 2)
+            self.deviceRaw = device.rawValue
+            self.applyProfileLocked(profile, device: device, sampleRate: 48_000, channels: 2)
             do {
                 try self.startLocked()
                 self.isRunning = true
@@ -60,12 +69,13 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         }
     }
 
-    func setProfile(_ profile: MediaAmplifyProfile) {
+    func setProfile(_ profile: MediaAmplifyProfile, device: AmplifyOutputDevice) {
         queue.async {
             self.profileRaw = profile.rawValue
+            self.deviceRaw = device.rawValue
             let sr = self.format.mSampleRate > 0 ? self.format.mSampleRate : 48_000
             let ch = max(2, self.channelCount)
-            self.applyProfileLocked(profile, sampleRate: sr, channels: ch)
+            self.applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
             if self.isRunning {
                 self.statusLine = self.makeStatus(profile: profile)
             }
@@ -83,7 +93,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     }
 
     private func makeStatus(profile: MediaAmplifyProfile) -> String {
-        var parts = ["\(profile.title)", "Local EQ"]
+        var parts = ["\(profile.title)", "Symphony EQ"]
+        if !deviceHint.isEmpty {
+            parts.append(deviceHint)
+        }
         if !spatialHint.isEmpty {
             parts.append(spatialHint)
         }
@@ -95,17 +108,28 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     // MARK: - Profile / DSP
 
-    private func applyProfileLocked(_ profile: MediaAmplifyProfile, sampleRate: Double, channels: Int) {
+    private func applyProfileLocked(
+        _ profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        sampleRate: Double,
+        channels: Int
+    ) {
         let ch = max(1, channels)
-        let built: (filters: [Biquad], makeup: Float)
-        if let fromPy = DynamoEQPython.coeffs(profile: profile.rawValue, sampleRate: sampleRate) {
-            built = (fromPy.filters, fromPy.makeup)
+        deviceHint = device.statusLabel
+        if let fromPy = DynamoEQPython.coeffs(
+            profile: profile.rawValue,
+            device: device.rawValue,
+            sampleRate: sampleRate
+        ) {
+            makeup = fromPy.makeup
+            stereoWidth = fromPy.width
+            channelFilters = (0..<ch).map { _ in fromPy.filters.map { $0.clone() } }
         } else {
-            built = DynamoEQCurves.filters(for: profile, sampleRate: sampleRate)
+            let built = DynamoEQCurves.filters(for: profile, device: device, sampleRate: sampleRate)
+            makeup = built.makeup
+            stereoWidth = built.width
+            channelFilters = (0..<ch).map { _ in built.filters.map { $0.clone() } }
         }
-        makeup = built.makeup
-        // Fresh state per channel — same coefficients (stereo image / Atmos bed safe).
-        channelFilters = (0..<ch).map { _ in built.filters.map { $0.clone() } }
         channelCount = ch
     }
 
@@ -147,8 +171,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         spatialHint = Self.detectSpatialHint(channels: ch, sampleRate: sr)
         spatialCompatible = true
 
+        let device = AmplifyOutputDevice(rawValue: deviceRaw) ?? .auto
         if let profile = MediaAmplifyProfile(rawValue: profileRaw) {
-            applyProfileLocked(profile, sampleRate: sr, channels: ch)
+            applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch)
         }
 
         let outputUID = try defaultOutputDeviceUID()
@@ -257,15 +282,38 @@ final class LocalAmplifyEngine: @unchecked Sendable {
                 return
             }
 
-            // Interleaved float
+            // Interleaved float — stereo path uses mid-side width for “symphony” stage.
             if let outRaw = outABL.first?.mData?.assumingMemoryBound(to: Float.self) {
                 let inSamples = inRaw.assumingMemoryBound(to: Float.self)
                 let frameCount = bytes / (MemoryLayout<Float>.size * channels)
+                let w = stereoWidth
                 for f in 0..<frameCount {
-                    for c in 0..<channels {
-                        let idx = f * channels + c
-                        let chain = channelFilters[min(c, channelFilters.count - 1)]
-                        outRaw[idx] = process(inSamples[idx], filters: chain)
+                    if channels >= 2, w > 0.001 {
+                        let li = f * channels
+                        let ri = li + 1
+                        var l = inSamples[li]
+                        var r = inSamples[ri]
+                        // Mid-side encode → widen → decode (preserves mono bass)
+                        let mid = 0.5 * (l + r)
+                        var side = 0.5 * (l - r)
+                        side *= (1.0 + w)
+                        l = mid + side
+                        r = mid - side
+                        let fl = channelFilters[0]
+                        let fr = channelFilters[min(1, channelFilters.count - 1)]
+                        outRaw[li] = process(l, filters: fl)
+                        outRaw[ri] = process(r, filters: fr)
+                        for c in 2..<channels {
+                            let idx = f * channels + c
+                            let chain = channelFilters[min(c, channelFilters.count - 1)]
+                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                        }
+                    } else {
+                        for c in 0..<channels {
+                            let idx = f * channels + c
+                            let chain = channelFilters[min(c, channelFilters.count - 1)]
+                            outRaw[idx] = process(inSamples[idx], filters: chain)
+                        }
                     }
                 }
                 outABL[0].mDataByteSize = inBuf.mDataByteSize
@@ -281,7 +329,8 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     private func ensureChannelFilters(count: Int) {
         guard count > channelFilters.count else { return }
-        let template = channelFilters.first ?? DynamoEQCurves.filters(for: .cinema, sampleRate: 48_000).filters
+        let template = channelFilters.first
+            ?? DynamoEQCurves.filters(for: .cinema, device: .auto, sampleRate: 48_000).filters
         while channelFilters.count < count {
             channelFilters.append(template.map { $0.clone() })
         }
@@ -432,45 +481,138 @@ final class Biquad {
     }
 }
 
+// MARK: - Output device voicing (symphony path)
+
+enum AmplifyOutputDevice: String, CaseIterable, Identifiable {
+    case auto
+    case headphones
+    case wireless
+    case speakers
+    case external
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Auto"
+        case .headphones: return "Headphones (wired)"
+        case .wireless: return "Wireless / BT"
+        case .speakers: return "Mac speakers"
+        case .external: return "External speakers"
+        }
+    }
+
+    var statusLabel: String {
+        switch self {
+        case .auto: return "Auto"
+        case .headphones: return "Wired"
+        case .wireless: return "Wireless"
+        case .speakers: return "Speakers"
+        case .external: return "External"
+        }
+    }
+
+    /// Infer from system output device name (AirPods, Bluetooth, Built-in, …).
+    static func infer(fromDeviceName name: String?) -> AmplifyOutputDevice {
+        guard let n = name?.lowercased(), !n.isEmpty else { return .auto }
+        if n.contains("airpod") || n.contains("bluetooth") || n.contains("beats")
+            || n.contains("galaxy buds") || n.contains("wf-") || n.contains("wh-") {
+            return .wireless
+        }
+        if n.contains("headphone") || n.contains("headset") || n.contains("earphone") {
+            return .headphones
+        }
+        if n.contains("built-in") || n.contains("macbook") || n.contains("imac")
+            || n.contains("internal") {
+            return .speakers
+        }
+        if n.contains("speaker") || n.contains("soundbar") || n.contains("homePod")
+            || n.contains("homepod") || n.contains("display") || n.contains("hdmi")
+            || n.contains("usb") || n.contains("dac") {
+            return .external
+        }
+        return .auto
+    }
+}
+
 // MARK: - Embedded curves (match Tools/DynamoEQ/dynamo_eq.py)
 
 enum DynamoEQCurves {
-    static func filters(for profile: MediaAmplifyProfile, sampleRate: Double) -> (filters: [Biquad], makeup: Float) {
+    static func filters(
+        for profile: MediaAmplifyProfile,
+        device: AmplifyOutputDevice,
+        sampleRate: Double
+    ) -> (filters: [Biquad], makeup: Float, width: Float) {
         let sr = Float(sampleRate)
-        let bands: [(String, Float, Float, Float)]
-        let makeupDB: Float
+        var bands: [(String, Float, Float, Float, String)] // kind, freq, gain, q, label
+        var makeupDB: Float
+        var width: Float = 0.08
+
         switch profile {
         case .presence:
-            // Atmos-safe: modest shelves, avoid extreme LFE boost that muddies beds.
             bands = [
-                ("lowshelf", 90, -1.2, 0.7),
-                ("peak", 350, -1.0, 0.9),
-                ("peak", 1800, 2.8, 1.1),
-                ("peak", 3500, 2.2, 1.0),
-                ("highshelf", 8000, 1.8, 0.7)
+                ("lowshelf", 90, -1.2, 0.7, "sub"),
+                ("peak", 350, -1.0, 0.9, "body"),
+                ("peak", 1800, 2.8, 1.1, "presence"),
+                ("peak", 3500, 2.2, 1.0, "air"),
+                ("highshelf", 8000, 1.8, 0.7, "brilliance")
             ]
             makeupDB = 0.35
         case .cinema:
-            // Mild loudness contour — works on stereo Spatial renders and multi-ch beds.
             bands = [
-                ("lowshelf", 70, 2.4, 0.7),
-                ("peak", 250, 0.8, 0.9),
-                ("peak", 900, -1.8, 1.0),
-                ("peak", 3200, 1.4, 1.0),
-                ("highshelf", 9000, 2.2, 0.7)
+                ("lowshelf", 70, 2.4, 0.7, "sub"),
+                ("peak", 250, 0.8, 0.9, "warmth"),
+                ("peak", 900, -1.8, 1.0, "mud"),
+                ("peak", 3200, 1.4, 1.0, "presence"),
+                ("highshelf", 9000, 2.2, 0.7, "air")
             ]
             makeupDB = 0.5
         case .impact:
             bands = [
-                ("lowshelf", 60, 3.8, 0.7),
-                ("peak", 110, 2.6, 1.0),
-                ("peak", 220, 1.5, 1.0),
-                ("peak", 800, -1.2, 0.9),
-                ("highshelf", 7000, 1.0, 0.7)
+                ("lowshelf", 60, 3.8, 0.7, "sub"),
+                ("peak", 110, 2.6, 1.0, "punch"),
+                ("peak", 220, 1.5, 1.0, "body"),
+                ("peak", 800, -1.2, 0.9, "mud"),
+                ("highshelf", 7000, 1.0, 0.7, "air")
             ]
             makeupDB = 0.65
+        case .symphony:
+            bands = [
+                ("lowshelf", 65, 2.0, 0.7, "sub"),
+                ("peak", 180, 1.2, 0.95, "body"),
+                ("peak", 700, -1.4, 1.0, "mud"),
+                ("peak", 2200, 2.0, 1.05, "presence"),
+                ("peak", 4500, 1.3, 1.0, "sheen"),
+                ("highshelf", 10000, 1.6, 0.7, "air")
+            ]
+            makeupDB = 0.45
+            width = 0.12
         }
-        let filters = bands.map { kind, freq, gain, q -> Biquad in
+
+        // Device voicing — “you are there” on each transducer type
+        let bias: [String: Float]
+        switch device {
+        case .headphones:
+            bias = ["presence": 1.2, "air": 1.4, "brilliance": 1.0, "sub": -0.4]
+            width = max(width, 0.12)
+        case .wireless:
+            bias = ["sub": 0.6, "presence": 0.9, "air": 0.5, "mud": -0.5, "punch": 0.8]
+            width = max(width, 0.08)
+            makeupDB += 0.15
+        case .speakers:
+            bias = ["sub": 0.8, "body": 0.6, "mud": -0.8, "presence": 0.7]
+            width = max(width, 0.05)
+        case .external:
+            bias = ["sub": 1.0, "presence": 0.5, "air": 0.6, "mud": -0.6]
+            width = max(width, 0.10)
+        case .auto:
+            bias = [:]
+        }
+        bands = bands.map { kind, freq, gain, q, label in
+            (kind, freq, gain + (bias[label] ?? 0), q, label)
+        }
+
+        let filters = bands.map { kind, freq, gain, q, _ -> Biquad in
             switch kind {
             case "lowshelf": return lowshelf(sr: sr, freq: freq, gainDB: gain, q: q)
             case "highshelf": return highshelf(sr: sr, freq: freq, gainDB: gain, q: q)
@@ -478,7 +620,7 @@ enum DynamoEQCurves {
             }
         }
         let makeup = pow(10.0, makeupDB / 20.0)
-        return (filters, makeup)
+        return (filters, makeup, width)
     }
 
     private static func peaking(sr: Float, freq: Float, gainDB: Float, q: Float) -> Biquad {
@@ -535,9 +677,10 @@ enum DynamoEQPython {
     struct Result {
         var filters: [Biquad]
         var makeup: Float
+        var width: Float
     }
 
-    static func coeffs(profile: String, sampleRate: Double) -> Result? {
+    static func coeffs(profile: String, device: String, sampleRate: Double) -> Result? {
         let script = scriptURL()
         guard FileManager.default.isReadableFile(atPath: script.path) else { return nil }
         let proc = Process()
@@ -545,6 +688,7 @@ enum DynamoEQPython {
         proc.arguments = [
             script.path, "coeffs",
             "--profile", profile,
+            "--device", device,
             "--sr", String(sampleRate)
         ]
         let out = Pipe()
@@ -573,7 +717,8 @@ enum DynamoEQPython {
         }
         guard !filters.isEmpty else { return nil }
         let makeup = Float((json["makeup"] as? Double) ?? 1.0)
-        return Result(filters: filters, makeup: makeup)
+        let width = Float((json["width"] as? Double) ?? 0.0)
+        return Result(filters: filters, makeup: makeup, width: width)
     }
 
     private static func scriptURL() -> URL {

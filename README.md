@@ -6,8 +6,8 @@ Dynamo turns the notch into an interactive tray with a plugin architecture (widg
 
 | | |
 |---|---|
-| **Version** | **1.0.1** |
-| **Platform** | macOS 13+ (14.2+ for live process-tap EQ / local Amplify) |
+| **Version** | **1.1.1** |
+| **Platform** | macOS 13+ (14.2+ for live process-tap EQ / Symphony Amplify) |
 | **Daily driver** | `dist/Dynamo.app` only (single-instance) |
 | **License** | MIT |
 
@@ -60,22 +60,27 @@ Free, offline, no WeatherKit:
 | Distance | km from GPS (or fallback city) on distance modes |
 | Extras | DST badges, call-window, “when it’s X here” converter, copy time |
 
-### Media Amplify — local DynamoEQ (Atmos / Spatial–safe)
-Not Music Automation. Not system volume.
+### Media Amplify — DynamoEQ Symphony engine
+Local sound processing only — **no Music Automation, no cloud APIs, not the volume fader.**
+
+| Goal | How |
+|------|-----|
+| **1. Amplify by media type & quality** | PCM analysis: speech / music / bass-heavy / bright / sparse / low-quality + DR/bandwidth |
+| **2. Tune each “note” region** | Spectral regions (sub, punch, presence, air, …) get suggested gains toward a musical balance |
+| **3. “You are there” / symphony** | Device voicing: wired headphones · wireless/BT · Mac speakers · external + gentle mid-side stage |
 
 | | |
 |--|--|
-| **Engine** | `LocalAmplifyEngine` — process tap → multi-band biquad EQ → output |
-| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` — pure Python 3 stdlib, no network APIs |
-| **Profiles** | **Presence** · **Cinema** · **Impact** |
-| **Spatial / Atmos** | EQ after the player’s spatial render; **same curve on every channel** (no mono fold); mute-when-tapped so you hear one path |
-| **Players** | Music and Spotify (macOS **14.2+**, audio capture permission) |
-| **UI** | Green = on · red = off; right-click profile; Preferences → Feel & alerts |
+| **Realtime** | `LocalAmplifyEngine` — process tap → multi-band EQ → output (macOS **14.2+**) |
+| **Designer** | `Tools/DynamoEQ/dynamo_eq.py` — pure Python 3 stdlib |
+| **Profiles** | **Symphony** (adaptive default) · Presence · Cinema · Impact |
+| **Spatial / Atmos** | Post-render EQ; same curve per channel; no mono fold |
+| **UI** | Green = on · red = off; device picker in Preferences → Feel & alerts |
 
 ```bash
-# Optional offline designer / self-test (curves also embedded in the app)
 python3 Tools/DynamoEQ/dynamo_eq.py selftest
-python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile impact --sr 48000
+python3 Tools/DynamoEQ/dynamo_eq.py coeffs --profile symphony --device headphones --sr 48000
+python3 Tools/DynamoEQ/dynamo_eq.py symphony --device wireless --sr 48000 < stereo.f32le
 ```
 
 ### Peek as notification surface
@@ -253,7 +258,8 @@ dist/               Packaged Dynamo.app (daily driver)
 | 7 | Focus/Meeting, Sports, System Health, power modes, process-tap visualizer |
 | **0.5.x** | Adaptive width, Amplify intents, Peek center, pressable Amplify |
 | **1.0.0** | Production without Weather; packaging hardened |
-| **1.0.1** | World Clock + distance sort, Preferences, local Spatial-safe Amplify, calendar full-access fix, icon-only tray + hover previews |
+| **1.0.1** | World Clock + distance sort, Preferences, calendar full-access fix, icon-only tray |
+| **1.1.1** | DynamoEQ Symphony Amplify (media/quality/note tuning + device path), Spatial/Atmos-safe local EQ |
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 

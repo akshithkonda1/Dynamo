@@ -7,6 +7,7 @@ import Foundation
 /// Curves designed by `Tools/DynamoEQ/dynamo_eq.py` (pure local DSP, no network APIs)
 /// and applied in real time by `LocalAmplifyEngine` (process tap + multi-band EQ).
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
+    case symphony
     case presence
     case cinema
     case impact
@@ -15,6 +16,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .symphony: return "Symphony"
         case .presence: return "Presence"
         case .cinema: return "Cinema"
         case .impact: return "Impact"
@@ -23,6 +25,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .symphony: return "Adaptive concert-hall path — media + device aware"
         case .presence: return "Dialogue clarity & air — local multi-band EQ"
         case .cinema: return "Loudness contour + soft mid scoop — local EQ"
         case .impact: return "Bass body & punch — local EQ, not the volume fader"
@@ -31,6 +34,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
         case .impact: return "waveform.path.ecg"
@@ -38,13 +42,13 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
     }
 
     static func resolved(fromStored raw: String?) -> MediaAmplifyProfile {
-        guard let raw else { return .cinema }
+        guard let raw else { return .symphony }
         if let p = MediaAmplifyProfile(rawValue: raw) { return p }
         switch raw {
         case "crisp": return .presence
         case "balanced": return .cinema
         case "visceral": return .impact
-        default: return .cinema
+        default: return .symphony
         }
     }
 }
@@ -59,6 +63,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private static let enabledKey = "dynamo.media.amplify.enabled"
     private static let profileKey = "dynamo.media.amplify.profile"
+    private static let deviceKey = "dynamo.media.amplify.device"
     private static let legacySavedVolumeKey = "dynamo.media.amplify.savedVolume"
     private static let legacySavedEQKey = "dynamo.media.amplify.savedEQ"
     private static let legacySavedPresetKey = "dynamo.media.amplify.savedPreset"
@@ -86,6 +91,16 @@ final class MediaAmplifyController: ObservableObject {
         }
     }
 
+    /// Headphones / wireless / speakers / external — auto-detect from system output name.
+    @Published var outputDevice: AmplifyOutputDevice {
+        didSet {
+            UserDefaults.standard.set(outputDevice.rawValue, forKey: Self.deviceKey)
+            if isEnabled {
+                updateEngineProfile()
+            }
+        }
+    }
+
     @Published private(set) var statusLine: String = "Off"
     @Published private(set) var lastError: String?
     @Published private(set) var activePresetName: String?
@@ -107,12 +122,31 @@ final class MediaAmplifyController: ObservableObject {
         profile = MediaAmplifyProfile.resolved(
             fromStored: UserDefaults.standard.string(forKey: Self.profileKey)
         )
-        statusLine = isEnabled ? "\(profile.title) · Local EQ" : "Off"
+        if let raw = UserDefaults.standard.string(forKey: Self.deviceKey),
+           let d = AmplifyOutputDevice(rawValue: raw) {
+            outputDevice = d
+        } else {
+            outputDevice = .auto
+        }
+        statusLine = isEnabled ? "\(profile.title) · Symphony EQ" : "Off"
         if isEnabled {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 self?.startEngine(reason: "launch")
             }
         }
+    }
+
+    private var resolvedDevice: AmplifyOutputDevice {
+        if outputDevice != .auto { return outputDevice }
+        let out = AudioOutputController.shared
+        out.refresh()
+        let name: String?
+        if let sel = out.selectedID {
+            name = out.devices.first(where: { $0.id == sel })?.name
+        } else {
+            name = out.devices.first?.name
+        }
+        return AmplifyOutputDevice.infer(fromDeviceName: name)
     }
 
     func reapplyForSource() {
@@ -177,14 +211,16 @@ final class MediaAmplifyController: ObservableObject {
                 }
                 let bundle = self.preferredPlayerBundleID
                     ?? Self.guessPlayerBundleID()
+                let device = self.resolvedDevice
                 LocalAmplifyEngine.shared.start(
                     profile: self.profile,
+                    device: device,
                     preferredBundleID: bundle
                 )
                 self.syncFromEngine()
                 self.startPolling()
                 #if DEBUG
-                print("[MediaAmplify] \(reason) → local Spatial-safe engine")
+                print("[MediaAmplify] \(reason) → symphony engine device=\(device.rawValue)")
                 #endif
             }
         }
@@ -203,7 +239,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private func updateEngineProfile() {
         guard #available(macOS 14.2, *) else { return }
-        LocalAmplifyEngine.shared.setProfile(profile)
+        LocalAmplifyEngine.shared.setProfile(profile, device: resolvedDevice)
         syncFromEngine()
     }
 

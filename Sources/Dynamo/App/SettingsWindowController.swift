@@ -264,7 +264,7 @@ struct SettingsView: View {
 
             Text("Media Amplify")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Amplify EQ (local DSP)", isOn: Binding(
+            Toggle("Amplify / Symphony EQ", isOn: Binding(
                 get: { amplify.isEnabled },
                 set: { amplify.isEnabled = $0 }
             ))
@@ -281,6 +281,18 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("Listening device")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("Device", selection: Binding(
+                get: { amplify.outputDevice },
+                set: { amplify.outputDevice = $0 }
+            )) {
+                ForEach(AmplifyOutputDevice.allCases) { device in
+                    Text(device.title).tag(device)
+                }
+            }
+            .labelsHidden()
             Text(amplify.statusLine)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -300,7 +312,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            Text("Local multi-band EQ (DynamoEQ) — Spatial/Atmos-safe: EQ after the player’s spatial render, same curve on every channel (no mono fold). No Music Automation, no cloud APIs. macOS 14.2+ · allow audio capture when prompted. Music & Spotify.")
+            Text("DynamoEQ (local): (1) amplify by media type/quality, (2) tune each spectral “note” region, (3) device-aware symphony path for headphones, wireless, Mac speakers, or external. Spatial/Atmos-safe post-render EQ. No cloud APIs. macOS 14.2+.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
