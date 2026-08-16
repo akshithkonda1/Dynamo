@@ -1,3 +1,4 @@
+import CoreAudio
 import XCTest
 @testable import Dynamo
 
@@ -168,6 +169,6 @@ final class AmplifySpatialPathTests: XCTestCase {
     func testMPEG51LayoutRoles() {
         let roles = AmplifyChannelLayout.roles(forLayoutTag: kAudioChannelLayoutTag_MPEG_5_1_A)
         XCTAssertEqual(roles?.count, 6)
-        XCTAssertEqual(roles?[3], .lfe)
+        XCTAssertEqual(roles?[3], AmplifyChannelRole.lfe)
     }
 }

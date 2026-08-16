@@ -72,8 +72,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var limiterEnvelope: Float = 0
     private var limiterGain: Float = 1
     private static let limiterCeiling: Float = 0.891_250_9 // ≈ −1 dBTP
-    private static let limiterAttack: Float = 0.02         // fast peak catch
-    private static let limiterRelease: Float = 0.0025      // ~smooth release coeff
+    /// Envelope coeffs: attack must be fast (near 1), release slow (small).
+    private static let limiterAttack: Float = 0.55
+    private static let limiterRelease: Float = 0.008
+    private static let limiterGainSmooth: Float = 0.45
 
     // Live adaptive analysis (Tier A) — light RMS/crest/HF every ~0.75s.
     private var analysisEnergy: Float = 0
@@ -86,7 +88,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var liveMakeupTarget: Float = 1.0
     private var liveHFMul: Float = 1.0
     private var liveHFTarget: Float = 1.0
-    private var dryLoudnessMul: Float = 1.0 // match dry A/B roughly to wet level
+    /// Scales wet only (≤1) so Amplify doesn’t win A/B by loudness. Never boosts dry.
+    private var wetLoudnessMatch: Float = 1.0
+    private var wetLoudnessTarget: Float = 1.0
     private static let analysisIntervalSeconds: Float = 0.75
 
     private(set) var isRunning = false
@@ -532,7 +536,8 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         liveMakeupTarget = 1
         liveHFMul = 1
         liveHFTarget = 1
-        dryLoudnessMul = 1
+        wetLoudnessMatch = 1
+        wetLoudnessTarget = 1
         liveMediaHint = ""
         channelRoles = []
     }
@@ -566,16 +571,25 @@ final class LocalAmplifyEngine: @unchecked Sendable {
                 var frameBuf = [Float](repeating: 0, count: nCh)
                 for f in 0..<frames {
                     let wetG = wetGain
+                    let wetScale = wetLoudnessMatch
                     var peak: Float = 0
+                    var monoAccum: Float = 0
+                    var monoCount = 0
                     for c in 0..<nCh {
                         guard let iPtr = inABL[c].mData?.assumingMemoryBound(to: Float.self) else { continue }
                         let dry = iPtr[f]
-                        let wet = processEQ(dry: dry, channel: c)
-                        let dryMatched = dry * dryLoudnessMul
-                        let mixed = dryMatched * (1 - wetG) + wet * wetG
+                        // Wet only is level-matched — dry passthrough stays bit-identical unity.
+                        let wet = processEQ(dry: dry, channel: c) * wetScale
+                        let mixed = dry * (1 - wetG) + wet * wetG
                         frameBuf[c] = mixed
                         peak = max(peak, abs(mixed))
-                        accumulateAnalysis(sample: dry, channel: c)
+                        if role(for: c) != .lfe {
+                            monoAccum += dry
+                            monoCount += 1
+                        }
+                    }
+                    if monoCount > 0 {
+                        accumulateAnalysisMono(monoAccum / Float(monoCount))
                     }
                     let gr = linkedLimiterGain(framePeak: peak)
                     for c in 0..<nCh {
@@ -600,7 +614,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
                 for f in 0..<frameCount {
                     let widthNow = allowMS ? currentWidth() : 0
                     let wetG = wetGain
+                    let wetScale = wetLoudnessMatch
                     var peak: Float = 0
+                    var monoAccum: Float = 0
+                    var monoCount = 0
 
                     if channels >= 2, widthNow > 0.001 {
                         let li = f * channels
@@ -614,32 +631,41 @@ final class LocalAmplifyEngine: @unchecked Sendable {
                         side *= (1.0 + widthNow)
                         l = mid + side
                         r = mid - side
-                        let wL = processEQ(dry: l, channel: 0)
-                        let wR = processEQ(dry: r, channel: 1)
-                        frameBuf[0] = dryL * dryLoudnessMul * (1 - wetG) + wL * wetG
-                        frameBuf[1] = dryR * dryLoudnessMul * (1 - wetG) + wR * wetG
+                        let wL = processEQ(dry: l, channel: 0) * wetScale
+                        let wR = processEQ(dry: r, channel: 1) * wetScale
+                        frameBuf[0] = dryL * (1 - wetG) + wL * wetG
+                        frameBuf[1] = dryR * (1 - wetG) + wR * wetG
                         peak = max(abs(frameBuf[0]), abs(frameBuf[1]))
-                        accumulateAnalysis(sample: dryL, channel: 0)
-                        accumulateAnalysis(sample: dryR, channel: 1)
+                        monoAccum += dryL + dryR
+                        monoCount += 2
                         for c in 2..<channels {
                             let idx = f * channels + c
                             let dry = inSamples[idx]
-                            let wet = processEQ(dry: dry, channel: c)
-                            frameBuf[c] = dry * dryLoudnessMul * (1 - wetG) + wet * wetG
+                            let wet = processEQ(dry: dry, channel: c) * wetScale
+                            frameBuf[c] = dry * (1 - wetG) + wet * wetG
                             peak = max(peak, abs(frameBuf[c]))
-                            accumulateAnalysis(sample: dry, channel: c)
+                            if role(for: c) != .lfe {
+                                monoAccum += dry
+                                monoCount += 1
+                            }
                         }
                     } else {
                         for c in 0..<channels {
                             let idx = f * channels + c
                             let dry = inSamples[idx]
-                            let wet = processEQ(dry: dry, channel: c)
-                            frameBuf[c] = dry * dryLoudnessMul * (1 - wetG) + wet * wetG
+                            let wet = processEQ(dry: dry, channel: c) * wetScale
+                            frameBuf[c] = dry * (1 - wetG) + wet * wetG
                             peak = max(peak, abs(frameBuf[c]))
-                            accumulateAnalysis(sample: dry, channel: c)
+                            if role(for: c) != .lfe {
+                                monoAccum += dry
+                                monoCount += 1
+                            }
                         }
                     }
 
+                    if monoCount > 0 {
+                        accumulateAnalysisMono(monoAccum / Float(monoCount))
+                    }
                     let gr = linkedLimiterGain(framePeak: peak)
                     for c in 0..<channels {
                         outRaw[f * channels + c] = max(-1, min(1, frameBuf[c] * gr))
@@ -756,10 +782,15 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     /// Shared gain reduction from frame peak — preserves multi-channel image.
     private func linkedLimiterGain(framePeak: Float) -> Float {
         let ceiling = Self.limiterCeiling
+        // Fast attack / slow release on peak envelope.
         if framePeak > limiterEnvelope {
             limiterEnvelope += (framePeak - limiterEnvelope) * Self.limiterAttack
         } else {
             limiterEnvelope += (framePeak - limiterEnvelope) * Self.limiterRelease
+        }
+        // Silence recovery — don’t leave GR stuck after a one-shot peak.
+        if framePeak < 1e-5 {
+            limiterEnvelope *= 0.98
         }
         let needed: Float
         if limiterEnvelope > ceiling && limiterEnvelope > 1e-9 {
@@ -767,18 +798,16 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         } else {
             needed = 1
         }
-        // Smooth GR so we don’t zipper.
-        limiterGain += (needed - limiterGain) * 0.35
-        return max(0.05, min(1, limiterGain))
+        limiterGain += (needed - limiterGain) * Self.limiterGainSmooth
+        // Floor soft enough to avoid total duck, hard enough to stop overs.
+        return max(0.25, min(1, limiterGain))
     }
 
-    private func accumulateAnalysis(sample: Float, channel: Int) {
-        // Skip pure LFE for media-type heuristics (bass channel skews classification).
-        if role(for: channel) == .lfe { return }
-        let x = sample
+    /// One mono sample per audio frame (not per channel) for stable analysis timing.
+    private func accumulateAnalysisMono(_ mono: Float) {
+        let x = mono
         analysisEnergy += x * x
         analysisPeak = max(analysisPeak, abs(x))
-        // Crude HF proxy: difference energy (high-passed-ish).
         let hp = x - analysisPrevSample
         analysisHighEnergy += hp * hp
         if (analysisPrevSample >= 0) != (x >= 0) { analysisZCR += 1 }
@@ -786,7 +815,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         analysisFrames += 1
 
         let sr = Float(format.mSampleRate > 0 ? format.mSampleRate : 48_000)
-        let need = Int(Self.analysisIntervalSeconds * sr) * max(1, channelCount / 2)
+        let need = max(1, Int(Self.analysisIntervalSeconds * sr))
         if analysisFrames >= need {
             finalizeLiveAnalysis()
         }
@@ -799,28 +828,23 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         let highRatio = (sqrt(analysisHighEnergy / Float(n)) + 1e-9) / rms
         let zcr = Float(analysisZCR) / Float(n)
 
-        // Map to small trims (Tier A) — never aggressive.
         var makeupT: Float = 1.0
         var hfT: Float = 1.0
         var hint = "music"
 
         if zcr > 0.18 && highRatio > 0.55 {
-            // Speech-ish: mild presence preference via higher wet HF keep, lower sub makeup.
             makeupT = 0.96
             hfT = 1.0
             hint = "speech"
         } else if highRatio < 0.35 && crest < 6 {
-            // Bass-heavy / dull: slight body, don’t boost air.
             makeupT = 1.02
             hfT = 0.92
             hint = "bass"
         } else if highRatio > 0.85 {
-            // Bright: pull HF wet blend.
             makeupT = 0.97
             hfT = 0.85
             hint = "bright"
         } else if crest > 12 {
-            // High DR master: less makeup.
             makeupT = 0.94
             hfT = 0.95
             hint = "dynamic"
@@ -830,7 +854,6 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             hint = "quiet"
         }
 
-        // Reference profile: almost no live coloration.
         if profileRaw == "reference" {
             makeupT = 1.0 + (makeupT - 1.0) * 0.25
             hfT = 1.0 + (hfT - 1.0) * 0.25
@@ -840,10 +863,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         liveHFTarget = max(0.8, min(1.05, hfT))
         liveMediaHint = hint
 
-        // Dry loudness match (Tier B): scale dry toward wet energy so A/B isn’t “louder wins”.
-        // Approximate: wet often slightly hotter — pull dry up a touch when makeup > 1.
-        let targetDry = min(1.12, max(0.92, liveMakeupTarget))
-        dryLoudnessMul += (targetDry - dryLoudnessMul) * 0.35
+        // Fair A/B: never boost dry. If wet would be hotter, attenuate wet slightly.
+        // Inverse of makeup target, clamped so we only turn wet down, not up.
+        wetLoudnessTarget = max(0.88, min(1.0, 1.0 / max(0.92, liveMakeupTarget)))
 
         analysisEnergy = 0
         analysisPeak = 0
@@ -863,10 +885,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         if wetInc != 0 || abs(wetGain - wetTarget) > 1e-5 {
             wetGain = advanceToward(wetGain, target: wetTarget, inc: &wetInc)
         }
-        // Smooth live trims (~30 ms @ 48k).
         let liveSmooth: Float = 0.002
         liveMakeupMul += (liveMakeupTarget - liveMakeupMul) * liveSmooth
         liveHFMul += (liveHFTarget - liveHFMul) * liveSmooth
+        wetLoudnessMatch += (wetLoudnessTarget - wetLoudnessMatch) * liveSmooth
     }
 
     private func advanceToward(_ value: Float, target: Float, inc: inout Float) -> Float {
@@ -1003,7 +1025,7 @@ final class Biquad {
 
 // MARK: - Channel roles (layout-aware)
 
-enum AmplifyChannelRole: String {
+enum AmplifyChannelRole: String, Equatable {
     case fullRange
     case lfe
     case height
@@ -1131,14 +1153,15 @@ enum AmplifySpatialPath: String, CaseIterable, Identifiable {
     ) -> AmplifySpatialPath {
         // Never pretend multi-ch if we fell back to stereo mixdown.
         if tapIsStereoMix {
+            // Still Spatial-safe EQ if content claims Atmos/Spatial; else honest fallback label.
             if contentImmersiveHint { return .spatialBinaural }
             return .stereoMixFallback
         }
-        // Auto path policy (Tier A)
+        // Auto path policy (Tier A): multi-channel beds first.
         if channels >= 6 {
-            return contentImmersiveHint || channels >= 8 || sourceApp == "music"
-                ? .atmosBed
-                : .multichannel
+            // 8+ ch or immersive metadata → Atmos bed; plain 6ch without hint → surround.
+            // Music alone is not enough to upgrade 6ch→Atmos (false positives on stereo-upmix).
+            return (contentImmersiveHint || channels >= 8) ? .atmosBed : .multichannel
         }
         if channels > 2 {
             return .multichannel

@@ -38,7 +38,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .reference: return "waveform.badge.magnifyingglass"
+        case .reference: return "tuningfork"
         case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
