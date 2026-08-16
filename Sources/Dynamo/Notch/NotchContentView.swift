@@ -239,6 +239,8 @@ struct NotchContentView: View {
             isActive: isActive,
             isLive: isAmbient
         ) {
+            // Light haptic so tab switches feel tactile and fun.
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .default)
             if isActive, let opener = plugin as? any PlayerAppOpening {
                 opener.openPlayerApp()
             } else {
@@ -250,7 +252,7 @@ struct NotchContentView: View {
     }
 }
 
-/// Tray control: icon-only. Hover highlights + tab-style name preview; press never expands a label.
+/// Tray control: icon-only. Hover name preview; press via ButtonStyle (reliable click + scale).
 private struct TrayIconButton: View {
     let systemImage: String
     let displayName: String
@@ -263,21 +265,19 @@ private struct TrayIconButton: View {
     @State private var previewTask: Task<Void, Never>?
 
     /// Slight dwell so skimming the tray doesn’t flash every name.
-    private static let previewDelayNs: UInt64 = 280_000_000
+    private static let previewDelayNs: UInt64 = 220_000_000
 
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
-                    .foregroundStyle(isActive || isHovering ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                    .symbolRenderingMode(.hierarchical)
+                trayGlyph
                 if isLive && !isActive {
                     Circle()
                         .fill(NotchTheme.positive)
                         .frame(width: 5, height: 5)
                         .shadow(color: NotchTheme.positive.opacity(0.7), radius: 2)
                         .offset(x: 2, y: -2)
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
             .frame(width: 32, height: 32)
@@ -296,7 +296,7 @@ private struct TrayIconButton: View {
             )
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TrayIconButtonStyle(isHovering: isHovering))
         .onHover { hovering in
             isHovering = hovering
             previewTask?.cancel()
@@ -316,7 +316,6 @@ private struct TrayIconButton: View {
         }
         .overlay(alignment: .bottom) {
             if showPreview {
-                // Tab-style hover preview — floats under the icon, not in the chip.
                 Text(displayName)
                     .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(NotchTheme.textPrimary)
@@ -342,10 +341,22 @@ private struct TrayIconButton: View {
         .animation(NotchTheme.quick, value: isHovering)
         .animation(NotchTheme.snappy, value: isActive)
         .animation(NotchTheme.quick, value: showPreview)
-        // No system `.help` — that competes with our preview and can feel like a press label.
         .accessibilityLabel(displayName)
         .accessibilityHint("Opens \(displayName)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var trayGlyph: some View {
+        let image = Image(systemName: systemImage)
+            .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
+            .foregroundStyle(isActive || isHovering ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+            .symbolRenderingMode(.hierarchical)
+        if #available(macOS 14.0, *) {
+            image.symbolEffect(.bounce, value: isActive)
+        } else {
+            image
+        }
     }
 
     private var fillColor: Color {
@@ -356,6 +367,18 @@ private struct TrayIconButton: View {
     private var strokeColor: Color {
         if isActive { return NotchTheme.controlAccent.opacity(0.32) }
         return isHovering ? Color.white.opacity(0.12) : Color.clear
+    }
+}
+
+/// Press scale without DragGesture (which can steal clicks on nonactivating panels).
+private struct TrayIconButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : (isHovering ? 1.06 : 1.0))
+            .animation(NotchTheme.snappy, value: configuration.isPressed)
+            .animation(NotchTheme.quick, value: isHovering)
     }
 }
 

@@ -53,11 +53,32 @@ final class SportsStore: ObservableObject {
         refreshCurrent()
         // Warm a few high-traffic boards in background.
         Task { await prefetchCore() }
-        let t = Timer(timeInterval: 35, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshCurrent() }
+        scheduleAdaptivePoll()
+    }
+
+    /// Faster while something is live; idle boards stay sparse for battery.
+    private func scheduleAdaptivePoll() {
+        timer?.invalidate()
+        let interval = preferredPollInterval
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshCurrent()
+                let want = self.preferredPollInterval
+                if abs((self.timer?.timeInterval ?? 0) - want) > 1 {
+                    self.scheduleAdaptivePoll()
+                }
+            }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    private var preferredPollInterval: TimeInterval {
+        let anyLive = liveFollowed != nil
+            || currentEvents.contains(where: { $0.status == .live })
+            || liveAllEvents.contains(where: { $0.status == .live })
+        return anyLive ? 18 : 40
     }
 
     func stop() {

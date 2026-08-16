@@ -431,7 +431,7 @@ private struct ExpandedFocusView: View {
             } else if let due = agenda.snapshot.needsAttention.first {
                 miniRow("Overdue", due.title, due.detail)
             } else {
-                Text("Nothing urgent — enjoy the flow.")
+                Text("All clear — ride the flow.")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
@@ -639,7 +639,7 @@ private struct MeetingNotesPanel: View {
             }
 
             if notes.bullets.isEmpty {
-                Text("No notes yet — type below or tap Listen")
+                Text("Start a bullet or tap Listen — notes stick here")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textQuaternary)
                     .padding(.vertical, 4)

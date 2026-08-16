@@ -257,7 +257,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private func startPolling() {
         pollTimer?.invalidate()
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.syncFromEngine() }
         }
         RunLoop.main.add(t, forMode: .common)

@@ -36,11 +36,19 @@ run_python() {
 run_swift() {
   section "Swift — XCTest (Package.swift DynamoTests)"
   # Clear resource-fork xattrs that break ad-hoc codesign of SPM products
-  xattr -cr .build 2>/dev/null || true
+  scrub_build_xattrs() {
+    xattr -cr .build 2>/dev/null || true
+    find .build -name '*.xctest' -print0 2>/dev/null | xargs -0 xattr -cr 2>/dev/null || true
+    find .build -name 'Dynamo' -type f -print0 2>/dev/null | xargs -0 xattr -cr 2>/dev/null || true
+  }
+  scrub_build_xattrs
   if ! swift test --filter DynamoTests; then
-    red "swift test failed once — cleaning and retrying"
-    rm -rf .build
-    swift test --filter DynamoTests || return 1
+    red "swift test failed once — scrubbing xattrs / cleaning and retrying"
+    scrub_build_xattrs
+    if ! swift test --filter DynamoTests; then
+      rm -rf .build
+      swift test --filter DynamoTests || return 1
+    fi
   fi
   green "Swift tests passed"
   return 0

@@ -176,10 +176,12 @@ private struct ExpandedClipboardView: View {
     @ViewBuilder
     private var pinnedSection: some View {
         if store.snippets.isEmpty && !plugin.isAddingSnippet {
-            Text("No pins yet — pin from History or add text.")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .padding(.vertical, 2)
+            NotchEmptyState(
+                systemImage: "pin",
+                title: "Pin your keepers",
+                caption: "Star from History or tap Add snippet for go-to text.",
+                prominent: false
+            )
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(store.snippets) { snippet in
@@ -195,15 +197,19 @@ private struct ExpandedClipboardView: View {
             searchQuery.isEmpty || $0.text.localizedCaseInsensitiveContains(searchQuery)
         }
         if store.history.isEmpty {
-            Text("Copy text or a screenshot — it shows up here.")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .padding(.vertical, 2)
+            NotchEmptyState(
+                systemImage: "doc.on.clipboard",
+                title: "Clipboard is quiet",
+                caption: "Copy text or a screenshot — it lands here automatically.",
+                prominent: false
+            )
         } else if filtered.isEmpty {
-            Text("No results for \"\(searchQuery)\".")
-                .font(NotchTheme.caption)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .padding(.vertical, 2)
+            NotchEmptyState(
+                systemImage: "magnifyingglass",
+                title: "No matches",
+                caption: "Nothing in history for “\(searchQuery)”.",
+                prominent: false
+            )
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(filtered) { item in

@@ -15,6 +15,13 @@ All notable changes to Dynamo are documented here.
 - Profiles: **Symphony** (default adaptive) · Presence · Cinema · Impact
 - Python designer: `Tools/DynamoEQ/dynamo_eq.py` (`analyze`, `symphony`, `coeffs`, `process`)
 
+### Performance & feel
+- Adaptive media poll (faster while playing, idle back-off)
+- Slower idle polls: notifications, calls, volume, Amplify sync, Notes, clipboard
+- Sports scoreboard poll speeds up only while games are live
+- Tray: reliable press scale (ButtonStyle), hover name previews, light haptics, bounce on select (macOS 14+)
+- Friendlier empty states across Calendar, Clipboard, Checklist, Media, Shelf, Focus
+
 ### Also in this line
 - World Clock distance / reverse / random sort
 - Preferences rebrand, Feel & alerts, icon-only tray + hover previews

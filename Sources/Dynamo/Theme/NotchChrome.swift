@@ -74,11 +74,14 @@ struct NotchSectionHeader: View {
 
 // MARK: - Empty state
 
+/// Friendly zero-content strip — soft icon pop so empty tabs feel intentional, not broken.
 struct NotchEmptyState: View {
     var systemImage: String
     var title: String
     var caption: String? = nil
     var prominent: Bool = false
+
+    @State private var appeared = false
 
     var body: some View {
         VStack(spacing: prominent ? 6 : 4) {
@@ -87,8 +90,10 @@ struct NotchEmptyState: View {
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .symbolRenderingMode(.hierarchical)
                 .symbolVariant(.none)
+                .scaleEffect(appeared ? 1 : 0.86)
+                .opacity(appeared ? 1 : 0.45)
             Text(title)
-                .font(NotchTheme.caption)
+                .font(NotchTheme.caption.weight(.medium))
                 .foregroundStyle(NotchTheme.textSecondary)
                 .multilineTextAlignment(.center)
             if let caption {
@@ -102,6 +107,12 @@ struct NotchEmptyState: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, prominent ? NotchTheme.spaceSM : 4)
+        .opacity(appeared ? 1 : 0.7)
+        .onAppear {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
+                appeared = true
+            }
+        }
     }
 }
 

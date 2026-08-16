@@ -425,9 +425,9 @@ private struct ExpandedCalendarView: View {
             case .authorized:
                 if plugin.events.isEmpty {
                     NotchEmptyState(
-                        systemImage: "calendar",
-                        title: "No upcoming events",
-                        caption: "Next 3 weeks look clear — New to schedule.",
+                        systemImage: "sun.max.fill",
+                        title: "Wide open calendar",
+                        caption: "Nothing in the next 3 weeks — tap New when you’re ready.",
                         prominent: false
                     )
                 } else {
