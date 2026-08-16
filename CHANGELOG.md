@@ -28,6 +28,14 @@ All notable changes to Dynamo are documented here.
 - Amplify toggle always works (Meeting only auto-offs on enter)
 - Friendlier empty states across Calendar, Clipboard, Checklist, Media, Shelf, Focus
 
+### Notifications → Peek
+- Mirror **calls, texts/iMessage, mail, Slack/Teams**, and general Notification Center alerts into notch Peeks (like reminders)
+- Critical urgency for calls/texts (survives Meeting quiet); FaceTime/Zoom/Teams activation Peeks
+- Prefer Full Disk Access; clearer Preferences status + test text Peek
+
+### World Clock
+- **Here (current location) always first**, then other cities in the chosen sort (nearest / farthest / random / pick order)
+
 ### Also in this line
 - World Clock distance / reverse / random sort
 - Preferences rebrand, Feel & alerts, icon-only tray + hover previews

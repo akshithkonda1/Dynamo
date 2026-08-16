@@ -98,10 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
         PeekBridge.shared.attach(registry: registry)
         DynamoNotificationAPI.installExternalListeners()
-        // Mirror other apps’ Notification Center deliveries into Peeks (best-effort).
-        if PeekNotificationCenter.shared.isPrimaryDelivery {
-            SystemNotificationMirror.shared.start()
-        }
+        // Mirror other apps’ Notification Center deliveries (calls, texts, general) into Peeks.
+        // Independent of primaryDelivery — respects SystemNotificationMirror.isEnabled.
+        SystemNotificationMirror.shared.start()
         PermissionsStore.shared.refreshFromSystem()
         FocusController.shared.emitPeek = { peek in
             PeekNotificationCenter.shared.deliver(

@@ -80,4 +80,37 @@ final class WorldClockSortTests: XCTestCase {
         XCTAssertNotEqual(before, plugin.randomSeed)
         XCTAssertEqual(plugin.sortMode, .random)
     }
+
+    func testCurrentLocationAlwaysFirst() {
+        let plugin = WorldClockPlugin()
+        plugin.selectedIDs = [
+            "tokyo",
+            WorldClockEntry.currentLocationID,
+            "london",
+            "new-york"
+        ]
+        for mode in WorldClockSortMode.allCases {
+            plugin.sortMode = mode
+            if mode == .random { plugin.randomSeed = 42 }
+            let ordered = plugin.activeEntries
+            XCTAssertEqual(
+                ordered.first?.kind,
+                .currentLocation,
+                "Here must lead in \(mode.title) sort"
+            )
+            // Rest still present
+            XCTAssertEqual(ordered.count, 4)
+            XCTAssertTrue(ordered.dropFirst().allSatisfy { $0.kind != .currentLocation })
+        }
+    }
+
+    func testFarthestKeepsHereFirstThenRestByDistance() {
+        let plugin = WorldClockPlugin()
+        plugin.selectedIDs = [WorldClockEntry.currentLocationID, "tokyo", "london"]
+        plugin.sortMode = .farthest
+        let ordered = plugin.activeEntries
+        XCTAssertEqual(ordered.first?.id, WorldClockEntry.currentLocationID)
+        // Remaining cities still included
+        XCTAssertEqual(Set(ordered.dropFirst().map(\.id)), Set(["tokyo", "london"]))
+    }
 }

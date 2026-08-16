@@ -187,21 +187,19 @@ struct SettingsView: View {
 
             Text("Notifications → Peek")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Deliver all alerts as Peeks", isOn: Binding(
+            Toggle("Deliver all Dynamo alerts as Peeks", isOn: Binding(
                 get: { PeekNotificationCenter.shared.isPrimaryDelivery },
-                set: { newValue in
-                    PeekNotificationCenter.shared.isPrimaryDelivery = newValue
-                    if newValue {
-                        SystemNotificationMirror.shared.start()
-                    } else {
-                        SystemNotificationMirror.shared.stop()
-                    }
-                }
+                set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
             ))
-            Toggle("Mirror other apps’ notifications", isOn: Binding(
+            Toggle("Mirror calls, texts & system notifications", isOn: Binding(
                 get: { mirror.isEnabled },
                 set: { mirror.isEnabled = $0 }
             ))
+            Toggle("Prioritize calls & texts (critical Peek)", isOn: Binding(
+                get: { mirror.prioritizeCallsAndTexts },
+                set: { mirror.prioritizeCallsAndTexts = $0 }
+            ))
+            .disabled(!mirror.isEnabled)
             Toggle("Peek haptics", isOn: Binding(
                 get: { PeekNotificationCenter.shared.hapticsEnabled },
                 set: { PeekNotificationCenter.shared.hapticsEnabled = $0 }
@@ -210,7 +208,7 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, sports, health, world clock — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS may still show system banners unless you quiet them in Focus / Notifications.")
+            Text("Like reminders: Messages, FaceTime/Phone, Mail, Slack/Teams, and other Notification Center alerts appear as notch Peeks when mirroring is on. Grant Full Disk Access so Dynamo can read the Notification Center store. macOS may still show system banners — quiet them in Focus / Notifications if you want Peek-only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -218,13 +216,26 @@ struct SettingsView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(mirror.accessDenied ? Color.orange : Color.secondary)
                 .lineLimit(2)
+            if !mirror.lastMirroredApp.isEmpty {
+                Text("Last app: \(mirror.lastMirroredApp) · \(mirror.mirroredCount) mirrored")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             if mirror.accessDenied {
-                Button("Open Privacy → Full Disk Access") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                        NSWorkspace.shared.open(url)
+                HStack(spacing: 8) {
+                    Button("Open Full Disk Access") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
+                    .controlSize(.small)
+                    Button("Retry") {
+                        mirror.stop()
+                        mirror.start()
+                    }
+                    .controlSize(.small)
                 }
-                .controlSize(.small)
             }
             if PeekNotificationCenter.shared.pendingCount > 0 {
                 Text("\(PeekNotificationCenter.shared.pendingCount) queued")
@@ -232,11 +243,23 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             if let last = PeekNotificationCenter.shared.lastDelivered {
-                Text("Last: \(last.title)")
+                Text("Last Peek: \(last.title)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            Button("Send test text Peek") {
+                DynamoNotificationAPI.post(
+                    title: "Alex",
+                    subtitle: "On my way — 5 min",
+                    detail: "Text · Messages",
+                    systemImage: "message.fill",
+                    urgency: .critical,
+                    category: "text",
+                    id: "test-text|\(Date().timeIntervalSince1970)"
+                )
+            }
+            .controlSize(.small)
 
             Divider()
 

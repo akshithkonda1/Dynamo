@@ -459,6 +459,11 @@ final class FocusController: ObservableObject {
 
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
         if peek.style == .media { return false }
+        // Calls / texts / mail always surface (same priority as due reminders).
+        let detail = peek.detail.lowercased()
+        if detail.hasPrefix("call") || detail.hasPrefix("text") || detail.hasPrefix("mail") {
+            return false
+        }
         if isMeetingActive, peek.urgency < .high {
             if peek.detail.contains("Meeting companion") { return false }
             return true
