@@ -660,6 +660,23 @@ private enum WorldClockFormat {
         }
     }
 
+    /// Local day phase for tinting clock cards (sun / dusk / night).
+    static func dayPhase(date: Date, timeZone: TimeZone) -> (label: String, symbol: String, tint: Color) {
+        let h = hour(date: date, timeZone: timeZone)
+        switch h {
+        case 5..<8:
+            return ("Dawn", "sunrise.fill", Color(red: 1.0, green: 0.72, blue: 0.42))
+        case 8..<17:
+            return ("Day", "sun.max.fill", Color(red: 1.0, green: 0.86, blue: 0.35))
+        case 17..<20:
+            return ("Dusk", "sunset.fill", Color(red: 1.0, green: 0.55, blue: 0.38))
+        case 20..<24, 0..<5:
+            return ("Night", "moon.stars.fill", Color(red: 0.55, green: 0.72, blue: 1.0))
+        default:
+            return ("Day", "sun.max.fill", NotchTheme.calmGlow)
+        }
+    }
+
     static func convert(localHour: Int, localMinute: Int, from: TimeZone, to: TimeZone, on date: Date = Date()) -> Date {
         var fromCal = Calendar.current
         fromCal.timeZone = from
@@ -678,21 +695,32 @@ private struct AmbientWorldClockView: View {
     @ObservedObject var plugin: WorldClockPlugin
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { context in
             let entries = Array(plugin.activeEntries.prefix(3))
-            HStack(spacing: 8) {
-                Image(systemName: "globe")
+            HStack(spacing: 6) {
+                Image(systemName: "globe.americas.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchTheme.calmGlow)
+                    .symbolRenderingMode(.hierarchical)
                 ForEach(entries) { entry in
+                    let phase = WorldClockFormat.dayPhase(date: context.date, timeZone: entry.timeZone)
                     HStack(spacing: 3) {
+                        Circle()
+                            .fill(phase.tint.opacity(0.9))
+                            .frame(width: 4, height: 4)
                         Text(ambientLabel(entry))
                             .font(NotchTheme.micro.weight(.semibold))
                             .foregroundStyle(NotchTheme.textTertiary)
                         Text(WorldClockFormat.timeString(date: context.date, timeZone: entry.timeZone))
-                            .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                            .font(NotchTheme.micro.weight(.bold).monospacedDigit())
                             .foregroundStyle(NotchTheme.textPrimary)
                     }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(phase.tint.opacity(0.12))
+                    )
                 }
                 Spacer(minLength: 0)
             }
@@ -708,9 +736,9 @@ private struct AmbientWorldClockView: View {
             if entry.timeZoneIdentifier == "UTC" || entry.timeZoneIdentifier == "GMT" {
                 return entry.timeZoneIdentifier
             }
-            return String(entry.name.prefix(3))
+            return String(entry.name.prefix(3)).uppercased()
         case .majorCity:
-            return String(entry.name.prefix(3))
+            return String(entry.name.prefix(3)).uppercased()
         }
     }
 }
@@ -725,37 +753,42 @@ private struct ExpandedWorldClockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-            HStack(spacing: 8) {
-                NotchSectionHeader("World Clock")
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("World Clock")
+                        .font(NotchTheme.section)
+                        .foregroundStyle(NotchTheme.textTertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.7)
+                    Text(footerLine)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 sortControls
             }
 
-            TimelineView(.periodic(from: .now, by: 15)) { context in
-                ScrollView {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(plugin.activeEntries) { entry in
-                            cityRow(entry, at: context.date)
+                        ForEach(Array(plugin.activeEntries.enumerated()), id: \.element.id) { index, entry in
+                            cityCard(entry, at: context.date, isHero: index == 0)
                         }
-
                         converterCard(at: context.date)
                     }
                 }
             }
-
-            Text(footerLine)
-                .font(NotchTheme.micro)
-                .foregroundStyle(NotchTheme.textQuaternary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var footerLine: String {
         switch plugin.sortMode {
-        case .nearest: return "Here first · then nearest → farthest · offline"
-        case .farthest: return "Here first · then farthest → nearest · offline"
-        case .random: return "Here first · then random · shuffle to re-roll · offline"
-        case .selection: return "Here first · then pick order · offline"
+        case .nearest: return "Here first · nearest next · offline"
+        case .farthest: return "Here first · farthest next · offline"
+        case .random: return "Here first · shuffled · offline"
+        case .selection: return "Here first · pick order · offline"
         }
     }
 
@@ -783,11 +816,15 @@ private struct ExpandedWorldClockView: View {
                         .font(NotchTheme.micro.weight(.semibold))
                 }
                 .foregroundStyle(NotchTheme.textSecondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
                 .background(
                     Capsule(style: .continuous)
                         .fill(NotchTheme.chipFill)
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(NotchTheme.hairline.opacity(0.5), lineWidth: 0.5)
+                        )
                 )
             }
             .menuStyle(.borderlessButton)
@@ -801,6 +838,7 @@ private struct ExpandedWorldClockView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(NotchTheme.textTertiary)
                         .frame(width: 26, height: 26)
+                        .background(Circle().fill(NotchTheme.chipFill))
                 }
                 .buttonStyle(.plain)
                 .help("Reshuffle")
@@ -808,105 +846,142 @@ private struct ExpandedWorldClockView: View {
         }
     }
 
-    private func cityRow(_ entry: WorldClockEntry, at date: Date) -> some View {
+    private func cityCard(_ entry: WorldClockEntry, at date: Date, isHero: Bool) -> some View {
         let tz = entry.timeZone
         let ref = plugin.referenceTimeZone
         let window = WorldClockFormat.callWindow(date: date, timeZone: tz)
         let dst = WorldClockFormat.isDST(timeZone: tz, date: date)
+        let phase = WorldClockFormat.dayPhase(date: date, timeZone: tz)
+        let timeSize: CGFloat = isHero ? 28 : 20
 
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
+        return HStack(alignment: .center, spacing: 12) {
+            // Day/night orb
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [phase.tint.opacity(0.55), phase.tint.opacity(0.08)],
+                            center: .center,
+                            startRadius: 1,
+                            endRadius: 18
+                        )
+                    )
+                    .frame(width: isHero ? 40 : 34, height: isHero ? 40 : 34)
+                Image(systemName: phase.symbol)
+                    .font(.system(size: isHero ? 15 : 12, weight: .semibold))
+                    .foregroundStyle(phase.tint)
+                    .symbolRenderingMode(.hierarchical)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Image(systemName: icon(for: entry))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(NotchTheme.calmGlow)
                     Text(entry.name)
-                        .font(NotchTheme.body.weight(.semibold))
+                        .font(isHero ? NotchTheme.body.weight(.bold) : NotchTheme.body.weight(.semibold))
                         .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
                     if entry.kind == .currentLocation {
                         Text("HERE")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
                             .foregroundStyle(NotchTheme.calmGlow)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(NotchTheme.calmGlow.opacity(0.15)))
-                    }
-                }
-                HStack(spacing: 6) {
-                    Text(WorldClockFormat.abbreviation(date: date, timeZone: tz))
-                        .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(NotchTheme.textSecondary)
-                    Text("·")
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    Text(WorldClockFormat.gmtOffsetLabel(timeZone: tz, date: date))
-                        .font(NotchTheme.micro.monospacedDigit())
-                        .foregroundStyle(NotchTheme.textTertiary)
-                    Text("·")
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                    Text(WorldClockFormat.dayHint(date: date, timeZone: tz, reference: ref))
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
-                    if entry.kind != .currentLocation {
-                        Text("·")
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                        Text(WorldClockFormat.offsetLabel(from: ref, to: tz, date: date))
-                            .font(NotchTheme.micro.monospacedDigit())
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    }
-                    if let dist = plugin.distanceLabel(for: entry) {
-                        Text("·")
-                            .foregroundStyle(NotchTheme.textQuaternary)
-                        Text(dist)
-                            .font(NotchTheme.micro.monospacedDigit())
-                            .foregroundStyle(NotchTheme.calmGlow.opacity(0.9))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(NotchTheme.calmGlow.opacity(0.18)))
                     }
                     if dst {
                         Text("DST")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(Color.orange.opacity(0.9))
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.orange.opacity(0.95))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.15)))
                     }
                 }
+
+                HStack(spacing: 5) {
+                    metaChip(WorldClockFormat.abbreviation(date: date, timeZone: tz))
+                    metaChip(WorldClockFormat.gmtOffsetLabel(timeZone: tz, date: date))
+                    metaChip(WorldClockFormat.dayHint(date: date, timeZone: tz, reference: ref))
+                    if entry.kind != .currentLocation {
+                        metaChip(WorldClockFormat.offsetLabel(from: ref, to: tz, date: date))
+                    }
+                    if let dist = plugin.distanceLabel(for: entry) {
+                        metaChip(dist, tint: NotchTheme.calmGlow)
+                    }
+                }
+
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(window.good ? Color.green.opacity(0.85) : Color.secondary.opacity(0.45))
-                        .frame(width: 6, height: 6)
-                    Text(window.label)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
+                    callPill(window)
                     if let dstHint = WorldClockFormat.nextDSTHint(timeZone: tz, date: date) {
-                        Text("· \(dstHint)")
-                            .font(NotchTheme.micro)
+                        Text(dstHint)
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(NotchTheme.textQuaternary)
                     }
                 }
             }
-            Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(WorldClockFormat.timeString(date: date, timeZone: tz))
-                        .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: timeSize, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(NotchTheme.textPrimary)
                     Text(WorldClockFormat.periodString(date: date, timeZone: tz))
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textTertiary)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(phase.tint.opacity(0.95))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(phase.tint.opacity(0.14)))
                 }
                 Button {
                     copyTime(entry, at: date)
                 } label: {
-                    Text("Copy")
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textSecondary)
+                    HStack(spacing: 3) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("Copy")
+                            .font(NotchTheme.micro.weight(.semibold))
+                    }
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(NotchTheme.chipFill))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(NotchTheme.cardFill)
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, isHero ? 12 : 10)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(NotchTheme.cardFill)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                phase.tint.opacity(isHero ? 0.16 : 0.10),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.14),
+                                phase.tint.opacity(0.18),
+                                Color.white.opacity(0.04)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.6
+                    )
+            }
+        }
         .contextMenu {
             Button("Copy time") { copyTime(entry, at: date) }
             if entry.kind == .currentLocation {
@@ -915,29 +990,63 @@ private struct ExpandedWorldClockView: View {
         }
     }
 
+    private func metaChip(_ text: String, tint: Color = NotchTheme.textTertiary) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .rounded).monospacedDigit())
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+    }
+
+    private func callPill(_ window: (label: String, good: Bool)) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(window.good ? Color.green.opacity(0.9) : Color.white.opacity(0.28))
+                .frame(width: 5, height: 5)
+            Text(window.label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(window.good ? Color.green.opacity(0.95) : NotchTheme.textTertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(window.good ? Color.green.opacity(0.12) : Color.white.opacity(0.05))
+        )
+    }
+
     private func converterCard(at date: Date) -> some View {
         let from = plugin.referenceTimeZone
-        let targets = plugin.activeEntries.filter { $0.timeZone.identifier != from.identifier || $0.kind == .currentLocation }
+        let targets = plugin.activeEntries.filter {
+            $0.timeZone.identifier != from.identifier || $0.kind == .currentLocation
+        }
 
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Convert from here")
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textSecondary)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.calmGlow)
+                Text("When it’s this hour here…")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textSecondary)
+                Spacer(minLength: 0)
+            }
 
             HStack(spacing: 8) {
-                Text("When it’s")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
                 Picker("Hour", selection: $convertHour) {
                     ForEach(0..<24, id: \.self) { h in
                         Text(hourLabel(h)).tag(h)
                     }
                 }
                 .labelsHidden()
-                .frame(width: 88)
-                Text("here")
+                .frame(width: 96)
+                Text("local")
                     .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textTertiary)
+                    .foregroundStyle(NotchTheme.textQuaternary)
                 Spacer(minLength: 0)
             }
 
@@ -949,28 +1058,37 @@ private struct ExpandedWorldClockView: View {
                     to: entry.timeZone,
                     on: date
                 )
-                HStack {
+                let phase = WorldClockFormat.dayPhase(date: instant, timeZone: entry.timeZone)
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(phase.tint.opacity(0.85))
+                        .frame(width: 6, height: 6)
                     Text(entry.name)
                         .font(NotchTheme.micro.weight(.medium))
                         .foregroundStyle(NotchTheme.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(WorldClockFormat.timeString(date: instant, timeZone: entry.timeZone))
-                        .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
+                        .font(NotchTheme.micro.weight(.bold).monospacedDigit())
                         .foregroundStyle(NotchTheme.textPrimary)
                     Text(WorldClockFormat.periodString(date: instant, timeZone: entry.timeZone))
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textTertiary)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(phase.tint)
                     Text(WorldClockFormat.abbreviation(date: instant, timeZone: entry.timeZone))
                         .font(NotchTheme.micro.monospacedDigit())
                         .foregroundStyle(NotchTheme.textQuaternary)
                 }
+                .padding(.vertical, 2)
             }
         }
-        .padding(10)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(NotchTheme.cardFill.opacity(0.85))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(NotchTheme.cardFill.opacity(0.9))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(NotchTheme.calmGlow.opacity(0.12), lineWidth: 0.5)
+                )
         )
     }
 
@@ -978,14 +1096,6 @@ private struct ExpandedWorldClockView: View {
         let period = h < 12 ? "AM" : "PM"
         let twelve = h % 12 == 0 ? 12 : h % 12
         return "\(twelve) \(period)"
-    }
-
-    private func icon(for entry: WorldClockEntry) -> String {
-        switch entry.kind {
-        case .currentLocation: return "location.fill"
-        case .majorCity: return "building.2.fill"
-        case .timeZone: return "clock.fill"
-        }
     }
 
     private func copyTime(_ entry: WorldClockEntry, at date: Date) {

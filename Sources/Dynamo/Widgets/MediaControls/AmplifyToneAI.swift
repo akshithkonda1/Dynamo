@@ -2,14 +2,13 @@ import Foundation
 
 /// On-device genre / tone intelligence for Amplify EQ.
 ///
-/// Mirrors `Tools/DynamoEQ/dynamo_tone_ai.py`:
-/// - Linear softmax classifier over spectral features (no cloud APIs)
-/// - Optional local metadata prior (MusicKit / now-playing genre strings)
-/// - Ephemeral session EMA (in-memory only — never persisted)
-/// - Genre → live makeup / HF multipliers + EQ band bias map
+/// Goals: hear music closer to how it was mixed — clear notes, balanced
+/// volume, presence without harshness. Pure on-device (no cloud APIs).
 ///
-/// Training corpora and scrapes are developer-side only (Python `train`);
-/// the app ships weights as constants and never stores audio or lookups.
+/// - Linear softmax classifier over spectral features
+/// - Local metadata prior (MusicKit / now-playing genre strings)
+/// - Ephemeral session EMA (never persisted)
+/// - Genre → note-region dB map + volume / presence / clarity targets
 enum AmplifyToneAI {
 
     static let genres: [String] = [
@@ -20,7 +19,6 @@ enum AmplifyToneAI {
     /// Feature order matches Python FEATURE_KEYS (bias is appended as 1).
     private static let featureCount = 9
 
-    /// Genre × feature weights (embedded; same structure as Python `_WEIGHTS`).
     private static let weights: [[Float]] = [
         [0.4, 0.8, 0.3, 0.2, 0.1, -0.8, 0.5, 0.6, 0.2],
         [-1.2, 0.6, 1.4, -0.3, 1.6, -0.5, 1.0, 0.3, -0.1],
@@ -54,6 +52,55 @@ enum AmplifyToneAI {
         "folk": ["folk", "acoustic", "country", "bluegrass", "americana", "singer-songwriter"]
     ]
 
+    /// Per-genre note-region dB offsets — “hear every note” without wrecking fidelity.
+    /// Keys match DynamoEQCurves band labels.
+    static let genreNoteBias: [String: [String: Float]] = [
+        "pop": [
+            "sub": 0.25, "punch": 0.65, "body": 0.35, "mud": -0.55,
+            "warmth": 0.15, "presence": 0.85, "sheen": 0.40, "air": 0.30, "brilliance": 0.15
+        ],
+        "classical": [
+            "sub": -0.15, "punch": -0.10, "body": 0.25, "mud": -0.65,
+            "warmth": 0.35, "presence": 0.45, "sheen": 0.55, "air": 0.70, "brilliance": 0.45
+        ],
+        "electronic": [
+            "sub": 0.95, "punch": 0.55, "body": 0.15, "mud": -0.45,
+            "warmth": -0.05, "presence": 0.35, "sheen": 0.20, "air": 0.05, "brilliance": 0.0
+        ],
+        "hiphop": [
+            "sub": 1.05, "punch": 0.70, "body": 0.30, "mud": -0.60,
+            "warmth": 0.30, "presence": 0.50, "sheen": 0.05, "air": -0.05, "brilliance": -0.10
+        ],
+        "rock": [
+            "sub": 0.30, "punch": 0.50, "body": 0.65, "mud": -0.55,
+            "warmth": 0.25, "presence": 0.70, "sheen": -0.15, "air": 0.15, "brilliance": -0.05
+        ],
+        "jazz": [
+            "sub": -0.05, "punch": 0.10, "body": 0.40, "mud": -0.45,
+            "warmth": 0.60, "presence": 0.40, "sheen": 0.40, "air": 0.50, "brilliance": 0.20
+        ],
+        "speech": [
+            "sub": -1.0, "punch": -0.50, "body": 0.15, "mud": -0.85,
+            "warmth": 0.20, "presence": 1.35, "sheen": 0.50, "air": 0.25, "brilliance": 0.10
+        ],
+        "ambient": [
+            "sub": 0.40, "punch": -0.25, "body": 0.25, "mud": -0.25,
+            "warmth": 0.45, "presence": 0.10, "sheen": 0.35, "air": 0.60, "brilliance": 0.40
+        ],
+        "metal": [
+            "sub": 0.45, "punch": 0.60, "body": 0.55, "mud": -0.85,
+            "warmth": -0.10, "presence": 0.75, "sheen": -0.35, "air": -0.10, "brilliance": -0.20
+        ],
+        "folk": [
+            "sub": -0.10, "punch": 0.15, "body": 0.55, "mud": -0.40,
+            "warmth": 0.55, "presence": 0.50, "sheen": 0.30, "air": 0.40, "brilliance": 0.20
+        ],
+        "unknown": [
+            "sub": 0.15, "punch": 0.20, "body": 0.20, "mud": -0.40,
+            "warmth": 0.15, "presence": 0.45, "sheen": 0.20, "air": 0.25, "brilliance": 0.10
+        ]
+    ]
+
     struct Features: Equatable {
         var bassRatio: Float
         var brightness: Float
@@ -63,6 +110,7 @@ enum AmplifyToneAI {
         var speechLikelihood: Float
         var bandwidthHz: Float
         var midRatio: Float
+        var rms: Float = 0.05
 
         func vector() -> [Float] {
             [
@@ -79,21 +127,28 @@ enum AmplifyToneAI {
         }
     }
 
+    /// Full live guidance for the process-tap path.
     struct Verdict: Equatable {
         var genre: String
         var confidence: Float
+        /// Overall wet makeup (volume) multiplier.
         var makeupMul: Float
+        /// High-frequency blend vs dry (1 = full EQ HF, lower = tamer).
         var hfMul: Float
+        /// Presence / note intelligibility lift (1…~1.12).
+        var presenceMul: Float
+        /// Sub/punch body lift (1…~1.10).
+        var bassMul: Float
+        /// Note-region dB map for curve rebuild.
+        var noteBias: [String: Float]
         var source: String
         var displayLabel: String {
             let name = genre.prefix(1).uppercased() + genre.dropFirst()
-            if confidence < 0.35 { return "Tone AI" }
+            if confidence < 0.32 { return "Tone AI" }
             return "AI \(name)"
         }
     }
 
-    /// In-memory EMA of feature vectors for the current Amplify session only.
-    /// Cleared on stop — never written to disk.
     final class SessionMemory: @unchecked Sendable {
         private let lock = NSLock()
         private var ema: [Float]?
@@ -108,7 +163,6 @@ enum AmplifyToneAI {
         func blend(current: [Float]) -> [Float] {
             lock.lock()
             defer { lock.unlock() }
-            // current includes bias 1.0 at end — EMA only over free features
             let free = Array(current.dropLast())
             if var e = ema, e.count == free.count {
                 for i in 0..<e.count {
@@ -167,17 +221,23 @@ enum AmplifyToneAI {
             source = "audio"
         }
 
-        let (makeup, hf) = liveMultipliers(genre: genre, features: features)
+        let targets = listeningTargets(genre: genre, features: features)
+        var noteBias = genreNoteBias[genre] ?? genreNoteBias["unknown"]!
+        // Live note balancing from spectrum: lift weak bands, tame harsh HF.
+        noteBias = adaptNotes(base: noteBias, features: features)
+
         return Verdict(
             genre: genre,
             confidence: conf,
-            makeupMul: makeup,
-            hfMul: hf,
+            makeupMul: targets.makeup,
+            hfMul: targets.hf,
+            presenceMul: targets.presence,
+            bassMul: targets.bass,
+            noteBias: noteBias,
             source: source
         )
     }
 
-    /// Build features from the lightweight live analysis stats in LocalAmplifyEngine.
     static func featuresFromLive(
         rms: Float,
         crest: Float,
@@ -188,7 +248,6 @@ enum AmplifyToneAI {
         let midProxy = max(0.05, min(0.7, 0.55 - abs(highRatio - 0.5) * 0.3))
         let speech = max(0, min(1, (zcr - 0.05) * 4 + (0.35 - bassProxy) * 1.5))
         let crestDB = 20 * log10(max(crest, 1e-3))
-        // Bandwidth proxy from HF energy
         let bw: Float = highRatio > 0.7 ? 14_000 : (highRatio > 0.4 ? 11_000 : 8_000)
         return Features(
             bassRatio: bassProxy * 0.55 + (1 - highRatio) * 0.25,
@@ -198,11 +257,131 @@ enum AmplifyToneAI {
             dynamicRangeDB: max(4, min(28, crestDB * 1.1)),
             speechLikelihood: speech,
             bandwidthHz: bw,
-            midRatio: midProxy
+            midRatio: midProxy,
+            rms: rms
         )
     }
 
+    /// Band dB bias for curve rebuild (scaled by confidence).
+    static func scaledNoteBias(for genre: String, confidence: Float, intensity: Float = 0.72) -> [String: Float] {
+        let base = genreNoteBias[genre] ?? genreNoteBias["unknown"]!
+        let scale = intensity * max(0.35, min(1.0, confidence + 0.25))
+        return base.mapValues { $0 * scale }
+    }
+
     // MARK: - Private
+
+    private static func listeningTargets(
+        genre: String,
+        features: Features
+    ) -> (makeup: Float, hf: Float, presence: Float, bass: Float) {
+        // Intent: even, clear, “as mixed” — not a loudness war.
+        var makeup: Float = 1.02
+        var hf: Float = 0.98
+        var presence: Float = 1.04
+        var bass: Float = 1.02
+
+        switch genre {
+        case "classical":
+            // Preserve dynamics; open air; gentle presence for quiet passages.
+            makeup = 1.00; hf = 1.02; presence = 1.06; bass = 0.99
+        case "pop":
+            makeup = 1.04; hf = 0.98; presence = 1.08; bass = 1.03
+        case "electronic":
+            makeup = 1.05; hf = 0.94; presence = 1.04; bass = 1.08
+        case "hiphop":
+            makeup = 1.06; hf = 0.92; presence = 1.05; bass = 1.10
+        case "rock":
+            makeup = 1.03; hf = 0.95; presence = 1.07; bass = 1.04
+        case "jazz":
+            makeup = 1.01; hf = 1.00; presence = 1.05; bass = 1.00
+        case "speech":
+            makeup = 1.05; hf = 1.0; presence = 1.12; bass = 0.94
+        case "ambient":
+            makeup = 1.02; hf = 1.03; presence = 1.02; bass = 1.03
+        case "metal":
+            makeup = 1.03; hf = 0.90; presence = 1.08; bass = 1.05
+        case "folk":
+            makeup = 1.02; hf = 1.00; presence = 1.06; bass = 1.00
+        default:
+            makeup = 1.03; hf = 0.98; presence = 1.05; bass = 1.02
+        }
+
+        // Volume intelligence: lift quiet content so notes are audible.
+        if features.rms < 0.015 {
+            makeup = min(1.16, makeup * 1.08)
+            presence = min(1.14, presence * 1.04)
+        } else if features.rms < 0.035 {
+            makeup = min(1.12, makeup * 1.04)
+            presence = min(1.12, presence * 1.02)
+        } else if features.rms > 0.18 {
+            // Hot masters — hold volume, tame air.
+            makeup = min(makeup, 1.02)
+            hf = min(hf, 0.92)
+        }
+
+        // Dynamic classical-like material: don't squash crest with volume.
+        if features.crestDB > 12 {
+            makeup = min(makeup, 1.06)
+        }
+        // Harsh / bright: protect ears, keep presence via mid focus.
+        if features.brightness > 0.55 {
+            hf *= 0.92
+            presence = min(1.12, presence * 1.03)
+        }
+        // Bass-heavy: keep body, don't bury vocals.
+        if features.bassRatio > 0.42 {
+            bass = min(1.12, bass * 1.03)
+            presence = min(1.12, presence * 1.02)
+            hf = min(hf, 0.95)
+        }
+        // Speech-like: maximize intelligibility.
+        if features.speechLikelihood > 0.5 {
+            presence = max(presence, 1.10)
+            bass = min(bass, 0.96)
+            makeup = max(makeup, 1.04)
+        }
+        // Narrow bandwidth (low quality streams): fill body, cut harsh air.
+        if features.bandwidthHz < 9_000 {
+            presence = min(1.12, presence * 1.05)
+            hf = min(hf, 0.90)
+            makeup = min(1.10, makeup * 1.03)
+        }
+
+        return (
+            max(0.92, min(1.16, makeup)),
+            max(0.82, min(1.06, hf)),
+            max(0.96, min(1.14, presence)),
+            max(0.92, min(1.12, bass))
+        )
+    }
+
+    private static func adaptNotes(base: [String: Float], features: Features) -> [String: Float] {
+        var out = base
+        // Sparse / quiet → lift presence + air so quiet notes speak.
+        if features.rms < 0.03 || features.dynamicRangeDB > 16 {
+            out["presence", default: 0] += 0.25
+            out["air", default: 0] += 0.20
+            out["sheen", default: 0] += 0.12
+        }
+        // Muddy mid build-up
+        if features.midRatio > 0.5, features.brightness < 0.35 {
+            out["mud", default: 0] -= 0.25
+            out["presence", default: 0] += 0.20
+        }
+        // Thin → body
+        if features.bassRatio < 0.18, features.speechLikelihood < 0.4 {
+            out["body", default: 0] += 0.25
+            out["warmth", default: 0] += 0.15
+        }
+        // Harsh top
+        if features.brightness > 0.55 {
+            out["brilliance", default: 0] -= 0.30
+            out["sheen", default: 0] -= 0.15
+            out["presence", default: 0] += 0.10
+        }
+        return out
+    }
 
     private static func metadataPrior(_ text: String?) -> (genre: String, confidence: Float)? {
         guard let text, !text.isEmpty else { return nil }
@@ -219,31 +398,6 @@ enum AmplifyToneAI {
         guard let best, bestHits > 0 else { return nil }
         let conf = min(0.92, 0.45 + 0.15 * Float(bestHits))
         return (best, conf)
-    }
-
-    private static func liveMultipliers(genre: String, features: Features) -> (Float, Float) {
-        var makeup: Float = 1.0
-        var hf: Float = 1.0
-        switch genre {
-        case "classical": makeup = 0.94; hf = 1.02
-        case "pop": makeup = 1.01; hf = 0.98
-        case "electronic": makeup = 1.02; hf = 0.94
-        case "hiphop": makeup = 1.03; hf = 0.90
-        case "rock": makeup = 1.00; hf = 0.93
-        case "jazz": makeup = 0.97; hf = 1.00
-        case "speech": makeup = 0.96; hf = 1.0
-        case "ambient": makeup = 0.98; hf = 1.03
-        case "metal": makeup = 0.99; hf = 0.88
-        case "folk": makeup = 0.98; hf = 1.0
-        default: break
-        }
-        if features.brightness > 0.5 { hf *= 0.95 }
-        if features.bassRatio > 0.4 { makeup = min(1.05, makeup + 0.01) }
-        if features.speechLikelihood > 0.55 {
-            makeup = min(makeup, 0.97)
-            hf = min(1.02, max(0.95, hf))
-        }
-        return (max(0.88, min(1.08, makeup)), max(0.80, min(1.05, hf)))
     }
 
     private static func softmax(_ xs: [Float]) -> [Float] {
