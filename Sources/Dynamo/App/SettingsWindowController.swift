@@ -185,19 +185,23 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Dynamo Notification Router")
+            Text("Notifications through Peek (not banners)")
                 .font(.subheadline.weight(.semibold))
-            Text("Dynamo routes every alert into the Peek hub — widgets, Focus, API/Shortcuts, and (optionally) Messages/FaceTime/Mail. Peek presents them; the Hub tab is the inbox. This is routing, not a passive system-banner mirror.")
+            Text("Dynamo delivers alerts as notch Peeks — the way you want them — not as typical top-right system banners. Calendar, battery, media, Focus, and Messages/FaceTime (when routed) all use Peek.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Toggle("Deliver through Peek only", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.peekOnlyDelivery },
+                set: { DynamoNotificationRouter.shared.peekOnlyDelivery = $0 }
+            ))
             Toggle("Dynamo is the router", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.isEnabled },
                 set: { DynamoNotificationRouter.shared.isEnabled = $0 }
             ))
-            Toggle("Peek hub delivery", isOn: Binding(
-                get: { PeekNotificationCenter.shared.isPrimaryDelivery },
-                set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
+            Toggle("Route system apps into Peek (Messages, FaceTime…)", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeSystemApps },
+                set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
             ))
             Toggle("Route widgets", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeWidgets },
@@ -207,15 +211,11 @@ struct SettingsView: View {
                 get: { DynamoNotificationRouter.shared.routeFocus },
                 set: { DynamoNotificationRouter.shared.routeFocus = $0 }
             ))
-            Toggle("Route system apps (Messages, FaceTime, Mail…)", isOn: Binding(
-                get: { DynamoNotificationRouter.shared.routeSystemApps },
-                set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
-            ))
             Toggle("Route external API / Shortcuts", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeExternal },
                 set: { DynamoNotificationRouter.shared.routeExternal = $0 }
             ))
-            Toggle("Prioritize calls & texts (critical Peek)", isOn: Binding(
+            Toggle("Prioritize calls & texts", isOn: Binding(
                 get: { mirror.prioritizeCallsAndTexts },
                 set: { mirror.prioritizeCallsAndTexts = $0 }
             ))
@@ -228,10 +228,34 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("System-app routing needs Full Disk Access. macOS may still show banners — Dynamo cannot hide them; use Focus for Peek-only.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Stop the usual corner banners")
+                        .font(.caption.weight(.semibold))
+                    Text("Apple does not let Dynamo turn off Messages/FaceTime banners for you. Keep “Allow Notifications” ON (so Dynamo can still see them), but set Alert style to None for each app:")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Messages · FaceTime · Mail · Slack… → Notifications → Alert style → None")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button("Open Notifications settings") {
+                            DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
+                        }
+                        .controlSize(.small)
+                        Button("Open Focus") {
+                            DynamoNotificationRouter.shared.openFocusForPeekOnly()
+                        }
+                        .controlSize(.small)
+                    }
+                    Text("Also needs Full Disk Access so Dynamo can route those apps into Peek.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Text(DynamoNotificationRouter.shared.lastStatus)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)

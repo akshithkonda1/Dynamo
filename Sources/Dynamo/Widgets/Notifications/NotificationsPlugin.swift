@@ -126,8 +126,12 @@ private struct ExpandedPeekHubView: View {
             if hub.history.isEmpty && hub.pendingCount == 0 {
                 NotchEmptyState(
                     systemImage: "bell.badge",
-                    title: "Peek is your notification hub",
-                    caption: "Calendar, reminders, battery, media, messages, and more land here as notch Peeks — then stay in this inbox.",
+                    title: router.peekOnlyDelivery
+                        ? "Alerts come through Peek"
+                        : "Peek is your notification hub",
+                    caption: router.peekOnlyDelivery
+                        ? "Dynamo delivers here in the notch — not as typical corner banners. Set Messages/FaceTime alert style to None in System Settings so only Peek shows."
+                        : "Calendar, reminders, battery, media, messages, and more land here as notch Peeks — then stay in this inbox.",
                     prominent: true
                 )
             } else {
@@ -163,6 +167,16 @@ private struct ExpandedPeekHubView: View {
                 .buttonStyle(.plain)
                 .disabled(hub.history.isEmpty)
 
+                if router.peekOnlyDelivery {
+                    Button {
+                        DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
+                    } label: {
+                        NotchChipLabel(title: "Banner off…", systemImage: "rectangle.badge.xmark", active: true)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Set Messages/FaceTime alert style to None so only Peek shows")
+                }
+
                 if mirror.accessDenied {
                     Button {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
@@ -172,7 +186,7 @@ private struct ExpandedPeekHubView: View {
                         NotchChipLabel(title: "Full Disk Access", systemImage: "lock.shield", active: true)
                     }
                     .buttonStyle(.plain)
-                    .help("Needed to route Messages / FaceTime / other apps into the hub")
+                    .help("Needed to route Messages / FaceTime into Peek")
                 }
 
                 Spacer(minLength: 0)
