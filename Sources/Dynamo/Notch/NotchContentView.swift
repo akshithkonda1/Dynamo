@@ -264,8 +264,8 @@ private struct TrayIconButton: View {
     @State private var showPreview = false
     @State private var previewTask: Task<Void, Never>?
 
-    /// Slight dwell so skimming the tray doesn’t flash every name.
-    private static let previewDelayNs: UInt64 = 220_000_000
+    /// Short dwell so names feel instant without flashing while skimming.
+    private static let previewDelayNs: UInt64 = 90_000_000
 
     var body: some View {
         Button(action: action) {

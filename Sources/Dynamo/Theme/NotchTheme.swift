@@ -108,23 +108,23 @@ enum NotchTheme {
     static let shadowRadius: CGFloat = 24
     static let shadowY: CGFloat = 12
 
-    // MARK: Animation — snappier island (responsive without feeling jumpy)
+    // MARK: Animation — instantaneous feel (tight springs, short settles)
     /// Island expand/collapse.
     static var expandSpring: Animation {
-        .spring(response: 0.32, dampingFraction: 0.88, blendDuration: 0.08)
+        .spring(response: 0.20, dampingFraction: 0.90, blendDuration: 0.04)
     }
 
     /// Content cross-fade / tab switch.
     static var contentSpring: Animation {
-        .spring(response: 0.24, dampingFraction: 0.90, blendDuration: 0.05)
+        .spring(response: 0.16, dampingFraction: 0.92, blendDuration: 0.03)
     }
 
     static var snappy: Animation {
-        .spring(response: 0.18, dampingFraction: 0.88)
+        .spring(response: 0.12, dampingFraction: 0.90)
     }
 
     static var quick: Animation {
-        .easeOut(duration: 0.10)
+        .easeOut(duration: 0.07)
     }
 
     /// Ambient rim pulse — slow so it costs almost no CPU.
@@ -133,10 +133,10 @@ enum NotchTheme {
     }
 
     /// Match AppKit panel frame animation to SwiftUI expand spring feel.
-    static let panelExpandDuration: TimeInterval = 0.32
+    static let panelExpandDuration: TimeInterval = 0.20
     /// Standard macOS ease with a light overshoot for island character.
     static var panelExpandTiming: CAMediaTimingFunction {
-        CAMediaTimingFunction(controlPoints: 0.18, 0.92, 0.22, 1.04)
+        CAMediaTimingFunction(controlPoints: 0.16, 0.95, 0.18, 1.02)
     }
 
     // MARK: Helpers

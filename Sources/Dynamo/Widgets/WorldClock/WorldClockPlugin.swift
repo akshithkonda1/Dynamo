@@ -61,6 +61,11 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         didSet { UserDefaults.standard.set(String(randomSeed), forKey: Self.randomSeedKey) }
     }
 
+    /// Test / deterministic shuffle support — not exposed in the UI.
+    func setRandomSeedForTesting(_ seed: UInt64) {
+        randomSeed = seed == 0 ? 1 : seed
+    }
+
     /// Placename for “Current Location” when Core Location succeeds.
     @Published private(set) var locationPlaceName: String?
     @Published private(set) var locationStatusLine: String = "Using Mac time zone"
@@ -153,26 +158,33 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         AnyView(WorldClockSettingsView(plugin: self))
     }
 
-    /// Resolved active clocks in sort order (distance / reverse / random / pick order).
+    /// Resolved active clocks: **current location (“Here”) always first**, then the
+    /// rest in the designated order (distance / reverse / random / pick order).
     var activeEntries: [WorldClockEntry] {
         let base = selectedIDs.compactMap { resolveEntry(id: $0) }
         return sortedEntries(base)
     }
 
     func sortedEntries(_ entries: [WorldClockEntry]) -> [WorldClockEntry] {
+        // Pin “Here” to the top whenever present; sort everyone else by mode.
+        let here = entries.filter { $0.kind == .currentLocation }
+        let rest = entries.filter { $0.kind != .currentLocation }
+        let orderedRest: [WorldClockEntry]
         switch sortMode {
         case .selection:
-            return entries
+            // Preserve selection-list order for non-Here clocks.
+            orderedRest = rest
         case .nearest:
-            return entries.sorted { distanceKm(for: $0) < distanceKm(for: $1) }
+            orderedRest = rest.sorted { distanceKm(for: $0) < distanceKm(for: $1) }
         case .farthest:
-            return entries.sorted { distanceKm(for: $0) > distanceKm(for: $1) }
+            orderedRest = rest.sorted { distanceKm(for: $0) > distanceKm(for: $1) }
         case .random:
             // Stable shuffle keyed by seed + id.
-            return entries.sorted { a, b in
+            orderedRest = rest.sorted { a, b in
                 shuffleKey(a.id) < shuffleKey(b.id)
             }
         }
+        return here + orderedRest
     }
 
     /// Kilometers from reference location (0 for “Here”).
@@ -740,10 +752,10 @@ private struct ExpandedWorldClockView: View {
 
     private var footerLine: String {
         switch plugin.sortMode {
-        case .nearest: return "Sorted nearest → farthest from you · offline"
-        case .farthest: return "Sorted farthest → nearest · offline"
-        case .random: return "Random order · shuffle to re-roll · offline"
-        case .selection: return "As picked · major cities · time zones · offline"
+        case .nearest: return "Here first · then nearest → farthest · offline"
+        case .farthest: return "Here first · then farthest → nearest · offline"
+        case .random: return "Here first · then random · shuffle to re-roll · offline"
+        case .selection: return "Here first · then pick order · offline"
         }
     }
 

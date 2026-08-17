@@ -142,8 +142,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     private func probeForTrackChange(reason: String) {
         cancelSkipProbe()
         let baseline = lastTrackKey
-        // Staggered probes: 0.15s … ~1.8s covers Music + Spotify.
-        let delays: [TimeInterval] = [0.12, 0.28, 0.5, 0.85, 1.3, 1.9]
+        // Staggered probes — front-loaded so skip feels instant.
+        let delays: [TimeInterval] = [0.06, 0.16, 0.32, 0.55, 0.9, 1.4]
         for delay in delays {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
@@ -342,6 +342,7 @@ private struct ExpandedMediaView: View {
     @ObservedObject var plugin: MediaControlsPlugin
     @ObservedObject private var volume = SystemVolumeController.shared
     @ObservedObject private var amplify = MediaAmplifyController.shared
+    @ObservedObject private var focus = FocusController.shared
     /// Local scrub value while the user is dragging the timeline.
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
@@ -449,8 +450,8 @@ private struct ExpandedMediaView: View {
             scrubElapsed = nil
             lastTick = .now
         }
-        // 2 Hz is enough for a smooth scrubber without 4 Hz main-thread ticks.
-        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { now in
+        // ~4 Hz scrubber for instantaneous progress without 60 Hz main-thread cost.
+        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { now in
             guard scrubElapsed == nil, plugin.info.isPlaying, plugin.info.duration > 0 else {
                 lastTick = now
                 return
@@ -584,47 +585,43 @@ private struct ExpandedMediaView: View {
     }
 
     /// Amplify icon button — **green glow when on**, **red glow when off**.
-    /// Plain Button + always-visible circle (no Menu — first-click reliable).
+    /// Always clickable (Meeting only *auto-pauses* Amplify; user can re-enable).
+    /// Uses transport button style so first click fires on the nonactivating notch panel.
     private var amplifyIconButton: some View {
         let on = amplify.isEnabled
-        let inMeeting = FocusController.shared.isMeetingActive
+        let inMeeting = focus.isMeetingActive
         let green = Color(red: 0.18, green: 0.95, blue: 0.45)
         let red = Color(red: 1.0, green: 0.28, blue: 0.32)
         let glow = on ? green : red
         return Button {
-            guard !inMeeting else { return }
+            // Always allow explicit toggle — Meeting Mode only auto-offs on *enter*.
             amplify.toggle()
         } label: {
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(glow)
+                .symbolRenderingMode(.hierarchical)
                 .shadow(color: glow.opacity(0.95), radius: on ? 7 : 5)
                 .shadow(color: glow.opacity(0.45), radius: on ? 12 : 8)
                 .frame(width: 36, height: 36)
-                .background(
-                    Circle()
-                        .fill(glow.opacity(on ? 0.20 : 0.14))
-                        .overlay(Circle().strokeBorder(glow.opacity(0.35), lineWidth: 0.6))
-                )
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .disabled(inMeeting)
-        .opacity(inMeeting ? 0.4 : 1)
+        .buttonStyle(AmplifyToggleButtonStyle(on: on, glow: glow))
         .help(
-            inMeeting
-                ? "Amplify pauses in Meeting Mode"
-                : (on
-                   ? "Amplify \(amplify.profile.title) — shapes tone, not volume\(amplify.activePresetName.map { " · \($0)" } ?? "")"
-                   : "Amplify off — Dolby-style presence/cinema/impact via EQ only")
+            on
+                ? "Amplify \(amplify.profile.title) on — tap to turn off\(inMeeting ? " · Meeting Mode" : "")\(amplify.activePresetName.map { " · \($0)" } ?? "")"
+                : (inMeeting
+                   ? "Amplify off (auto-paused for Meeting) — tap to turn on"
+                   : "Amplify off — tap to turn on")
         )
         .accessibilityLabel(on ? "Amplify \(amplify.profile.title) on" : "Amplify off")
+        .accessibilityHint("Toggles local Symphony EQ")
         .accessibilityAddTraits(.isButton)
         .contextMenu {
             ForEach(MediaAmplifyProfile.allCases) { profile in
                 Button {
                     amplify.profile = profile
-                    if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                    if !amplify.isEnabled {
                         amplify.isEnabled = true
                     }
                 } label: {
@@ -636,9 +633,12 @@ private struct ExpandedMediaView: View {
                 }
             }
             Divider()
+            Button(on ? "Turn Amplify Off" : "Turn Amplify On") {
+                amplify.toggle()
+            }
             Button("Cycle profile") {
                 amplify.cycleProfile()
-                if !amplify.isEnabled, !FocusController.shared.isMeetingActive {
+                if !amplify.isEnabled {
                     amplify.isEnabled = true
                 }
             }
@@ -970,6 +970,24 @@ private enum MediaTransportRole {
         case .active: return NotchTheme.textPrimary
         case .secondary: return NotchTheme.textSecondary
         }
+    }
+}
+
+/// Amplify on/off chrome — always-visible fill so first-click hits on the nonactivating panel.
+private struct AmplifyToggleButtonStyle: ButtonStyle {
+    var on: Bool
+    var glow: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Circle()
+                    .fill(glow.opacity(on ? (configuration.isPressed ? 0.28 : 0.20) : (configuration.isPressed ? 0.22 : 0.14)))
+                    .overlay(Circle().strokeBorder(glow.opacity(0.40), lineWidth: 0.8))
+            )
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .animation(.spring(response: 0.16, dampingFraction: 0.78), value: configuration.isPressed)
+            .contentShape(Circle())
     }
 }
 

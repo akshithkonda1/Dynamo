@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated {
             hotKeys.uninstall()
             SystemNotificationMirror.shared.stop()
+            DynamoNotificationRouter.shared.stop()
             PeekNotificationCenter.shared.teardown()
             PeekBridge.shared.teardown()
             registry?.stopAll()
@@ -77,10 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
         mediaPlugin = media
         registry.register(media)
+        // Peek Hub — Dynamo’s notification inbox (not a system banner mirror).
+        registry.register(NotificationsPlugin())
         registry.register(CalendarPlugin())
         registry.register(ClipboardPlugin())
         registry.register(ChecklistPlugin())
-        registry.register(WorldClockPlugin())
+        let clocks = WorldClockPlugin()
+        registry.register(clocks)
         registry.register(BatteryPlugin())
         registry.register(FocusPlugin())
         registry.register(SportsPlugin())
@@ -88,28 +92,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registry.register(ShelfPlugin())
         registry.register(WebcamPlugin())
 
+        // World Clock “Here” needs When-In-Use Location. Prompt once on boot so
+        // distance sort + city label work without digging into Preferences.
+        // Safe if already granted/denied — Core Location no-ops appropriately.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            clocks.requestCurrentLocation()
+        }
+        // Contacts: so call/text Peeks can show the contact photo + matching tint.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            ContactPhotoResolver.requestAccessOnLaunchIfNeeded()
+        }
+
         WidgetSettingsStore.shared.apply(to: registry)
         // Drop any legacy "weather" id from saved tray prefs.
         WidgetSettingsStore.shared.stripDisabledWidgets(from: registry, ids: ["weather"])
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
-        // Peek is Dynamo’s primary notification surface (queue + haptics + history).
+        // Peek hub (presentation + inbox) + Dynamo as the notification router.
         PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
+        DynamoNotificationRouter.shared.start(
+            registry: registry,
+            hub: PeekNotificationCenter.shared
+        )
         PeekBridge.shared.attach(registry: registry)
         DynamoNotificationAPI.installExternalListeners()
-        // Mirror other apps’ Notification Center deliveries into Peeks (best-effort).
-        if PeekNotificationCenter.shared.isPrimaryDelivery {
-            SystemNotificationMirror.shared.start()
-        }
         PermissionsStore.shared.refreshFromSystem()
-        FocusController.shared.emitPeek = { peek in
-            PeekNotificationCenter.shared.deliver(
-                peek,
-                id: "focus|\(peek.title)|\(peek.subtitle)",
-                category: "focus"
-            )
-        }
+        // Focus peeks are wired inside DynamoNotificationRouter.start
         FocusController.shared.start()
         FocusQuietMonitor.shared.start()
 

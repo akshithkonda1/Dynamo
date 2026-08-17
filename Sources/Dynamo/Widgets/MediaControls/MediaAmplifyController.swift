@@ -38,7 +38,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .reference: return "waveform.badge.magnifyingglass"
+        case .reference: return "tuningfork"
         case .symphony: return "music.quarternote.3"
         case .presence: return "ear"
         case .cinema: return "film"
@@ -186,11 +186,19 @@ final class MediaAmplifyController: ObservableObject {
         }()
         if #available(macOS 14.2, *) {
             LocalAmplifyEngine.shared.setContentImmersiveHint(immersive, sourceApp: appHint)
+            // Tone AI metadata prior — local now-playing strings only (no network).
+            LocalAmplifyEngine.shared.setToneMetadata(
+                title: title,
+                artist: artist,
+                album: album,
+                genre: genre
+            )
             if isEnabled { syncFromEngine() }
         }
     }
 
     func toggle() {
+        // Explicit user action — flip via isEnabled so didSet starts/stops once.
         isEnabled.toggle()
     }
 
@@ -280,7 +288,8 @@ final class MediaAmplifyController: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = nil
         if #available(macOS 14.2, *) {
-            LocalAmplifyEngine.shared.stop()
+            // Immediate teardown so toggle-off is reliable (no stuck “Fading out…”).
+            LocalAmplifyEngine.shared.stop(immediate: true)
         }
         statusLine = "Off"
         lastError = nil
@@ -290,7 +299,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private func startPolling() {
         pollTimer?.invalidate()
-        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.syncFromEngine() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -313,7 +322,12 @@ final class MediaAmplifyController: ObservableObject {
             case .stereoMixFallback:
                 activePresetName = "Stereo-mix EQ"
             case .stereo:
-                activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
+                if !engine.toneGenre.isEmpty, engine.toneGenre != "unknown" {
+                    let pretty = engine.toneGenre.prefix(1).uppercased() + engine.toneGenre.dropFirst()
+                    activePresetName = "AI \(pretty)"
+                } else {
+                    activePresetName = profile == .reference ? "Reference EQ" : "Local EQ"
+                }
             }
             lastError = engine.lastError
         } else if isEnabled {

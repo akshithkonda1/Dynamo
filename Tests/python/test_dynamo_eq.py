@@ -107,7 +107,7 @@ class TestSymphonyCoeffs(unittest.TestCase):
     def test_coeffs_json_shape(self):
         payload = eq.coeffs_payload("symphony", 48000, "headphones", None, 1.0)
         self.assertEqual(payload["engine"], "DynamoEQ")
-        self.assertEqual(payload["version"], 3)
+        self.assertEqual(payload["version"], 4)
         self.assertTrue(payload["spatial_safe"])
         self.assertTrue(payload["atmos_ready"])
         self.assertTrue(payload["seamless"])
@@ -205,7 +205,7 @@ class TestSeamlessTransitions(unittest.TestCase):
 
     def test_morph_payload_steps(self):
         payload = eq.morph_payload("cinema", "impact", 48000, "auto", steps=5)
-        self.assertEqual(payload["version"], 3)
+        self.assertEqual(payload["version"], 4)
         self.assertTrue(payload["seamless"])
         self.assertEqual(len(payload["frames"]), 5)
         self.assertEqual(payload["frames"][0]["t"], 0.0)

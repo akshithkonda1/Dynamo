@@ -2,23 +2,27 @@ import AppKit
 import Foundation
 import SQLite3
 
-/// Mirrors **macOS Notification Center** deliveries into Dynamo Peeks.
+/// **Routes** macOS Notification Center deliveries into Dynamo’s **Peek hub** —
+/// the same inbox as reminders, calendar, battery, and media Peeks.
 ///
-/// Apple does not publish an API to intercept other apps’ banners. This reads
-/// the local `usernoted` SQLite store (same data Notification Center uses) when
-/// the Mac grants access (often Full Disk Access / TCC for Group Containers).
+/// This is not a second “mirror” surface: alerts are **ingested into the hub**
+/// and presented as notch Peeks. Apple does not publish an API to suppress
+/// system banners; users who want Peek-only can silence banners via Focus.
+///
+/// Implementation reads the local `usernoted` SQLite store when TCC allows
+/// (Full Disk Access / Group Containers).
 ///
 /// - Only **new** deliveries after Dynamo starts (no history dump)
 /// - Skips Dynamo’s own bundle
-/// - Routes everything through `PeekNotificationCenter`
-/// - Never raises system volume; never suppresses other apps’ banners itself
-///   (user can quiet banners via Focus / System Settings while using Peek)
+/// - Prioritizes **calls, texts/iMessage, mail** as high/critical
+/// - Everything goes through `PeekNotificationCenter` / `DynamoNotificationAPI`
 @MainActor
 final class SystemNotificationMirror: ObservableObject {
     static let shared = SystemNotificationMirror()
 
     private static let enabledKey = "dynamo.peek.mirrorSystemNotifications"
     private static let lastRecKey = "dynamo.peek.mirror.lastRecID"
+    private static let preferCallsKey = "dynamo.peek.mirror.prioritizeCallsTexts"
 
     @Published var isEnabled: Bool {
         didSet {
@@ -27,21 +31,29 @@ final class SystemNotificationMirror: ObservableObject {
         }
     }
 
+    /// When true (default), phone / FaceTime / Messages get critical urgency.
+    @Published var prioritizeCallsAndTexts: Bool {
+        didSet {
+            UserDefaults.standard.set(prioritizeCallsAndTexts, forKey: Self.preferCallsKey)
+        }
+    }
+
     @Published private(set) var lastStatus: String = "Idle"
     @Published private(set) var mirroredCount: Int = 0
     @Published private(set) var databaseFound: Bool = false
     @Published private(set) var accessDenied: Bool = false
+    @Published private(set) var lastMirroredApp: String = ""
 
     private var timer: Timer?
     private var highWaterRecID: Int64 = 0
     private var seenUUIDs = Set<String>()
-    private let maxSeen = 400
-    /// Sparse enough for battery; still catches alerts within a couple seconds.
-    private let pollInterval: TimeInterval = 2.5
+    private let maxSeen = 500
+    /// Snappy enough for texts/calls; light on SQLite.
+    private let pollInterval: TimeInterval = 1.0
 
     private static let selfBundleID = "com.akshithkonda.Dynamo"
 
-    /// Candidate paths for the usernoted store (varies slightly by OS).
+    /// Candidate paths for the usernoted store (varies by OS generation).
     private static var dbCandidates: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [
@@ -60,6 +72,11 @@ final class SystemNotificationMirror: ObservableObject {
         } else {
             isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         }
+        if UserDefaults.standard.object(forKey: Self.preferCallsKey) == nil {
+            prioritizeCallsAndTexts = true
+        } else {
+            prioritizeCallsAndTexts = UserDefaults.standard.bool(forKey: Self.preferCallsKey)
+        }
     }
 
     func start() {
@@ -71,11 +88,13 @@ final class SystemNotificationMirror: ObservableObject {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
-        // First poll slightly delayed so launch isn’t blocked on SQLite.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+        // First poll quickly so first text/call after launch isn’t delayed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.poll()
         }
-        lastStatus = "Watching Notification Center"
+        lastStatus = databaseFound
+            ? "Routing system apps into Peek hub"
+            : "Waiting for Notification Center access"
     }
 
     func stop() {
@@ -87,23 +106,21 @@ final class SystemNotificationMirror: ObservableObject {
     // MARK: - Bootstrap
 
     private func bootstrapHighWater() {
-        // Prefer live max rec_id so we only mirror *new* notifications.
         if let maxID = Self.queryMaxRecID() {
             highWaterRecID = maxID
             databaseFound = true
             accessDenied = false
             UserDefaults.standard.set(maxID, forKey: Self.lastRecKey)
-            lastStatus = "Synced · waiting for new alerts"
+            lastStatus = "Hub ready · routing new system alerts"
             return
         }
-        // Fallback to persisted watermark if DB temporarily unreadable.
         let stored = UserDefaults.standard.object(forKey: Self.lastRecKey) as? Int64 ?? 0
         highWaterRecID = stored
         databaseFound = Self.resolveDBPath() != nil
         accessDenied = !databaseFound
         lastStatus = databaseFound
             ? "Waiting for Notification Center"
-            : "Need Full Disk Access to mirror alerts"
+            : "Need Full Disk Access to route calls & texts into the hub"
     }
 
     // MARK: - Poll
@@ -113,15 +130,15 @@ final class SystemNotificationMirror: ObservableObject {
         guard let path = Self.resolveDBPath() else {
             databaseFound = false
             accessDenied = true
-            lastStatus = "Notification DB not readable · grant Full Disk Access"
+            lastStatus = "Notification DB locked · grant Full Disk Access"
             return
         }
         databaseFound = true
         accessDenied = false
 
-        let rows = Self.fetchRecords(path: path, afterRecID: highWaterRecID, limit: 40)
+        let rows = Self.fetchRecords(path: path, afterRecID: highWaterRecID, limit: 60)
         guard !rows.isEmpty else {
-            lastStatus = "Watching · last #\(highWaterRecID)"
+            lastStatus = "Hub idle · last #\(highWaterRecID)"
             return
         }
 
@@ -142,27 +159,169 @@ final class SystemNotificationMirror: ObservableObject {
             let body = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty || !body.isEmpty else { continue }
 
+            let kind = NotificationKind.classify(bundleID: note.appIdentifier, title: title, body: body)
             let appName = Self.displayName(for: note.appIdentifier)
-            let peekTitle = title.isEmpty ? appName : title
-            let peekSubtitle = body.isEmpty
-                ? appName
-                : (title.isEmpty ? body : body)
-            let detail = title.isEmpty ? "Notification" : appName
+            let peekTitle: String
+            let peekSubtitle: String
+            let detail: String
 
-            DynamoNotificationAPI.post(
+            switch kind {
+            case .call:
+                peekTitle = title.isEmpty ? "Incoming call" : title
+                peekSubtitle = body.isEmpty ? appName : body
+                detail = "Call · \(appName)"
+            case .text:
+                peekTitle = title.isEmpty ? "Message" : title
+                peekSubtitle = body.isEmpty ? appName : body
+                detail = "Text · \(appName)"
+            case .mail:
+                peekTitle = title.isEmpty ? "Mail" : title
+                peekSubtitle = body.isEmpty ? appName : body
+                detail = "Mail · \(appName)"
+            case .general:
+                peekTitle = title.isEmpty ? appName : title
+                peekSubtitle = body.isEmpty ? appName : (title.isEmpty ? body : body)
+                detail = appName
+            }
+
+            let urgency = urgency(for: kind)
+            // Message Peeks: contact photo drives island tint (primary path).
+            let artwork = resolveArtwork(
+                kind: kind,
+                title: peekTitle,
+                subtitle: peekSubtitle,
+                note: note
+            )
+            // Ingest → Dynamo router (not a side-channel into the hub).
+            DynamoNotificationRouter.shared.route(
                 title: peekTitle,
                 subtitle: peekSubtitle,
                 detail: detail,
-                systemImage: Self.symbol(for: note.appIdentifier),
-                urgency: Self.urgency(for: note.appIdentifier),
-                category: "system",
-                id: "system|\(uuidKey)"
+                systemImage: kind.systemImage,
+                urgency: urgency,
+                source: kind == .call ? .call : .system,
+                category: kind.category,
+                id: "system|\(kind.category)|\(uuidKey)",
+                artworkData: artwork
             )
             mirroredCount &+= 1
+            lastMirroredApp = appName
         }
 
         UserDefaults.standard.set(highWaterRecID, forKey: Self.lastRecKey)
-        lastStatus = "Mirrored · last #\(highWaterRecID)"
+        lastStatus = "Routed \(mirroredCount) into hub · last #\(highWaterRecID)"
+    }
+
+    private func urgency(for kind: NotificationKind) -> NotchSneakPeekUrgency {
+        switch kind {
+        case .call:
+            return prioritizeCallsAndTexts ? .critical : .high
+        case .text:
+            return prioritizeCallsAndTexts ? .critical : .high
+        case .mail:
+            return .high
+        case .general:
+            return .normal
+        }
+    }
+
+    /// Artwork for Peek chrome. **Message peeks** always try contact photo tinting.
+    private func resolveArtwork(
+        kind: NotificationKind,
+        title: String,
+        subtitle: String,
+        note: ParsedNote
+    ) -> Data? {
+        // 1) Image embedded in the notification payload (when present).
+        if let embedded = note.imageData, !embedded.isEmpty, NSImage(data: embedded) != nil {
+            return embedded
+        }
+
+        switch kind {
+        case .text:
+            // Messages / iMessage / SMS / messengers — resolve contact photo aggressively
+            // so the Peek wash/ring/lip match the contact photo colors.
+            return ContactPhotoResolver.imageDataForMessage(title: title, body: subtitle)
+                ?? ContactPhotoResolver.imageDataForMessage(title: title, body: note.body)
+        case .call:
+            // Incoming call name → same photo when available.
+            return ContactPhotoResolver.imageData(matchingName: title)
+                ?? ContactPhotoResolver.imageDataForMessage(title: title, body: subtitle)
+        case .mail, .general:
+            return nil
+        }
+    }
+
+    // MARK: - Kind classification
+
+    enum NotificationKind {
+        case call
+        case text
+        case mail
+        case general
+
+        var category: String {
+            switch self {
+            case .call: return "call"
+            case .text: return "text"
+            case .mail: return "mail"
+            case .general: return "system"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .call: return "phone.fill"
+            case .text: return "message.fill"
+            case .mail: return "envelope.fill"
+            case .general: return "bell.badge.fill"
+            }
+        }
+
+        static func classify(bundleID: String, title: String, body: String) -> NotificationKind {
+            let id = bundleID.lowercased()
+            let blob = "\(title) \(body)".lowercased()
+
+            // Calls / FaceTime / Phone Continuity
+            if id.contains("facetime")
+                || id.contains("incallservice")
+                || id.contains("telephony")
+                || id.contains("mobilephone")
+                || id == "com.apple.phone"
+                || id.contains("com.apple.callkit")
+                || blob.contains("facetime")
+                || blob.contains("is calling")
+                || blob.contains("incoming call")
+                || blob.contains("missed call") {
+                return .call
+            }
+
+            // Texts / iMessage / SMS / popular messengers
+            if id.contains("mobilesms")
+                || id.contains("messages")
+                || id.contains("ichat")
+                || id == "com.apple.MobileSMS"
+                || id.contains("whatsapp")
+                || id.contains("telegram")
+                || id.contains("signal")
+                || id.contains("imessage")
+                || id.contains("texts.com")
+                || id.contains("discord") && blob.contains("message") {
+                return .text
+            }
+
+            if id.contains("mail") || id.contains("spark") || id.contains("airmail")
+                || id.contains("outlook") || id.contains("superhuman") {
+                return .mail
+            }
+
+            // Slack/Teams often behave like “texts” for urgency when prioritized.
+            if id.contains("slack") || id.contains("teams") || id.contains("discord") {
+                return .text
+            }
+
+            return .general
+        }
     }
 
     // MARK: - SQLite
@@ -179,24 +338,43 @@ final class SystemNotificationMirror: ObservableObject {
         var title: String
         var body: String
         var uuid: String
+        /// Optional image payload from the notification blob (rare).
+        var imageData: Data? = nil
     }
 
     private static func resolveDBPath() -> String? {
         let fm = FileManager.default
         for url in dbCandidates {
             if fm.isReadableFile(atPath: url.path) {
+                // Skip empty decoys.
+                if let attrs = try? fm.attributesOfItem(atPath: url.path),
+                   let size = attrs[.size] as? NSNumber,
+                   size.intValue < 64 {
+                    continue
+                }
                 return url.path
             }
         }
         return nil
     }
 
-    private static func queryMaxRecID() -> Int64? {
-        guard let path = resolveDBPath() else { return nil }
+    private static func openDB(_ path: String) -> OpaquePointer? {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return nil
+        // URI immutable helps when usernoted holds a write lock.
+        let uri = "file:\(path)?immutable=1&mode=ro"
+        if sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK {
+            sqlite3_busy_timeout(db, 120)
+            return db
         }
+        if sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+            sqlite3_busy_timeout(db, 120)
+            return db
+        }
+        return nil
+    }
+
+    private static func queryMaxRecID() -> Int64? {
+        guard let path = resolveDBPath(), let db = openDB(path) else { return nil }
         defer { sqlite3_close(db) }
         let sql = "SELECT IFNULL(MAX(rec_id), 0) FROM record;"
         var stmt: OpaquePointer?
@@ -207,16 +385,10 @@ final class SystemNotificationMirror: ObservableObject {
     }
 
     private static func fetchRecords(path: String, afterRecID: Int64, limit: Int) -> [RawRow] {
-        var db: OpaquePointer?
-        // OPEN_READONLY — do not disturb usernoted.
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return []
-        }
+        guard let db = openDB(path) else { return [] }
         defer { sqlite3_close(db) }
 
-        // Short busy timeout; skip if locked rather than stall the main actor.
-        sqlite3_busy_timeout(db, 80)
-
+        // Primary schema (Sequoia+ group container).
         let sql = """
         SELECT r.rec_id, r.data, IFNULL(r.delivered_date, 0), IFNULL(a.identifier, '')
         FROM record r
@@ -226,7 +398,17 @@ final class SystemNotificationMirror: ObservableObject {
         LIMIT ?;
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            // Fallback: some builds omit delivered_date join.
+            let alt = """
+            SELECT rec_id, data, 0, ''
+            FROM record
+            WHERE rec_id > ?
+            ORDER BY rec_id ASC
+            LIMIT ?;
+            """
+            guard sqlite3_prepare_v2(db, alt, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, afterRecID)
         sqlite3_bind_int(stmt, 2, Int32(limit))
@@ -252,27 +434,132 @@ final class SystemNotificationMirror: ObservableObject {
             format: nil
         ) as? [String: Any] else { return nil }
 
-        let app = (root["app"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let app = firstString(in: root, keys: ["app", "bundleID", "bundleId", "appIdentifier"])
             ?? row.appIdentifier
-        let uuidData = root["uuid"] as? Data
-        let uuid = uuidData?.map { String(format: "%02x", $0) }.joined() ?? "\(row.recID)"
 
-        let req = root["req"] as? [String: Any] ?? [:]
-        let title = stringValue(req["titl"] ?? req["title"])
-        let body = stringValue(req["body"] ?? req["subt"] ?? req["subtitle"])
+        let uuid: String = {
+            if let d = root["uuid"] as? Data {
+                return d.map { String(format: "%02x", $0) }.joined()
+            }
+            if let s = root["uuid"] as? String, !s.isEmpty { return s }
+            if let s = root["identifier"] as? String, !s.isEmpty { return s }
+            return "\(row.recID)"
+        }()
+
+        // Nested request / content shapes vary by OS + app.
+        let req = (root["req"] as? [String: Any])
+            ?? (root["request"] as? [String: Any])
+            ?? [:]
+        let content = (req["cont"] as? [String: Any])
+            ?? (req["content"] as? [String: Any])
+            ?? (root["content"] as? [String: Any])
+            ?? [:]
+        let userInfo = (req["userInfo"] as? [String: Any])
+            ?? (content["userInfo"] as? [String: Any])
+            ?? [:]
+
+        var title = firstString(in: req, keys: ["titl", "title", "Title"])
+            ?? firstString(in: content, keys: ["title", "titl", "Title"])
+            ?? firstString(in: root, keys: ["title", "titl"])
+            ?? firstString(in: userInfo, keys: ["title", "aps.alert.title"])
+            ?? ""
+        var body = firstString(in: req, keys: ["body", "subt", "subtitle", "Subtitle", "Body"])
+            ?? firstString(in: content, keys: ["body", "subtitle", "subt", "Body"])
+            ?? firstString(in: root, keys: ["body", "subtitle"])
+            ?? firstString(in: userInfo, keys: ["body", "message", "aps.alert.body"])
+            ?? ""
+
+        // aps.alert nested
+        if title.isEmpty || body.isEmpty,
+           let aps = userInfo["aps"] as? [String: Any] {
+            if let alert = aps["alert"] as? [String: Any] {
+                if title.isEmpty { title = stringValue(alert["title"]) }
+                if body.isEmpty { body = stringValue(alert["body"] ?? alert["subtitle"]) }
+            } else if let alert = aps["alert"] as? String, body.isEmpty {
+                body = alert
+            }
+        }
+
+        let imageData = extractImageData(from: root)
+            ?? extractImageData(from: req)
+            ?? extractImageData(from: content)
+            ?? extractImageData(from: userInfo)
 
         return ParsedNote(
             appIdentifier: app.isEmpty ? row.appIdentifier : app,
             title: title,
             body: body,
-            uuid: uuid
+            uuid: uuid,
+            imageData: imageData
         )
+    }
+
+    /// Best-effort scan for image-bearing Data blobs (attachments / icons).
+    private static func extractImageData(from dict: [String: Any]) -> Data? {
+        let imageKeys = [
+            "image", "icon", "attachment", "attachments", "thumb", "thumbnail",
+            "imageData", "iconData", "contentImage", "avatar"
+        ]
+        for key in imageKeys {
+            if let data = dict[key] as? Data, isImageData(data) { return data }
+            if let arr = dict[key] as? [Any] {
+                for item in arr {
+                    if let data = item as? Data, isImageData(data) { return data }
+                    if let nested = item as? [String: Any],
+                       let data = extractImageData(from: nested) {
+                        return data
+                    }
+                }
+            }
+            if let nested = dict[key] as? [String: Any],
+               let data = extractImageData(from: nested) {
+                return data
+            }
+        }
+        // Shallow walk of Data values (limit to avoid heavy scans).
+        var checked = 0
+        for (_, value) in dict {
+            checked += 1
+            if checked > 40 { break }
+            if let data = value as? Data, isImageData(data) { return data }
+        }
+        return nil
+    }
+
+    private static func isImageData(_ data: Data) -> Bool {
+        guard data.count > 24, data.count < 2_500_000 else { return false }
+        // JPEG
+        if data[0] == 0xFF, data[1] == 0xD8 { return true }
+        // PNG
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return true }
+        // GIF
+        if data.starts(with: [0x47, 0x49, 0x46]) { return true }
+        // HEIC / ftyp
+        if data.count > 12 {
+            let ftyp = data.subdata(in: 4..<8)
+            if ftyp == Data("ftyp".utf8) { return true }
+        }
+        // TIFF
+        if data.starts(with: [0x49, 0x49]) || data.starts(with: [0x4D, 0x4D]) { return true }
+        return false
+    }
+
+    private static func firstString(in dict: [String: Any], keys: [String]) -> String? {
+        for k in keys {
+            if k.contains(".") {
+                // Simple one-level dotted path not used; skip.
+                continue
+            }
+            let s = stringValue(dict[k])
+            if !s.isEmpty { return s }
+        }
+        return nil
     }
 
     private static func stringValue(_ any: Any?) -> String {
         if let s = any as? String { return s }
         if let n = any as? NSNumber { return n.stringValue }
+        if let d = any as? Data, let s = String(data: d, encoding: .utf8) { return s }
         return ""
     }
 
@@ -285,40 +572,11 @@ final class SystemNotificationMirror: ObservableObject {
            !name.isEmpty {
             return name
         }
-        // Fallback: last path component of reverse-DNS.
-        return bundleID.split(separator: ".").last.map(String.init) ?? bundleID
-    }
-
-    private static func symbol(for bundleID: String) -> String {
-        let id = bundleID.lowercased()
-        if id.contains("mail") { return "envelope.fill" }
-        if id.contains("message") || id.contains("mobilesms") || id.contains("ichat") {
-            return "message.fill"
+        let last = bundleID.split(separator: ".").last.map(String.init) ?? bundleID
+        switch last.lowercased() {
+        case "mobilesms": return "Messages"
+        case "facetime": return "FaceTime"
+        default: return last
         }
-        if id.contains("calendar") || id.contains("ical") { return "calendar" }
-        if id.contains("reminders") { return "checklist" }
-        if id.contains("facetime") || id.contains("phone") { return "video.fill" }
-        if id.contains("slack") || id.contains("discord") || id.contains("teams") {
-            return "bubble.left.and.bubble.right.fill"
-        }
-        if id.contains("music") || id.contains("spotify") { return "music.note" }
-        if id.contains("news") { return "newspaper.fill" }
-        if id.contains("safari") || id.contains("chrome") { return "globe" }
-        if id.contains("xcode") { return "hammer.fill" }
-        return "bell.badge.fill"
-    }
-
-    private static func urgency(for bundleID: String) -> NotchSneakPeekUrgency {
-        let id = bundleID.lowercased()
-        if id.contains("message") || id.contains("mobilesms")
-            || id.contains("facetime") || id.contains("phone")
-            || id.contains("mail") {
-            return .high
-        }
-        if id.contains("calendar") || id.contains("reminders") {
-            return .high
-        }
-        if id.contains("news") { return .low }
-        return .normal
     }
 }

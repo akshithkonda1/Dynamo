@@ -152,15 +152,16 @@ struct SettingsView: View {
                 get: { Int(notch.collapseDelaySeconds) },
                 set: { notch.setCollapseDelay(TimeInterval($0)) }
             )) {
-                Text("Hover only (immediate)").tag(0)
-                Text("3 seconds (snappy)").tag(3)
-                Text("5 seconds (default)").tag(5)
+                Text("Hover only (instant)").tag(0)
+                Text("1 second").tag(1)
+                Text("3 seconds (default)").tag(3)
+                Text("5 seconds").tag(5)
                 Text("7 seconds").tag(7)
                 Text("10 seconds").tag(10)
                 Text("30 seconds").tag(30)
             }
             .labelsHidden()
-            Text("How long the tray stays open after the cursor leaves. Default is 5s so empty glances don’t linger. Use 3s for snappier feel.")
+            Text("How long the tray stays open after the cursor leaves. Default is 3s for a responsive feel. Use Hover only for instantaneous collapse.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -184,23 +185,41 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Notifications → Peek")
+            Text("Dynamo Notification Router")
                 .font(.subheadline.weight(.semibold))
-            Toggle("Deliver all alerts as Peeks", isOn: Binding(
+            Text("Dynamo routes every alert into the Peek hub — widgets, Focus, API/Shortcuts, and (optionally) Messages/FaceTime/Mail. Peek presents them; the Hub tab is the inbox. This is routing, not a passive system-banner mirror.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Dynamo is the router", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.isEnabled },
+                set: { DynamoNotificationRouter.shared.isEnabled = $0 }
+            ))
+            Toggle("Peek hub delivery", isOn: Binding(
                 get: { PeekNotificationCenter.shared.isPrimaryDelivery },
-                set: { newValue in
-                    PeekNotificationCenter.shared.isPrimaryDelivery = newValue
-                    if newValue {
-                        SystemNotificationMirror.shared.start()
-                    } else {
-                        SystemNotificationMirror.shared.stop()
-                    }
-                }
+                set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
             ))
-            Toggle("Mirror other apps’ notifications", isOn: Binding(
-                get: { mirror.isEnabled },
-                set: { mirror.isEnabled = $0 }
+            Toggle("Route widgets", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeWidgets },
+                set: { DynamoNotificationRouter.shared.routeWidgets = $0 }
             ))
+            Toggle("Route Focus", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeFocus },
+                set: { DynamoNotificationRouter.shared.routeFocus = $0 }
+            ))
+            Toggle("Route system apps (Messages, FaceTime, Mail…)", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeSystemApps },
+                set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
+            ))
+            Toggle("Route external API / Shortcuts", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeExternal },
+                set: { DynamoNotificationRouter.shared.routeExternal = $0 }
+            ))
+            Toggle("Prioritize calls & texts (critical Peek)", isOn: Binding(
+                get: { mirror.prioritizeCallsAndTexts },
+                set: { mirror.prioritizeCallsAndTexts = $0 }
+            ))
+            .disabled(!DynamoNotificationRouter.shared.routeSystemApps)
             Toggle("Peek haptics", isOn: Binding(
                 get: { PeekNotificationCenter.shared.hapticsEnabled },
                 set: { PeekNotificationCenter.shared.hapticsEnabled = $0 }
@@ -209,33 +228,87 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Dynamo is your notification surface: calendar, reminders, focus, battery, media, sports, health, world clock — and (when enabled) other apps’ Notification Center alerts mirrored into the notch Peek. macOS may still show system banners unless you quiet them in Focus / Notifications.")
+            Text("System-app routing needs Full Disk Access. macOS may still show banners — Dynamo cannot hide them; use Focus for Peek-only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(DynamoNotificationRouter.shared.lastStatus)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
             Text(mirror.lastStatus)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(mirror.accessDenied ? Color.orange : Color.secondary)
                 .lineLimit(2)
-            if mirror.accessDenied {
-                Button("Open Privacy → Full Disk Access") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            if DynamoNotificationRouter.shared.routedCount > 0 {
+                Text("Routed \(DynamoNotificationRouter.shared.routedCount) · last: \(DynamoNotificationRouter.shared.lastRoutedTitle)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 8) {
+                if mirror.accessDenied {
+                    Button("Open Full Disk Access") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .controlSize(.small)
+                    Button("Retry ingest") {
+                        mirror.stop()
+                        mirror.start()
+                    }
+                    .controlSize(.small)
+                }
+                Button("Open Focus settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.focus") {
+                        NSWorkspace.shared.open(url)
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
                         NSWorkspace.shared.open(url)
                     }
                 }
                 .controlSize(.small)
+                .help("Silence system banners so the Peek hub is the only surface")
             }
             if PeekNotificationCenter.shared.pendingCount > 0 {
-                Text("\(PeekNotificationCenter.shared.pendingCount) queued")
+                Text("\(PeekNotificationCenter.shared.pendingCount) queued in hub")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if PeekNotificationCenter.shared.unreadCount > 0 {
+                Text("\(PeekNotificationCenter.shared.unreadCount) unread in Hub tab")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             if let last = PeekNotificationCenter.shared.lastDelivered {
-                Text("Last: \(last.title)")
+                Text("Last Peek: \(last.title)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            Button("Send test message Peek") {
+                // Uses Contacts so the island tints to the contact photo colors.
+                let me = NSFullUserName()
+                let name = me.isEmpty ? "Alex" : me
+                let art = ContactPhotoResolver.imageDataForMessage(
+                    title: name,
+                    body: "On my way — 5 min"
+                ) ?? ContactPhotoResolver.imageData(matchingName: name)
+                DynamoNotificationAPI.post(
+                    title: name,
+                    subtitle: "On my way — 5 min",
+                    detail: "Text · Messages",
+                    systemImage: "message.fill",
+                    urgency: .critical,
+                    category: "text",
+                    id: "test-text|\(Date().timeIntervalSince1970)",
+                    artworkData: art
+                )
+            }
+            .controlSize(.small)
+            Text("Message Peeks tint from the contact photo (allow Contacts).")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             Divider()
 

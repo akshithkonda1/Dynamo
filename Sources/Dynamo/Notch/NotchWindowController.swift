@@ -69,26 +69,26 @@ final class NotchWindowController: ObservableObject {
         )
     }
     /// Stay open while the cursor is over the notch; collapse after leave
-    /// (delay from Preferences — 0 / 3 / 5 / 7 / 10 / 30s).
-    private let retreatDelay: TimeInterval = 0.7
+    /// (delay from Preferences — 0 / 1 / 3 / 5 / 7 / 10 / 30s).
+    private let retreatDelay: TimeInterval = 0.32
     /// Extra padding around the panel when deciding if the mouse is "still near".
-    private let nearPadding: CGFloat = 18
+    private let nearPadding: CGFloat = 28
 
     private static let hiddenModeKey = "dynamo.hiddenMode"
     static let collapseDelayKey = "dynamo.collapseDelaySeconds"
-    /// Default: snappy enough that an empty glance doesn’t linger over the desktop.
-    static let defaultCollapseDelay: TimeInterval = 5.0
+    /// Default: snappy leave delay — responsive without hover-only snatch.
+    static let defaultCollapseDelay: TimeInterval = 3.0
     /// Published for Settings binding. `0` = collapse immediately on leave (hover-only).
     @Published private(set) var collapseDelaySeconds: TimeInterval = defaultCollapseDelay
 
-    /// Effective collapse delay. Values: 0 (hover-only), 3, 5, 7, 10, 30.
+    /// Effective collapse delay. Values: 0 (hover-only), 1, 3, 5, 7, 10, 30.
     var collapseDelay: TimeInterval {
         collapseDelaySeconds
     }
 
     func setCollapseDelay(_ seconds: TimeInterval) {
-        // Snap to allowed steps; keep 3s as a real snappy option.
-        let allowed: [TimeInterval] = [0, 3, 5, 7, 10, 30]
+        // Snap to allowed steps; 1s + 3s for instantaneous / snappy feel.
+        let allowed: [TimeInterval] = [0, 1, 3, 5, 7, 10, 30]
         let value = allowed.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? Self.defaultCollapseDelay
         collapseDelaySeconds = value
         UserDefaults.standard.set(value, forKey: Self.collapseDelayKey)
@@ -144,9 +144,14 @@ final class NotchWindowController: ObservableObject {
         isHiddenModeEnabled = UserDefaults.standard.bool(forKey: Self.hiddenModeKey)
         if UserDefaults.standard.object(forKey: Self.collapseDelayKey) != nil {
             let stored = UserDefaults.standard.double(forKey: Self.collapseDelayKey)
-            setCollapseDelay(stored)
+            // Migrate previous “default 5s” installs toward snappier 3s once.
+            if stored == 5.0, UserDefaults.standard.object(forKey: "dynamo.collapseDelayMigratedTo3") == nil {
+                setCollapseDelay(3)
+                UserDefaults.standard.set(true, forKey: "dynamo.collapseDelayMigratedTo3")
+            } else {
+                setCollapseDelay(stored)
+            }
         } else {
-            // First launch / unset: 7s (comfortably in the 5–10s range).
             setCollapseDelay(Self.defaultCollapseDelay)
         }
         reposition()
@@ -189,9 +194,12 @@ final class NotchWindowController: ObservableObject {
         // Frame animation under the cursor often synthesizes mouseExited — ignore
         // those for a beat so the tray doesn't slam shut.
         // Cover the spring overshoot so mouseExited during bounce doesn’t collapse.
-        suppressHoverExitUntil = Date().addingTimeInterval(NotchTheme.panelExpandDuration + 0.2)
+        // Short suppress — only cover the expand spring, not an extra lag after open.
+        suppressHoverExitUntil = Date().addingTimeInterval(NotchTheme.panelExpandDuration + 0.06)
         guard !isExpanded else {
             animateFrame(to: expandedSize)
+            // Re-key so transport / Amplify first-click stays reliable.
+            panel?.makeKey()
             return
         }
         isExpanded = true
@@ -203,7 +211,7 @@ final class NotchWindowController: ObservableObject {
     func collapse() {
         guard isExpanded else { return }
         isExpanded = false
-        suppressHoverExitUntil = Date().addingTimeInterval(0.28)
+        suppressHoverExitUntil = Date().addingTimeInterval(0.14)
         animateFrame(to: collapsedSize)
     }
 
@@ -241,7 +249,7 @@ final class NotchWindowController: ObservableObject {
         collapseWorkItem = work
         // Hover-only (0) still waits a tiny beat so expand/resize mouseExited
         // noise doesn't slam the tray shut mid-animation.
-        let delay = collapseDelay <= 0 ? 0.08 : collapseDelay
+        let delay = collapseDelay <= 0 ? 0.04 : collapseDelay
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
@@ -311,7 +319,7 @@ final class NotchWindowController: ObservableObject {
             peekOverlayHolders += 1
         }
         if !isExpanded {
-            suppressHoverExitUntil = Date().addingTimeInterval(0.35)
+            suppressHoverExitUntil = Date().addingTimeInterval(0.18)
             // Always re-size so a peek after a compact HUD grows further down.
             animateFrame(to: overlaySize)
         } else if wasIdle {

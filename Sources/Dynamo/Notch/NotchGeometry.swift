@@ -91,14 +91,41 @@ enum NotchGeometry {
         return (base * scale).rounded()
     }
 
-    /// Peek / HUD overlay width tracks expanded width lightly.
+    /// Peek silhouette grows modestly from the physical cutout — Dynamic Island
+    /// style, not a wide notification toast. Width flares just enough for
+    /// icon + title; height is camera band + one compact content row.
     static func peekOverlaySize(for screen: NSScreen?) -> NSSize {
-        let w = min(540, max(380, expandedWidth(for: screen) * 0.68))
-        return NSSize(width: w.rounded(), height: 104)
+        let metrics = currentMetrics(for: screen)
+        // ~1.85× cutout + small padding → readable without looking banner-wide.
+        let width = min(440, max(metrics.width * 1.85 + 32, 276)).rounded()
+        let top = peekContentTopInset(for: screen)
+        // Content row ~52pt (icon 36 + padding) + soft bottom lip.
+        let height = max(78, (top + 54).rounded())
+        return NSSize(width: width, height: height)
+    }
+
+    /// Vertical inset so peek text/icons clear the camera housing.
+    /// Matches the physical notch band closely so the black glass fills the
+    /// cutout continuously — useful space without a large empty void.
+    static func peekContentTopInset(for screen: NSScreen?) -> CGFloat {
+        guard let screen else { return 12 }
+        let safeTop = screen.safeAreaInsets.top
+        if safeTop > 0 {
+            // Sit just under the housing (1–3pt tuck keeps island joined to cutout).
+            return max(16, min(34, safeTop - 2))
+        }
+        // Non-notched displays: slim menu-bar clearance.
+        return 10
     }
 
     static func hudOverlaySize(for screen: NSScreen?) -> NSSize {
-        let w = min(400, max(290, expandedWidth(for: screen) * 0.50))
-        return NSSize(width: w.rounded(), height: 50)
+        // HUD stays tighter than peeks — volume/brightness only need a slim bar
+        // under the camera band.
+        let metrics = currentMetrics(for: screen)
+        let w = min(340, max(metrics.width * 1.55 + 24, 240)).rounded()
+        let top = peekContentTopInset(for: screen)
+        // Camera band + meter row (~26pt) + bottom lip.
+        let h = max(52, (top + 28).rounded())
+        return NSSize(width: w, height: h)
     }
 }

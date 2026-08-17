@@ -382,16 +382,40 @@ PROFILE_CAPS = {
 }
 
 
+def _load_tone_ai():
+    """Import on-device genre AI from the same folder (optional)."""
+    try:
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent / "dynamo_tone_ai.py"
+        if not path.is_file():
+            return None
+        name = "dynamo_tone_ai"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
 def build_adaptive_bands(
     profile: str,
     device: str,
     analysis: Optional[MediaAnalysis],
     intensity: float = 1.0,
     path: str = "stereo",
+    genre: Optional[str] = None,
+    metadata_text: Optional[str] = None,
 ) -> Tuple[List[BandSpec], float, dict]:
     """
     Fidelity-capped intent + mild device calibration + optional analysis trims +
-    Spatial/Atmos path voicing. Width only for Impact on stereo.
+    Spatial/Atmos path voicing + on-device Tone AI genre bias.
+    Width only for Impact on stereo.
     """
     base_key = profile.lower() if profile.lower() in BASE_PROFILES else "symphony"
     bands = [
@@ -420,6 +444,52 @@ def build_adaptive_bands(
             if b.label in note_map:
                 b.gain_db = max(-gain_cap, min(gain_cap, b.gain_db + note_map[b.label] * intensity * 0.25))
 
+    # On-device Tone AI — genre from live features + optional local metadata text.
+    tone_genre = (genre or "").lower().strip() or None
+    tone_conf = 0.0
+    tone_source = "none"
+    if base_key != "reference":
+        tone = _load_tone_ai()
+        if tone is not None:
+            try:
+                if analysis is not None:
+                    feats = tone.ToneFeatures(
+                        bass_ratio=analysis.bass_ratio,
+                        brightness=analysis.brightness,
+                        crest_db=analysis.crest_db,
+                        zcr=0.08,  # not on MediaAnalysis — soft default
+                        dynamic_range_db=analysis.dynamic_range_db,
+                        speech_likelihood=analysis.speech_likelihood,
+                        bandwidth_hz=analysis.bandwidth_hz,
+                        mid_ratio=max(0.05, 1.0 - analysis.bass_ratio - analysis.brightness),
+                    )
+                    verdict = tone.classify_features(feats, metadata_text=metadata_text)
+                elif metadata_text:
+                    # Metadata-only prior when PCM analysis absent
+                    feats = tone.ToneFeatures(0.22, 0.25, 10, 0.08, 12, 0.1, 11000, 0.33)
+                    verdict = tone.classify_features(feats, metadata_text=metadata_text)
+                else:
+                    verdict = None
+                if verdict is not None:
+                    tone_genre = verdict.genre
+                    tone_conf = float(verdict.confidence)
+                    tone_source = verdict.source
+                    tone.apply_genre_bias_to_bands(
+                        bands, tone_genre, intensity=intensity * 0.40, gain_cap=gain_cap
+                    )
+            except Exception:
+                pass
+        elif tone_genre:
+            # Fallback static map if module missing but genre string provided
+            static = {
+                "pop": {"punch": 0.4, "presence": 0.5, "mud": -0.3},
+                "classical": {"air": 0.4, "mud": -0.4, "sub": -0.2},
+                "electronic": {"sub": 0.6, "punch": 0.3},
+                "hiphop": {"sub": 0.7, "presence": 0.2},
+                "speech": {"presence": 0.8, "sub": -0.6, "mud": -0.5},
+            }
+            _apply_bias(bands, static.get(tone_genre, {}), intensity * 0.4)
+
     # Width: Impact only, stereo path only
     width = 0.08 * intensity if base_key == "impact" and path == "stereo" else 0.0
 
@@ -431,6 +501,10 @@ def build_adaptive_bands(
             makeup_db = min(0.25 * intensity, makeup_db + 0.05)
         if analysis.media_type == "speech":
             makeup_db = min(makeup_db, 0.15 * intensity)
+    if tone_genre == "classical":
+        makeup_db = min(makeup_db, 0.14 * intensity)
+    elif tone_genre == "speech":
+        makeup_db = min(makeup_db, 0.15 * intensity)
 
     # Atmos/Spatial: gentle sub + mud; no air boost
     if path in ("atmosBed", "multichannel", "spatialBinaural", "stereoMixFallback"):
@@ -474,6 +548,10 @@ def build_adaptive_bands(
         "mid_side": width > 0.001,
         "fidelity_capped": True,
         "linked_true_peak_ceiling_db": -1.0,
+        "tone_genre": tone_genre or "unknown",
+        "tone_confidence": round(tone_conf, 3),
+        "tone_source": tone_source,
+        "tone_ai": True,
     }
     return bands, makeup, report
 
@@ -711,8 +789,9 @@ def morph_payload(
         )
     return {
         "engine": "DynamoEQ",
-        "version": 3,
+        "version": 4,
         "seamless": True,
+        "tone_ai": True,
         "from_profile": from_profile,
         "to_profile": to_profile,
         "device": device,
@@ -728,16 +807,27 @@ def coeffs_payload(
     analysis: Optional[MediaAnalysis] = None,
     intensity: float = 1.0,
     path: str = "stereo",
+    genre: Optional[str] = None,
+    metadata_text: Optional[str] = None,
 ) -> dict:
-    bands, makeup, report = build_adaptive_bands(profile, device, analysis, intensity, path=path)
+    bands, makeup, report = build_adaptive_bands(
+        profile,
+        device,
+        analysis,
+        intensity,
+        path=path,
+        genre=genre,
+        metadata_text=metadata_text,
+    )
     filters = bands_to_filters(bands, sample_rate)
     lfe = bands_to_filters(lfe_bands(bands), sample_rate)
     return {
         "engine": "DynamoEQ",
-        "version": 3,
+        "version": 4,
         "symphony": True,
         "spatial_safe": True,
         "atmos_ready": True,
+        "tone_ai": True,
         "seamless": True,
         "transition_ms": DEFAULT_TRANSITION_MS,
         "fade_in_ms": DEFAULT_FADE_IN_MS,
@@ -747,6 +837,9 @@ def coeffs_payload(
         "path": report["path"],
         "media_type": report["media_type"],
         "quality": report["quality"],
+        "tone_genre": report.get("tone_genre", "unknown"),
+        "tone_confidence": report.get("tone_confidence", 0),
+        "tone_source": report.get("tone_source", "none"),
         "sampleRate": sample_rate,
         "makeup": makeup,
         "width": report["width"],
@@ -796,9 +889,33 @@ def selftest() -> None:
     assert a.media_type in BASE_PROFILES or a.media_type in MEDIA_BIAS
     payload = coeffs_payload("symphony", sr, "headphones", a, 1.0, path="stereo")
     assert payload["width"] == 0  # width only on Impact
-    assert payload["version"] == 3
+    assert payload["version"] == 4
     assert payload["seamless"] is True
     assert payload["atmos_ready"] is True
+    assert payload.get("tone_ai") is True
+    # Classical metadata should bias tone genre when analysis is musical
+    classical = coeffs_payload(
+        "symphony",
+        sr,
+        "headphones",
+        a,
+        1.0,
+        path="stereo",
+        metadata_text="Mozart Symphony No. 40 classical orchestral",
+    )
+    assert classical.get("tone_genre") in (
+        "classical",
+        "unknown",
+        "jazz",
+        "folk",
+        "ambient",
+        "pop",
+        "rock",
+        "electronic",
+        "hiphop",
+        "metal",
+        "speech",
+    )
     assert len(payload["biquads"]) >= 5
     impact = coeffs_payload("impact", sr, "headphones", a, 1.0, path="stereo")
     assert impact["width"] > 0
@@ -857,7 +974,8 @@ def selftest() -> None:
             "bands": len(payload["bands"]),
             "peak": peak,
             "seamless": True,
-            "version": 3,
+            "tone_ai": True,
+            "version": 4,
         },
     )
 
@@ -877,6 +995,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     c.add_argument("--sr", type=float, default=48000.0)
     c.add_argument("--intensity", type=float, default=1.0)
+    c.add_argument("--genre", default="", help="Optional genre hint (pop/classical/…)")
+    c.add_argument("--metadata", default="", help="Local title/artist/genre text for Tone AI")
 
     a = sub.add_parser("analyze", help="Analyze stereo float32 LE PCM on stdin")
     a.add_argument("--sr", type=float, default=48000.0)
@@ -887,6 +1007,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--path", default="stereo", choices=list(SPATIAL_PATHS))
     s.add_argument("--sr", type=float, default=48000.0)
     s.add_argument("--intensity", type=float, default=1.0)
+    s.add_argument("--genre", default="")
+    s.add_argument("--metadata", default="")
 
     pr = sub.add_parser("process", help="Process stereo float32 LE PCM stdin→stdout")
     pr.add_argument("--profile", default="symphony", choices=list(BASE_PROFILES))
@@ -938,7 +1060,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "coeffs":
         print(
             json.dumps(
-                coeffs_payload(args.profile, args.sr, args.device, None, args.intensity, path=args.path),
+                coeffs_payload(
+                    args.profile,
+                    args.sr,
+                    args.device,
+                    None,
+                    args.intensity,
+                    path=args.path,
+                    genre=args.genre or None,
+                    metadata_text=args.metadata or None,
+                ),
                 indent=2,
             )
         )
@@ -957,7 +1088,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(
             json.dumps(
                 coeffs_payload(
-                    args.profile, args.sr, args.device, analysis, args.intensity, path=args.path
+                    args.profile,
+                    args.sr,
+                    args.device,
+                    analysis,
+                    args.intensity,
+                    path=args.path,
+                    genre=args.genre or None,
+                    metadata_text=args.metadata or None,
                 ),
                 indent=2,
             )

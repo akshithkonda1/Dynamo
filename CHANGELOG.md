@@ -20,11 +20,21 @@ All notable changes to Dynamo are documented here.
 
 
 ### Performance & feel
-- Adaptive media poll (faster while playing, idle back-off)
-- Slower idle polls: notifications, calls, volume, Amplify sync, Notes, clipboard
-- Sports scoreboard poll speeds up only while games are live
-- Tray: reliable press scale (ButtonStyle), hover name previews, light haptics, bounce on select (macOS 14+)
+- **Instant island:** faster expand springs (~0.20s), snappier collapse default (3s; migrate from 5s), 1s collapse option, tighter hover near-pad
+- Adaptive media poll (0.75s playing / 2s idle); snappier skip/seek refresh probes
+- Responsive polls: notifications 1.5s, volume 1.25s, calls 2s, clipboard 1.5s, Amplify sync 0.75s
+- Checklist/Notes/Reminders refresh on open; Calendar EventKit 30s
+- Tray: hover name previews ~90ms, press scale, haptics, bounce (macOS 14+)
+- Amplify toggle always works (Meeting only auto-offs on enter)
 - Friendlier empty states across Calendar, Clipboard, Checklist, Media, Shelf, Focus
+
+### Notifications → Peek
+- Mirror **calls, texts/iMessage, mail, Slack/Teams**, and general Notification Center alerts into notch Peeks (like reminders)
+- Critical urgency for calls/texts (survives Meeting quiet); FaceTime/Zoom/Teams activation Peeks
+- Prefer Full Disk Access; clearer Preferences status + test text Peek
+
+### World Clock
+- **Here (current location) always first**, then other cities in the chosen sort (nearest / farthest / random / pick order)
 
 ### Also in this line
 - World Clock distance / reverse / random sort

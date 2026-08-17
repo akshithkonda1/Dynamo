@@ -2,17 +2,18 @@ import AppKit
 import Combine
 import Foundation
 
-/// Dynamo’s **primary notification surface** — the notch Peek is the delivery
-/// UI for Dynamo-originated alerts and (via `SystemNotificationMirror`) other
-/// apps’ Notification Center deliveries.
+/// Dynamo’s **notification hub** — the notch Peek is the primary delivery UI
+/// for everything Dynamo surfaces:
+/// - Widget / Focus / battery / calendar / media peeks
+/// - External API (`dynamo://notify`, distributed notifications)
+/// - System apps **routed into the hub** (Messages, FaceTime, Mail, …) via
+///   `SystemNotificationMirror` — not a second parallel banner surface
 ///
-/// Design goals:
-/// - Single funnel (no lost alerts when peeks overlap)
-/// - Queue + coalesce by stable id
-/// - Urgency / media preemption rules
-/// - Light haptics on deliver
-/// - Recent history for Settings / debugging
-/// - Dynamo does not post competing system banners for its own alerts
+/// Design:
+/// - Single funnel (queue + coalesce)
+/// - Urgency / media preemption
+/// - Inbox history with unread + replay
+/// - Dynamo never posts competing system banners for its own alerts
 @MainActor
 final class PeekNotificationCenter: ObservableObject {
     static let shared = PeekNotificationCenter()
@@ -20,10 +21,10 @@ final class PeekNotificationCenter: ObservableObject {
     private static let primaryKey = "dynamo.peek.primaryDelivery"
     private static let hapticsKey = "dynamo.peek.haptics"
     private static let soundKey = "dynamo.peek.sound"
-    private static let maxQueue = 12
-    private static let maxHistory = 40
+    private static let maxQueue = 14
+    private static let maxHistory = 60
 
-    /// When true (default), all Dynamo alerts go through Peek only.
+    /// When true (default), every alert goes through the Peek hub.
     @Published var isPrimaryDelivery: Bool {
         didSet { UserDefaults.standard.set(isPrimaryDelivery, forKey: Self.primaryKey) }
     }
@@ -40,12 +41,14 @@ final class PeekNotificationCenter: ObservableObject {
     @Published private(set) var pendingCount: Int = 0
     @Published private(set) var history: [PeekHistoryItem] = []
     @Published private(set) var lastDelivered: PeekHistoryItem?
+    @Published private(set) var unreadCount: Int = 0
 
     private weak var presenter: NotchSneakPeekController?
     private var queue: [QueuedPeek] = []
     private var isPresenting = false
     private var registryCancellable: AnyCancellable?
-    private var hideCancellable: AnyCancellable?
+    /// Full peeks keyed by history id for replay from the hub.
+    private var replayStore: [String: NotchSneakPeek] = [:]
 
     struct QueuedPeek: Identifiable, Equatable {
         let id: String
@@ -59,8 +62,11 @@ final class PeekNotificationCenter: ObservableObject {
         let category: String
         let title: String
         let subtitle: String
+        let detail: String
+        let systemImage: String
         let urgency: NotchSneakPeekUrgency
         let deliveredAt: Date
+        var isUnread: Bool
     }
 
     private init() {
@@ -83,18 +89,16 @@ final class PeekNotificationCenter: ObservableObject {
 
     // MARK: - Attach
 
-    /// Wire registry fan-out + peek presenter. Call once at bootstrap.
+    /// Wire peek presenter. Widget / system / API traffic is owned by
+    /// `DynamoNotificationRouter` — the hub only presents + stores inbox.
     func attach(registry: WidgetRegistry, presenter: NotchSneakPeekController) {
         self.presenter = presenter
         presenter.onDidHide = { [weak self] in
             self?.handlePresenterDidHide()
         }
-        // Intercept all widget sneak peeks through the delivery center.
-        registryCancellable = registry.sneakPeekPublisher
-            .receive(on: RunLoop.main)
-            .sink { [weak self] peek in
-                self?.deliver(peek, category: "widget")
-            }
+        // Registry is no longer attached here — DynamoNotificationRouter owns
+        // widget fan-in so every source shares one routing policy.
+        _ = registry
     }
 
     func teardown() {
@@ -109,7 +113,7 @@ final class PeekNotificationCenter: ObservableObject {
 
     // MARK: - Public API
 
-    /// Deliver a notification as a Peek (queued, coalesced).
+    /// Deliver into the hub (queued, coalesced, then Peeks from the notch).
     func deliver(
         _ peek: NotchSneakPeek,
         id: String? = nil,
@@ -128,24 +132,24 @@ final class PeekNotificationCenter: ObservableObject {
             if let idx = queue.firstIndex(where: { $0.id == key }) {
                 queue[idx] = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
                 pendingCount = queue.count
-                // If this id is currently showing and urgency rose, re-present.
                 return
             }
         }
 
         if FocusController.shared.shouldSuppress(peek: peek) {
+            // Still land in the hub inbox so nothing is lost silently.
+            let item = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
+            recordHistory(item, presented: false)
             return
         }
 
         let item = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
 
-        // Media + critical preempt the current session so skips / "starting now"
-        // never feel delayed behind a routine heads-up.
+        // Media + critical preempt so skips / “starting now” never feel delayed.
         let preempt = peek.style == .media || peek.urgency >= .critical
         if preempt, let presenter {
-            // Keep lower-priority items queued; present this now.
             isPresenting = true
-            recordHistory(item)
+            recordHistory(item, presented: true)
             feedback(for: peek)
             presenter.showDirect(peek)
             pendingCount = queue.count
@@ -186,6 +190,38 @@ final class PeekNotificationCenter: ObservableObject {
         pendingCount = 0
     }
 
+    func markAllRead() {
+        for i in history.indices {
+            history[i].isUnread = false
+        }
+        recomputeUnread()
+    }
+
+    func markRead(id: String) {
+        if let idx = history.firstIndex(where: { $0.id == id }) {
+            history[idx].isUnread = false
+            recomputeUnread()
+        }
+    }
+
+    func clearHistory() {
+        history.removeAll()
+        lastDelivered = nil
+        replayStore.removeAll()
+        recomputeUnread()
+    }
+
+    /// Re-present a hub item as a Peek (does not re-queue).
+    func replay(id: String) {
+        guard let peek = replayStore[id] else { return }
+        markRead(id: id)
+        isPresenting = true
+        presenter?.showDirect(peek)
+    }
+
+    /// Snapshot of the live queue for the Hub UI.
+    var queuedItems: [QueuedPeek] { queue }
+
     // MARK: - Pump
 
     private func pump() {
@@ -194,9 +230,10 @@ final class PeekNotificationCenter: ObservableObject {
         guard let presenter else { return }
         guard !queue.isEmpty else { return }
 
-        // Skip suppressed items without dropping the whole queue forever.
         while let next = queue.first {
             if FocusController.shared.shouldSuppress(peek: next.peek) {
+                // Keep in hub history as unread; drop from live queue.
+                recordHistory(next, presented: false)
                 queue.removeFirst()
                 pendingCount = queue.count
                 continue
@@ -204,7 +241,7 @@ final class PeekNotificationCenter: ObservableObject {
             queue.removeFirst()
             pendingCount = queue.count
             isPresenting = true
-            recordHistory(next)
+            recordHistory(next, presented: true)
             feedback(for: next.peek)
             presenter.showDirect(next.peek)
             return
@@ -221,7 +258,6 @@ final class PeekNotificationCenter: ObservableObject {
 
     private func trimQueue() {
         guard queue.count > Self.maxQueue else { return }
-        // Drop oldest lowest-urgency from the back half.
         while queue.count > Self.maxQueue {
             if let idx = queue.enumerated().reversed().first(where: { $0.element.peek.urgency <= .normal })?.offset {
                 queue.remove(at: idx)
@@ -231,20 +267,40 @@ final class PeekNotificationCenter: ObservableObject {
         }
     }
 
-    private func recordHistory(_ item: QueuedPeek) {
+    private func recordHistory(_ item: QueuedPeek, presented: Bool) {
+        // De-dupe same id — move to top as unread.
+        history.removeAll { $0.id == item.id }
         let h = PeekHistoryItem(
             id: item.id,
             category: item.category,
             title: item.peek.title,
             subtitle: item.peek.subtitle,
+            detail: item.peek.detail,
+            systemImage: item.peek.systemImage,
             urgency: item.peek.urgency,
-            deliveredAt: Date()
+            deliveredAt: Date(),
+            isUnread: true
         )
         history.insert(h, at: 0)
         if history.count > Self.maxHistory {
+            let dropped = history.suffix(from: Self.maxHistory)
+            for d in dropped { replayStore.removeValue(forKey: d.id) }
             history = Array(history.prefix(Self.maxHistory))
         }
-        lastDelivered = h
+        replayStore[item.id] = item.peek
+        // Cap replay payloads (artwork-heavy).
+        if replayStore.count > Self.maxHistory + 8 {
+            let keep = Set(history.map(\.id))
+            replayStore = replayStore.filter { keep.contains($0.key) }
+        }
+        if presented {
+            lastDelivered = h
+        }
+        recomputeUnread()
+    }
+
+    private func recomputeUnread() {
+        unreadCount = history.filter(\.isUnread).count
     }
 
     private func feedback(for peek: NotchSneakPeek) {

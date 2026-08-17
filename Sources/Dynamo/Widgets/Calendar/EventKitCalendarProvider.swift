@@ -28,7 +28,7 @@ final class EventKitCalendarProvider: CalendarProvider {
         ) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        let t = Timer(timeInterval: 45, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)

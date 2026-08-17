@@ -24,10 +24,10 @@ final class NotchSneakPeekController: ObservableObject {
         let multiplier = UserDefaults.standard.object(forKey: "peekDwellMultiplier") as? Double ?? 1.0
         let base: TimeInterval
         switch urgency {
-        case .low: base = 3.0
-        case .normal: base = 3.4
-        case .high: base = 5.5
-        case .critical: base = 7.5
+        case .low: base = 2.4
+        case .normal: base = 2.8
+        case .high: base = 4.5
+        case .critical: base = 6.0
         }
         return base * multiplier
     }
@@ -39,9 +39,14 @@ final class NotchSneakPeekController: ObservableObject {
         _ = registry
     }
 
-    /// Direct path for FocusController (also routes through PeekNotificationCenter).
+    /// Direct path for FocusController — goes through Dynamo’s notification router.
     func showForFocus(_ content: NotchSneakPeek) {
-        PeekNotificationCenter.shared.deliver(content, id: "focus|\(content.title)", category: "focus")
+        DynamoNotificationRouter.shared.route(
+            content,
+            source: .focus,
+            category: "focus",
+            id: "focus|\(content.title)"
+        )
     }
 
     /// Present immediately (called only by PeekNotificationCenter).
@@ -84,7 +89,7 @@ final class NotchSneakPeekController: ObservableObject {
         }
         hideWorkItem = work
         let duration = content.style == .media
-            ? max(displayDuration(for: content.urgency), 3.2)
+            ? max(displayDuration(for: content.urgency), 2.4)
             : displayDuration(for: content.urgency)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
