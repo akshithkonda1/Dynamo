@@ -89,18 +89,16 @@ final class PeekNotificationCenter: ObservableObject {
 
     // MARK: - Attach
 
-    /// Wire registry fan-out + peek presenter. Call once at bootstrap.
+    /// Wire peek presenter. Widget / system / API traffic is owned by
+    /// `DynamoNotificationRouter` — the hub only presents + stores inbox.
     func attach(registry: WidgetRegistry, presenter: NotchSneakPeekController) {
         self.presenter = presenter
         presenter.onDidHide = { [weak self] in
             self?.handlePresenterDidHide()
         }
-        // Intercept all widget sneak peeks through the hub.
-        registryCancellable = registry.sneakPeekPublisher
-            .receive(on: RunLoop.main)
-            .sink { [weak self] peek in
-                self?.deliver(peek, category: "widget")
-            }
+        // Registry is no longer attached here — DynamoNotificationRouter owns
+        // widget fan-in so every source shares one routing policy.
+        _ = registry
     }
 
     func teardown() {

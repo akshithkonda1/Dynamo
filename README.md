@@ -33,7 +33,7 @@ Registered in `AppDelegate.bootstrap()`:
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
 
-**Background systems:** **Peek notification hub** (Dynamo alerts + optional system-app routing for Messages/FaceTime/Mail — inbox in the **Hub** tray tab), Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge for Shortcuts, **DynamoEQ** + **Tone AI** local amplify engine.
+**Background systems:** **`DynamoNotificationRouter`** → **Peek hub** (widgets · Focus · optional system apps · API; **Hub** tray inbox), Meeting speech capture (opt-in), global hotkeys, `dynamo://` URL scheme, Peek Bridge, **DynamoEQ** + **Tone AI**.
 
 > **Production note:** **Weather** is **not registered** (WeatherKit needs a paid team). Source remains under `Widgets/Weather/` for a future opt-in build. **Clocks** is the free replacement.
 
@@ -113,14 +113,14 @@ python3 Tools/DynamoEQ/dynamo_eq.py process --from-profile cinema --profile symp
   --transition-ms 90 --fade-in-ms 120 --sr 48000 < in.f32le > out.f32le
 ```
 
-### Peek as notification **hub**
-- **Single funnel** for Dynamo-originated alerts (calendar, reminders, battery, focus/meeting, media, sports, health, clipboard, clocks)  
-- Optional **routing** of system apps (Messages, FaceTime, Mail, Slack/Teams, …) into the same hub — not a second “mirror” banner surface  
-- **Hub** tray tab: inbox, unread, mark read, clear, **replay** as Peek; ambient unread badge  
-- Notch-aware Peek layout: camera-band clearance, contact-photo tint for messages  
-- API: `dynamo://notify?title=…&urgency=high` · `DynamoNotificationAPI` · distributed notifications  
-- Meeting Mode quiets low/normal peeks; use **Focus** to silence macOS banners if you want Peek-only (Apple does not allow apps to kill system banners)  
-- Full Disk Access needed only for system-app routing (usernoted store)
+### Dynamo as notification **router** → Peek **hub**
+- **`DynamoNotificationRouter`** is the single path: widgets · Focus · system apps · API / URL / Shortcuts  
+- **Peek hub** presents + stores inbox (queue, unread, replay) — Dynamo owns routing, not a dual banner mirror  
+- Per-source toggles in Preferences; **Hub** tray tab + ambient unread badge  
+- Message Peeks tint from contact photos  
+- API: `dynamo://notify?…` · `DynamoNotificationAPI` → Router → Hub  
+- Meeting Mode quiets low/normal peeks; use **Focus** to silence macOS banners for Peek-only  
+- Full Disk Access only for system-app ingest
 
 ### Calendar & Reminders
 - **Full Calendar Access** required to list events (write-only is detected and prompted)  

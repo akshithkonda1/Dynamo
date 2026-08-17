@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// **Peek Hub** — inbox for everything that surfaces through the notch Peek.
+/// **Peek Hub** — inbox for everything Dynamo routes into the notch.
 ///
-/// Not a second Notification Center. This is Dynamo’s own hub: widget alerts,
-/// Focus, battery, calendar, media, API posts, and system apps **routed in**
-/// (Messages, FaceTime, Mail, …). Live Peeks still fire; history + unread live here.
+/// Dynamo is the **router**; this tab is the **hub inbox**. Live Peeks still
+/// fire from the island; history + unread + replay live here.
 @MainActor
 final class NotificationsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding {
     let id = "peek-hub"
@@ -12,6 +11,7 @@ final class NotificationsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     let systemImage = "bell.badge.fill"
 
     @ObservedObject private var hub = PeekNotificationCenter.shared
+    @ObservedObject private var router = DynamoNotificationRouter.shared
     @ObservedObject private var mirror = SystemNotificationMirror.shared
 
     var expandedContentHeight: CGFloat { 268 }
@@ -20,7 +20,7 @@ final class NotificationsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     func stop() {}
 
     func expandedView() -> AnyView {
-        AnyView(ExpandedPeekHubView(hub: hub, mirror: mirror))
+        AnyView(ExpandedPeekHubView(hub: hub, router: router, mirror: mirror))
     }
 
     // MARK: Ambient — unread badge in the collapsed notch
@@ -82,12 +82,13 @@ private struct AmbientPeekHubView: View {
 
 private struct ExpandedPeekHubView: View {
     @ObservedObject var hub: PeekNotificationCenter
+    @ObservedObject var router: DynamoNotificationRouter
     @ObservedObject var mirror: SystemNotificationMirror
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
             HStack(spacing: 8) {
-                Text("Notification Hub")
+                Text("Dynamo Router · Hub")
                     .font(NotchTheme.section)
                     .foregroundStyle(NotchTheme.textTertiary)
                     .textCase(.uppercase)
@@ -100,19 +101,24 @@ private struct ExpandedPeekHubView: View {
                 }
             }
 
-            // Status strip — hub, not “mirror”
+            // Router status — Dynamo owns the path into Peek
             HStack(spacing: 8) {
                 statusChip(
-                    title: hub.isPrimaryDelivery ? "Peek hub on" : "Hub off",
+                    title: router.isEnabled ? "Router on" : "Router off",
+                    systemImage: "arrow.triangle.branch",
+                    active: router.isEnabled
+                )
+                statusChip(
+                    title: hub.isPrimaryDelivery ? "Peek hub" : "Hub off",
                     systemImage: "bell.badge",
                     active: hub.isPrimaryDelivery
                 )
                 statusChip(
-                    title: mirror.isEnabled
-                        ? (mirror.accessDenied ? "System route blocked" : "System apps routed")
-                        : "System route off",
-                    systemImage: mirror.accessDenied ? "exclamationmark.shield" : "arrow.triangle.merge",
-                    active: mirror.isEnabled && !mirror.accessDenied
+                    title: router.routeSystemApps
+                        ? (mirror.accessDenied ? "System blocked" : "System routed")
+                        : "System off",
+                    systemImage: mirror.accessDenied ? "exclamationmark.shield" : "app.badge",
+                    active: router.routeSystemApps && !mirror.accessDenied
                 )
                 Spacer(minLength: 0)
             }
@@ -181,13 +187,16 @@ private struct ExpandedPeekHubView: View {
     }
 
     private var footerHint: String {
+        if !router.isEnabled {
+            return "Dynamo’s router is off — nothing is delivered to Peek."
+        }
         if mirror.accessDenied {
-            return "Grant Full Disk Access to route Messages & calls into the hub. Silence system banners in Focus if you want Peek-only."
+            return "Grant Full Disk Access so the router can ingest Messages & calls. Silence system banners in Focus for Peek-only."
         }
-        if mirror.isEnabled {
-            return "System apps are routed into this hub as Peeks. Use Focus to hide macOS banners if you want a single surface."
+        if router.routeSystemApps {
+            return "Dynamo routes widgets, Focus, and system apps into this hub. \(router.routedCount) routed · \(router.lastStatus)"
         }
-        return "Enable “Route system apps into hub” in Preferences to include Messages, FaceTime, and more."
+        return "System-app routing is off. Turn it on in Preferences so Messages / FaceTime join the hub."
     }
 
     private func statusChip(title: String, systemImage: String, active: Bool) -> some View {

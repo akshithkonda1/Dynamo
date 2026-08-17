@@ -192,12 +192,14 @@ final class SystemNotificationMirror: ObservableObject {
                 subtitle: peekSubtitle,
                 note: note
             )
-            DynamoNotificationAPI.post(
+            // Ingest → Dynamo router (not a side-channel into the hub).
+            DynamoNotificationRouter.shared.route(
                 title: peekTitle,
                 subtitle: peekSubtitle,
                 detail: detail,
                 systemImage: kind.systemImage,
                 urgency: urgency,
+                source: kind == .call ? .call : .system,
                 category: kind.category,
                 id: "system|\(kind.category)|\(uuidKey)",
                 artworkData: artwork

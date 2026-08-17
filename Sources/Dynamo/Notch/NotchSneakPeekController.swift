@@ -39,9 +39,14 @@ final class NotchSneakPeekController: ObservableObject {
         _ = registry
     }
 
-    /// Direct path for FocusController (also routes through PeekNotificationCenter).
+    /// Direct path for FocusController — goes through Dynamo’s notification router.
     func showForFocus(_ content: NotchSneakPeek) {
-        PeekNotificationCenter.shared.deliver(content, id: "focus|\(content.title)", category: "focus")
+        DynamoNotificationRouter.shared.route(
+            content,
+            source: .focus,
+            category: "focus",
+            id: "focus|\(content.title)"
+        )
     }
 
     /// Present immediately (called only by PeekNotificationCenter).

@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated {
             hotKeys.uninstall()
             SystemNotificationMirror.shared.stop()
+            DynamoNotificationRouter.shared.stop()
             PeekNotificationCenter.shared.teardown()
             PeekBridge.shared.teardown()
             registry?.stopAll()
@@ -108,21 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)
-        // Peek is Dynamo’s notification hub (queue + inbox + haptics).
+        // Peek hub (presentation + inbox) + Dynamo as the notification router.
         PeekNotificationCenter.shared.attach(registry: registry, presenter: sneakPeekController)
+        DynamoNotificationRouter.shared.start(
+            registry: registry,
+            hub: PeekNotificationCenter.shared
+        )
         PeekBridge.shared.attach(registry: registry)
         DynamoNotificationAPI.installExternalListeners()
-        // Route system apps (Messages, FaceTime, Mail, …) into the Peek hub.
-        // Does not replace macOS banners by itself — use Focus for Peek-only.
-        SystemNotificationMirror.shared.start()
         PermissionsStore.shared.refreshFromSystem()
-        FocusController.shared.emitPeek = { peek in
-            PeekNotificationCenter.shared.deliver(
-                peek,
-                id: "focus|\(peek.title)|\(peek.subtitle)",
-                category: "focus"
-            )
-        }
+        // Focus peeks are wired inside DynamoNotificationRouter.start
         FocusController.shared.start()
         FocusQuietMonitor.shared.start()
 

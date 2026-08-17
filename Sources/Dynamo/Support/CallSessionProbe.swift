@@ -119,12 +119,13 @@ final class CallSessionProbe {
         lastPeekAt = Date()
 
         let isFaceTimeOrPhone = bid.contains("FaceTime") || bid.contains("InCall")
-        DynamoNotificationAPI.post(
+        DynamoNotificationRouter.shared.route(
             title: isFaceTimeOrPhone ? "\(name) active" : "\(name) opened",
             subtitle: reason == "launched" ? "App launched" : "Brought to front",
             detail: "Call · \(name)",
             systemImage: isFaceTimeOrPhone ? "phone.fill" : "video.fill",
             urgency: .critical,
+            source: .call,
             category: "call",
             id: "call|\(bid)|\(Int(Date().timeIntervalSince1970 / 45))"
         )

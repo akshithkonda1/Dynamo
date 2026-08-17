@@ -1,22 +1,19 @@
 import AppKit
 import Foundation
 
-/// **Dynamo Notification API** — the single supported way to post alerts into
-/// the notch Peek (and to receive mirrored system notifications).
+/// **Public post API** for alerts — everything is handed to
+/// `DynamoNotificationRouter`, which owns policy and delivers into the Peek hub.
 ///
-/// ### Sources
+/// ### Sources (all routed by Dynamo)
 /// | Path | How |
 /// |------|-----|
-/// | Swift | `DynamoNotificationAPI.post(...)` |
-/// | URL | `dynamo://notify?title=…&subtitle=…&urgency=high` |
-/// | URL (alias) | `dynamo://peek?title=…` |
-/// | Distributed | `com.akshithkonda.Dynamo.notify` userInfo |
-/// | Distributed (legacy) | `com.akshithkonda.Dynamo.externalPeek` |
-/// | System apps | `SystemNotificationMirror` → this API |
-/// | Widgets | `onSneakPeek` / registry → PeekNotificationCenter |
+/// | Swift | `DynamoNotificationAPI.post(...)` → **Router** |
+/// | URL | `dynamo://notify?title=…` → Router |
+/// | Distributed | `com.akshithkonda.Dynamo.notify` → Router |
+/// | System apps | NC ingest → Router (source `.system`) |
+/// | Widgets / Focus | registry / FocusController → Router |
 ///
-/// Always **EQ-safe**: never touches system volume. Delivery is queued, coalesced,
-/// and presented by `PeekNotificationCenter`.
+/// Always **EQ-safe**: never touches system volume.
 @MainActor
 enum DynamoNotificationAPI {
     /// Preferred distributed notification name for external posters.
@@ -50,16 +47,28 @@ enum DynamoNotificationAPI {
 
     // MARK: - Post
 
-    /// Post any notification into the Peek queue.
+    /// Post any notification — Dynamo routes it into the Peek hub.
     static func post(_ payload: Payload) {
         let title = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         var p = payload
         p.title = title
-        PeekNotificationCenter.shared.deliver(
+        let source: DynamoNotificationRouter.Source = {
+            switch p.category.lowercased() {
+            case "text", "mail", "system": return .system
+            case "call": return .call
+            case "focus": return .focus
+            case "test": return .test
+            case "external": return .external
+            case "widget": return .widget
+            default: return .api
+            }
+        }()
+        DynamoNotificationRouter.shared.route(
             p.asPeek,
-            id: p.id ?? "api|\(p.category)|\(p.title)|\(p.subtitle)",
+            source: source,
             category: p.category,
+            id: p.id ?? "\(source.rawValue)|\(p.category)|\(p.title)|\(p.subtitle)",
             coalesce: p.coalesce
         )
     }

@@ -185,25 +185,41 @@ struct SettingsView: View {
 
             Divider()
 
-            Text("Notification Hub (Peek)")
+            Text("Dynamo Notification Router")
                 .font(.subheadline.weight(.semibold))
-            Text("Peek is Dynamo’s notification hub — not a second banner tray. Calendar, reminders, battery, media, Focus, and (optionally) Messages/FaceTime/Mail all land as notch Peeks and stay in the Hub tab inbox.")
+            Text("Dynamo routes every alert into the Peek hub — widgets, Focus, API/Shortcuts, and (optionally) Messages/FaceTime/Mail. Peek presents them; the Hub tab is the inbox. This is routing, not a passive system-banner mirror.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Toggle("Use Peek as the delivery hub", isOn: Binding(
+            Toggle("Dynamo is the router", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.isEnabled },
+                set: { DynamoNotificationRouter.shared.isEnabled = $0 }
+            ))
+            Toggle("Peek hub delivery", isOn: Binding(
                 get: { PeekNotificationCenter.shared.isPrimaryDelivery },
                 set: { PeekNotificationCenter.shared.isPrimaryDelivery = $0 }
             ))
-            Toggle("Route system apps into the hub", isOn: Binding(
-                get: { mirror.isEnabled },
-                set: { mirror.isEnabled = $0 }
+            Toggle("Route widgets", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeWidgets },
+                set: { DynamoNotificationRouter.shared.routeWidgets = $0 }
+            ))
+            Toggle("Route Focus", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeFocus },
+                set: { DynamoNotificationRouter.shared.routeFocus = $0 }
+            ))
+            Toggle("Route system apps (Messages, FaceTime, Mail…)", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeSystemApps },
+                set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
+            ))
+            Toggle("Route external API / Shortcuts", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.routeExternal },
+                set: { DynamoNotificationRouter.shared.routeExternal = $0 }
             ))
             Toggle("Prioritize calls & texts (critical Peek)", isOn: Binding(
                 get: { mirror.prioritizeCallsAndTexts },
                 set: { mirror.prioritizeCallsAndTexts = $0 }
             ))
-            .disabled(!mirror.isEnabled)
+            .disabled(!DynamoNotificationRouter.shared.routeSystemApps)
             Toggle("Peek haptics", isOn: Binding(
                 get: { PeekNotificationCenter.shared.hapticsEnabled },
                 set: { PeekNotificationCenter.shared.hapticsEnabled = $0 }
@@ -212,16 +228,20 @@ struct SettingsView: View {
                 get: { PeekNotificationCenter.shared.criticalSoundEnabled },
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
-            Text("Routing system apps needs Full Disk Access (Notification Center store). macOS may still show its own banners — Dynamo cannot legally hide them. For Peek-only, silence those apps in Focus / Notifications.")
+            Text("System-app routing needs Full Disk Access. macOS may still show banners — Dynamo cannot hide them; use Focus for Peek-only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(DynamoNotificationRouter.shared.lastStatus)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
             Text(mirror.lastStatus)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(mirror.accessDenied ? Color.orange : Color.secondary)
                 .lineLimit(2)
-            if !mirror.lastMirroredApp.isEmpty {
-                Text("Last routed: \(mirror.lastMirroredApp) · \(mirror.mirroredCount) into hub")
+            if DynamoNotificationRouter.shared.routedCount > 0 {
+                Text("Routed \(DynamoNotificationRouter.shared.routedCount) · last: \(DynamoNotificationRouter.shared.lastRoutedTitle)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -234,7 +254,7 @@ struct SettingsView: View {
                         }
                     }
                     .controlSize(.small)
-                    Button("Retry route") {
+                    Button("Retry ingest") {
                         mirror.stop()
                         mirror.start()
                     }
