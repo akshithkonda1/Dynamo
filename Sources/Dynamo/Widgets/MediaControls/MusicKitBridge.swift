@@ -77,6 +77,17 @@ final class MusicKitBridge: ObservableObject {
         guard enrichmentInFlight == nil || enrichmentInFlight == trackKey else { return }
         currentEnrichment = enrichment
         onEnrichmentAvailable?()
+
+        // Resolve Album Motion (animated cover) when Apple Music provides it.
+        Task {
+            await MusicMotionArtworkLoader.shared.resolve(
+                catalogSongID: song.id.rawValue,
+                title: title,
+                artist: artist,
+                album: album,
+                trackKey: trackKey
+            )
+        }
     }
 
     // MARK: - Queue

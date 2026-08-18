@@ -800,41 +800,14 @@ private struct ExpandedMediaView: View {
 
     @ViewBuilder
     private func artwork(size: CGFloat) -> some View {
-        let corner: CGFloat = size >= 120 ? 18 : 16
-        PlayingArtRing(isPlaying: plugin.info.isPlaying, size: size, cornerRadius: corner) {
-            Group {
-                if let data = plugin.info.artworkData, let image = NSImage(data: data) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(1, contentMode: .fill)
-                } else {
-                    ZStack {
-                        LinearGradient(
-                            colors: [NotchTheme.chipFillActive, NotchTheme.chipFill],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        Image(systemName: "music.note")
-                            .font(.system(size: size * 0.27, weight: .medium))
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    }
-                }
-            }
-            .frame(width: size, height: size)
-            .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(5)
-                    .background(Circle().fill(Color.black.opacity(0.45)))
-                    .padding(6)
-            }
-        }
-        .shadow(color: .black.opacity(0.32), radius: 10, y: 4)
-        .help("Open in \(playerAppName)")
-        .onTapGesture { plugin.openConnectedApp() }
+        AlbumCoverHost(
+            plugin: plugin,
+            size: size,
+            playerAppName: playerAppName
+        )
     }
+
+    // transport helpers continue below
 
     private func transportRow(
         playDiameter: CGFloat,
