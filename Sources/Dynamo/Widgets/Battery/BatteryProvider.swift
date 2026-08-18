@@ -49,25 +49,52 @@ final class IOKitBatteryProvider: BatteryProvider {
 
     private var timer: Timer?
     private var isStarted = false
+    /// IOKit callback when AC / battery sources change (plug / unplug).
+    private var powerSourceRunLoopSource: CFRunLoopSource?
 
     func start() {
         guard !isStarted else { return }
         isStarted = true
         refresh()
-        // 60s is enough for UI; history store may sample more carefully.
-        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+        // Snappy enough to catch plug / unplug for Peeks; history still de-dupes.
+        let t = Timer(timeInterval: 8, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+
+        // IOKit power-source changes (AC connect/disconnect) → immediate refresh.
+        if powerSourceRunLoopSource == nil {
+            let ctx = Unmanaged.passUnretained(self).toOpaque()
+            if let src = IOPSNotificationCreateRunLoopSource(
+                IOKitBatteryProvider.powerSourceChanged,
+                ctx
+            )?.takeRetainedValue() {
+                CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+                powerSourceRunLoopSource = src
+            }
+        }
+    }
+
+    /// C callback for `IOPSNotificationCreateRunLoopSource`.
+    private static let powerSourceChanged: IOPowerSourceCallbackType = { context in
+        guard let context else { return }
+        let provider = Unmanaged<IOKitBatteryProvider>.fromOpaque(context).takeUnretainedValue()
+        Task { @MainActor in
+            provider.refresh()
+        }
     }
 
     func stop() {
         isStarted = false
         timer?.invalidate()
         timer = nil
+        if let src = powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
+            powerSourceRunLoopSource = nil
+        }
     }
 
     /// Force a re-read (after Low Power Mode toggle, etc.).

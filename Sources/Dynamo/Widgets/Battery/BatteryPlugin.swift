@@ -60,40 +60,180 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
 
     /// Stages already announced (e.g. "p20", "p10", "p5") so we don't spam.
     private var notifiedBatteryStages: Set<String> = []
+    /// Last known AC / charge state — drives plug / unplug Peeks.
+    private var lastPluggedIn: Bool?
+    private var lastCharging: Bool?
+    private var lastFullyChargedPeekAt: Date = .distantPast
+    private var hasSeededPowerState = false
 
     private func handleSnapshot(_ value: BatterySnapshot) {
+        let previous = snapshot
         snapshot = value
         power.refresh()
         history.record(snapshot: value, isLowPowerMode: power.isLowPowerModeEnabled)
         power.considerAutoEnable(snapshot: value)
         recomputeInsight()
+        announcePowerTransitionPeeks(previous: previous)
         announceBatteryIfNeeded()
     }
 
+    /// Peek when the Mac is plugged in or unplugged — with remaining / to-full time.
+    private func announcePowerTransitionPeeks(previous: BatterySnapshot) {
+        guard snapshot.isPresent else { return }
+
+        // First reading only seeds state — avoid a Peek on every launch.
+        guard hasSeededPowerState else {
+            lastPluggedIn = snapshot.isPluggedIn
+            lastCharging = snapshot.isCharging
+            hasSeededPowerState = true
+            return
+        }
+
+        let wasPlugged = lastPluggedIn ?? snapshot.isPluggedIn
+        let wasCharging = lastCharging ?? snapshot.isCharging
+        let nowPlugged = snapshot.isPluggedIn
+        let nowCharging = snapshot.isCharging
+        lastPluggedIn = nowPlugged
+        lastCharging = nowCharging
+
+        let p = snapshot.percent
+
+        // Unplugged from AC → critical Peek with time remaining.
+        if wasPlugged, !nowPlugged {
+            let remaining = minutesRemainingText()
+            let subtitle: String
+            if let remaining {
+                subtitle = "\(p)% · \(remaining) left"
+            } else {
+                subtitle = "\(p)% · estimating runtime…"
+            }
+            let detail = power.isLowPowerModeEnabled
+                ? "On battery · Low Power on"
+                : "On battery"
+            DynamoNotificationRouter.shared.route(
+                title: p <= 20 ? "Unplugged · battery low" : "Unplugged",
+                subtitle: subtitle,
+                detail: detail,
+                systemImage: p <= 20 ? "battery.25" : "battery.100",
+                urgency: p <= 15 ? .critical : .high,
+                source: .widget,
+                category: "battery",
+                id: "battery|unplug|\(Int(Date().timeIntervalSince1970 / 30))"
+            )
+            return
+        }
+
+        // Plugged into AC / started charging → Peek with time to full.
+        if (!wasPlugged && nowPlugged) || (!wasCharging && nowCharging) {
+            if p >= 99, nowPlugged {
+                peekFullyChargedIfNeeded(force: true)
+                return
+            }
+            let toFull = minutesToFullText()
+            let subtitle: String
+            if let toFull {
+                subtitle = "\(p)% · \(toFull) to full"
+            } else if nowCharging {
+                subtitle = "\(p)% · calculating time to full…"
+            } else {
+                subtitle = "\(p)% · holding on AC"
+            }
+            DynamoNotificationRouter.shared.route(
+                title: nowCharging ? "Charging" : "Plugged in",
+                subtitle: subtitle,
+                detail: nowCharging ? "Power connected · charging" : "Power connected",
+                systemImage: "bolt.fill",
+                urgency: .high,
+                source: .widget,
+                category: "battery",
+                id: "battery|plug|\(Int(Date().timeIntervalSince1970 / 30))"
+            )
+            return
+        }
+
+        // Reached full while on AC.
+        if nowPlugged, p >= 99, (previous.percent < 99 || (!wasCharging && !nowCharging)) {
+            peekFullyChargedIfNeeded(force: previous.percent < 99)
+        }
+    }
+
+    private func peekFullyChargedIfNeeded(force: Bool) {
+        guard force || Date().timeIntervalSince(lastFullyChargedPeekAt) > 120 else { return }
+        lastFullyChargedPeekAt = Date()
+        DynamoNotificationRouter.shared.route(
+            title: "Fully charged",
+            subtitle: "\(max(snapshot.percent, 100))% · ready to unplug",
+            detail: "Battery full",
+            systemImage: "battery.100.bolt",
+            urgency: .high,
+            source: .widget,
+            category: "battery",
+            id: "battery|full|\(Int(Date().timeIntervalSince1970 / 60))"
+        )
+    }
+
+    private func minutesRemainingText() -> String? {
+        if let os = snapshot.timeRemainingMinutes, !snapshot.isCharging, os > 0, os < 6000 {
+            return formatDuration(os)
+        }
+        if let pred = insight.predictedRemainingMinutes { return formatDuration(pred) }
+        return nil
+    }
+
+    private func minutesToFullText() -> String? {
+        if snapshot.isCharging, let os = snapshot.timeRemainingMinutes, os > 0, os < 6000 {
+            return formatDuration(os)
+        }
+        if let pred = insight.predictedToFullMinutes { return formatDuration(pred) }
+        return nil
+    }
+
+    private func formatDuration(_ minutes: Int) -> String {
+        let h = minutes / 60
+        let m = minutes % 60
+        if h > 0 { return "~\(h)h \(m)m" }
+        return "~\(m)m"
+    }
+
     private func announceBatteryIfNeeded() {
-        guard snapshot.isPresent, !snapshot.isCharging else {
-            if snapshot.isCharging { notifiedBatteryStages.removeAll() }
+        guard snapshot.isPresent, !snapshot.isCharging, !snapshot.isPluggedIn else {
+            if snapshot.isCharging || snapshot.isPluggedIn { notifiedBatteryStages.removeAll() }
             return
         }
         let p = snapshot.percent
+        // Peek alerts at ≤10% (critical) and ≤5% (re-alert). Red UI starts at 20%.
         let stages: [(Int, String, NotchSneakPeekUrgency)] = [
             (5, "p5", .critical),
-            (10, "p10", .critical),
-            (15, "p15", .high),
-            (20, "p20", .high)
+            (10, "p10", .critical)
         ]
         // Clear stages once charge recovers above their threshold (re-arm alerts).
         for (threshold, key, _) in stages where p > threshold {
             notifiedBatteryStages.remove(key)
         }
+        // Drop legacy 15/20 stage keys if they linger from older builds.
+        if p > 20 {
+            notifiedBatteryStages.remove("p15")
+            notifiedBatteryStages.remove("p20")
+        }
         for (threshold, key, urgency) in stages {
             guard p <= threshold, !notifiedBatteryStages.contains(key) else { continue }
             notifiedBatteryStages.insert(key)
-            DynamoNotificationAPI.post(
-                title: p <= 10 ? "Battery critically low" : "Battery low",
-                subtitle: "\(p)% remaining" + (power.isLowPowerModeEnabled ? " · Low Power on" : ""),
+            let remaining = minutesRemainingText()
+            let subtitle: String
+            if let remaining {
+                subtitle = "\(p)% · \(remaining) left"
+                    + (power.isLowPowerModeEnabled ? " · Low Power on" : "")
+            } else {
+                subtitle = "\(p)% remaining"
+                    + (power.isLowPowerModeEnabled ? " · Low Power on" : "")
+            }
+            DynamoNotificationRouter.shared.route(
+                title: p <= 5 ? "Battery critically low" : "Battery at 10%",
+                subtitle: subtitle,
+                detail: "On battery · plug in soon",
                 systemImage: "battery.0",
                 urgency: urgency,
+                source: .widget,
                 category: "battery",
                 id: "battery|\(key)"
             )
@@ -143,10 +283,9 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     }
 
     var ambientPriority: Int {
+        if snapshot.isPresent, snapshot.percent <= 10 { return 92 }
+        if snapshot.isPresent, snapshot.percent <= 20 { return 78 }
         if power.isLowPowerModeEnabled { return 65 }
-        if snapshot.isPresent, snapshot.percent <= 10 { return 90 }
-        if snapshot.isPresent, snapshot.percent <= 15 { return 80 }
-        if snapshot.isPresent, snapshot.percent <= 20 { return 70 }
         return 10
     }
 
@@ -212,11 +351,10 @@ private struct AmbientBatteryView: View {
     }
 
     private var tint: Color {
+        // Red at ≤20%; Low Power → amber; otherwise green (healthy / charging).
+        if snapshot.percent <= 20 { return NotchTheme.negative }
         if lowPower { return NotchTheme.caution }
-        if snapshot.isCharging { return NotchTheme.positive }
-        if snapshot.percent <= 15 { return NotchTheme.negative }
-        if snapshot.percent <= 20 { return NotchTheme.caution }
-        return NotchTheme.textSecondary
+        return NotchTheme.positive
     }
 }
 
@@ -270,7 +408,7 @@ private struct ExpandedBatteryView: View {
     private var hardwareHealth: Int? { snapshot.hardwareHealthPercent }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Battery")
                     .font(NotchTheme.section)
@@ -279,14 +417,16 @@ private struct ExpandedBatteryView: View {
                     .tracking(0.7)
                 Spacer(minLength: 0)
                 if snapshot.isPresent {
-                    if power.isLowPowerModeEnabled {
+                    if snapshot.percent <= 20, !snapshot.isCharging {
+                        NotchStatusChip(text: snapshot.percent <= 10 ? "Critical" : "Low", kind: .danger)
+                    } else if power.isLowPowerModeEnabled {
                         NotchStatusChip(text: "Low Power", kind: .soon)
                     } else if snapshot.isCharging {
                         NotchStatusChip(text: "Charging", kind: .success)
                     } else if snapshot.isPluggedIn {
                         NotchStatusChip(text: "Plugged in", kind: .now)
                     } else {
-                        NotchStatusChip(text: "On battery", kind: .neutral)
+                        NotchStatusChip(text: "On battery", kind: .success)
                     }
                 }
             }
@@ -311,8 +451,8 @@ private struct ExpandedBatteryView: View {
                 if hasAnyMetric {
                     LazyVGrid(
                         columns: [
-                            GridItem(.flexible(), spacing: 8),
-                            GridItem(.flexible(), spacing: 8)
+                            GridItem(.flexible(), spacing: 6),
+                            GridItem(.flexible(), spacing: 6)
                         ],
                         spacing: 6
                     ) {
@@ -396,11 +536,11 @@ private struct ExpandedBatteryView: View {
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 16) {
-                // Futuristic ring + glyph
+                // Ring + glyph — sized to match peer tabs (268pt content).
                 ZStack {
                     Circle()
-                        .stroke(NotchTheme.chipFill, lineWidth: 5)
-                        .frame(width: 72, height: 72)
+                        .stroke(NotchTheme.chipFill, lineWidth: 4)
+                        .frame(width: 56, height: 56)
                     Circle()
                         .trim(from: 0, to: CGFloat(snapshot.percent) / 100)
                         .stroke(
@@ -413,22 +553,22 @@ private struct ExpandedBatteryView: View {
                                 ],
                                 center: .center
                             ),
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
                         )
-                        .frame(width: 72, height: 72)
+                        .frame(width: 56, height: 56)
                         .rotationEffect(.degrees(-90))
                         .animation(.spring(response: 0.55, dampingFraction: 0.8), value: snapshot.percent)
-                        .shadow(color: barColor.opacity(0.45), radius: snapshot.isCharging ? 8 : 3)
+                        .shadow(color: barColor.opacity(0.4), radius: snapshot.isCharging ? 6 : 2)
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [barColor.opacity(0.18), Color.clear],
+                                colors: [barColor.opacity(0.16), Color.clear],
                                 center: .center,
                                 startRadius: 2,
-                                endRadius: 34
+                                endRadius: 26
                             )
                         )
-                        .frame(width: 64, height: 64)
+                        .frame(width: 48, height: 48)
                     BatteryHeroGlyph(
                         percent: snapshot.percent,
                         tint: barColor,
@@ -437,12 +577,12 @@ private struct ExpandedBatteryView: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\(snapshot.percent)%")
-                            .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(barColor)
-                            .shadow(color: barColor.opacity(0.35), radius: 8)
+                            .shadow(color: barColor.opacity(0.3), radius: 6)
                             .contentTransition(.numericText())
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: snapshot.percent)
                         if snapshot.isCharging {
@@ -511,55 +651,55 @@ private struct ExpandedBatteryView: View {
                     }
                 }
             }
-            .frame(height: 9)
+            .frame(height: 7)
             .clipShape(Capsule())
         }
-        .padding(14)
+        .padding(10)
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                     .fill(.ultraThinMaterial)
                     .environment(\.colorScheme, .dark)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
-                                barColor.opacity(snapshot.isCharging ? 0.22 : 0.12),
-                                Color.black.opacity(0.25),
+                                barColor.opacity(snapshot.isCharging ? 0.18 : (snapshot.percent <= 20 ? 0.16 : 0.10)),
+                                Color.black.opacity(0.2),
                                 Color.clear
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.22),
-                                barColor.opacity(0.45),
-                                Color.white.opacity(0.06)
+                                Color.white.opacity(0.18),
+                                barColor.opacity(0.4),
+                                Color.white.opacity(0.05)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 0.8
+                        lineWidth: 0.6
                     )
             }
-            .shadow(color: barColor.opacity(0.18), radius: 16, y: 4)
+            .shadow(color: barColor.opacity(0.14), radius: 10, y: 3)
         }
     }
 
     /// Prominent remaining / to-full time.
     private var timeCallout: some View {
         let info = timeInfo
-        return HStack(spacing: 12) {
+        return HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(info.tint.opacity(0.16))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 30, height: 30)
                 Image(systemName: info.symbol)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(info.tint)
                     .scaleEffect(snapshot.isCharging && chargePulse ? 1.1 : 1.0)
                     .animation(
@@ -569,14 +709,14 @@ private struct ExpandedBatteryView: View {
                         value: chargePulse
                     )
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(info.title)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(NotchTheme.textQuaternary)
                     .textCase(.uppercase)
                     .tracking(0.4)
                 Text(info.value)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(NotchTheme.textPrimary)
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.4, dampingFraction: 0.85), value: info.value)
@@ -589,13 +729,13 @@ private struct ExpandedBatteryView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                 .fill(info.tint.opacity(0.08))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                         .strokeBorder(info.tint.opacity(0.18), lineWidth: 0.5)
                 )
         )
@@ -768,7 +908,9 @@ private struct ExpandedBatteryView: View {
                 value: formatDuration(mins),
                 subtitle: power.isLowPowerModeEnabled ? "Low Power Mode on" : "On battery",
                 symbol: "clock.fill",
-                tint: snapshot.percent <= 20 ? NotchTheme.caution : NotchTheme.calmGlow
+                tint: snapshot.percent <= 20
+                    ? NotchTheme.negative
+                    : (power.isLowPowerModeEnabled ? NotchTheme.caution : NotchTheme.positive)
             )
         }
         return TimeInfo(
@@ -776,7 +918,7 @@ private struct ExpandedBatteryView: View {
             value: "Calculating…",
             subtitle: "Estimating from recent drain",
             symbol: "clock",
-            tint: NotchTheme.textTertiary
+            tint: snapshot.percent <= 20 ? NotchTheme.negative : NotchTheme.textTertiary
         )
     }
 
@@ -829,12 +971,11 @@ private struct ExpandedBatteryView: View {
         return nil
     }
 
+    /// Green when healthy / not Low Power; amber in Low Power; red at ≤20%.
     private var barColor: Color {
+        if snapshot.percent <= 20 { return NotchTheme.negative }
         if power.isLowPowerModeEnabled { return NotchTheme.caution }
-        if snapshot.isCharging { return NotchTheme.positive }
-        if snapshot.percent <= 15 { return NotchTheme.negative }
-        if snapshot.percent <= 25 { return NotchTheme.caution }
-        return NotchTheme.textPrimary
+        return NotchTheme.positive
     }
 
     private var healthColor: Color {
@@ -858,10 +999,10 @@ private struct BatteryHeroGlyph: View {
         ZStack {
             HStack(spacing: 2) {
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(tint.opacity(0.5), lineWidth: 1.6)
-                        .frame(width: 42, height: 24)
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(tint.opacity(0.5), lineWidth: 1.4)
+                        .frame(width: 34, height: 18)
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [tint, tint.opacity(0.72)],
@@ -870,21 +1011,21 @@ private struct BatteryHeroGlyph: View {
                             )
                         )
                         .frame(
-                            width: max(4, 32 * CGFloat(min(100, max(0, percent))) / 100),
-                            height: 14
+                            width: max(3, 24 * CGFloat(min(100, max(0, percent))) / 100),
+                            height: 10
                         )
                         .padding(.leading, 5)
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: percent)
                 }
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                     .fill(tint.opacity(0.5))
-                    .frame(width: 3.5, height: 10)
+                    .frame(width: 3, height: 8)
             }
             if charging {
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(Color.white.opacity(0.95))
-                    .shadow(color: tint.opacity(0.8), radius: 3)
+                    .shadow(color: tint.opacity(0.8), radius: 2)
                     .offset(x: -2)
                     .scaleEffect(pulse ? 1.12 : 1.0)
                     .animation(
@@ -893,7 +1034,7 @@ private struct BatteryHeroGlyph: View {
                     )
             }
         }
-        .frame(width: 52, height: 32)
+        .frame(width: 42, height: 24)
         .accessibilityHidden(true)
     }
 }
