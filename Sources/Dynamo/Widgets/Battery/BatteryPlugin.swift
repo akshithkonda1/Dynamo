@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @MainActor
@@ -16,6 +17,7 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     private let history = BatteryHistoryStore.shared
     private let power = BatteryPowerMode.shared
     private var powerCancellable: Any?
+    private var powerObservers = Set<AnyCancellable>()
 
     init(provider: BatteryProvider? = nil) {
         let resolved = provider ?? IOKitBatteryProvider()
@@ -35,10 +37,20 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.power.refresh()
-                self?.recomputeInsight()
+                guard let self else { return }
+                self.power.refresh()
+                self.recomputeInsight()
+                // Force ambient + expanded tint refresh when Low Power flips.
+                self.objectWillChange.send()
             }
         }
+        // Also react when Dynamo toggles Low Power itself.
+        power.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &powerObservers)
     }
 
     func stop() {
@@ -47,6 +59,21 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
             NotificationCenter.default.removeObserver(powerCancellable)
             self.powerCancellable = nil
         }
+        powerObservers.removeAll()
+    }
+
+    /// Live tint for UI: red ≤20%, amber in Low Power, otherwise green.
+    /// Updates automatically as percent / power mode / charge state change.
+    static func tint(
+        percent: Int,
+        lowPower: Bool,
+        charging: Bool
+    ) -> Color {
+        if percent <= 20 { return NotchTheme.negative }
+        if lowPower { return NotchTheme.caution }
+        // Healthy on battery, charging, or plugged in → green.
+        _ = charging
+        return NotchTheme.positive
     }
 
     func expandedView() -> AnyView {
@@ -290,16 +317,26 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     }
 
     func ambientView() -> AnyView {
-        AnyView(AmbientBatteryView(snapshot: snapshot, lowPower: power.isLowPowerModeEnabled))
+        AnyView(AmbientBatteryView(plugin: self))
     }
 }
 
 // MARK: - Ambient
 
 private struct AmbientBatteryView: View {
-    let snapshot: BatterySnapshot
-    var lowPower: Bool = false
+    @ObservedObject var plugin: BatteryPlugin
+    @ObservedObject private var power = BatteryPowerMode.shared
     @State private var pulse = false
+
+    private var snapshot: BatterySnapshot { plugin.snapshot }
+
+    private var tint: Color {
+        BatteryPlugin.tint(
+            percent: snapshot.percent,
+            lowPower: power.isLowPowerModeEnabled,
+            charging: snapshot.isCharging
+        )
+    }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -314,7 +351,8 @@ private struct AmbientBatteryView: View {
             Text("\(snapshot.percent)%")
                 .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
-            if lowPower {
+                .animation(.easeInOut(duration: 0.35), value: tintDescription)
+            if power.isLowPowerModeEnabled {
                 Text("LPM")
                     .font(NotchTheme.micro.weight(.bold))
                     .foregroundStyle(NotchTheme.caution)
@@ -334,10 +372,19 @@ private struct AmbientBatteryView: View {
         }
         .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.4), value: snapshot.percent)
+        .animation(.easeInOut(duration: 0.4), value: power.isLowPowerModeEnabled)
         .onAppear { pulse = snapshot.isCharging }
         .onChange(of: snapshot.isCharging) { charging in
             pulse = charging
         }
+    }
+
+    /// Stable identity for color animation (Color itself isn’t Equatable in all SDKs).
+    private var tintDescription: String {
+        if snapshot.percent <= 20 { return "red" }
+        if power.isLowPowerModeEnabled { return "amber" }
+        return "green"
     }
 
     private var ambientTimeLabel: String? {
@@ -348,13 +395,6 @@ private struct AmbientBatteryView: View {
         if snapshot.isCharging { return "\(dur) full" }
         if !snapshot.isPluggedIn { return dur }
         return nil
-    }
-
-    private var tint: Color {
-        // Red at ≤20%; Low Power → amber; otherwise green (healthy / charging).
-        if snapshot.percent <= 20 { return NotchTheme.negative }
-        if lowPower { return NotchTheme.caution }
-        return NotchTheme.positive
     }
 }
 
@@ -508,6 +548,9 @@ private struct ExpandedBatteryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.4), value: snapshot.percent)
+        .animation(.easeInOut(duration: 0.4), value: power.isLowPowerModeEnabled)
+        .animation(.easeInOut(duration: 0.35), value: snapshot.isCharging)
         .onAppear {
             plugin.refreshNow()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
@@ -528,6 +571,12 @@ private struct ExpandedBatteryView: View {
                     shimmerPhase = 1
                 }
             }
+        }
+        .onChange(of: snapshot.percent) { _ in
+            // Percent crossings (e.g. 21→20) auto-flip green→red.
+        }
+        .onChange(of: power.isLowPowerModeEnabled) { _ in
+            // Low Power on/off auto-flips green↔amber.
         }
     }
 
@@ -971,11 +1020,13 @@ private struct ExpandedBatteryView: View {
         return nil
     }
 
-    /// Green when healthy / not Low Power; amber in Low Power; red at ≤20%.
+    /// Auto tint: red ≤20% · amber Low Power · otherwise green.
     private var barColor: Color {
-        if snapshot.percent <= 20 { return NotchTheme.negative }
-        if power.isLowPowerModeEnabled { return NotchTheme.caution }
-        return NotchTheme.positive
+        BatteryPlugin.tint(
+            percent: snapshot.percent,
+            lowPower: power.isLowPowerModeEnabled,
+            charging: snapshot.isCharging
+        )
     }
 
     private var healthColor: Color {
