@@ -84,11 +84,15 @@ final class NotesProvider: ObservableObject {
         end timeout
         """
         guard let out = Self.runAppleScript(script) else {
-            markUnavailable("Could not talk to Notes — allow Automation for Notes in System Settings → Privacy & Security → Automation.")
+            lastError = Self.friendlyError(from: "Could not talk to Notes")
+            isAvailable = false
+            lastStatus = "Unavailable"
             return
         }
-        if let err = Self.parseErrorPayload(out) {
-            markUnavailable(Self.friendlyError(err))
+        if out.hasPrefix("ERR|") {
+            lastError = Self.friendlyError(from: String(out.dropFirst(4)))
+            isAvailable = false
+            lastStatus = "Notes error"
             items = []
             return
         }
@@ -154,11 +158,14 @@ final class NotesProvider: ObservableObject {
         end timeout
         """
         guard let out = Self.runAppleScript(script) else {
-            markUnavailable("Could not create note — allow Automation for Notes in System Settings → Privacy & Security → Automation.")
+            lastError = Self.friendlyError(from: "Could not create note")
+            isAvailable = false
             return false
         }
-        if let err = Self.parseErrorPayload(out) {
-            markUnavailable(Self.friendlyError(err))
+        if out.hasPrefix("ERR") {
+            let raw = out.replacingOccurrences(of: "ERR\t", with: "").replacingOccurrences(of: "ERR|||", with: "")
+            lastError = Self.friendlyError(from: raw)
+            isAvailable = false
             return false
         }
         lastError = nil
@@ -183,15 +190,13 @@ final class NotesProvider: ObservableObject {
         end timeout
         """
         guard let out = Self.runAppleScript(script) else {
-            lastError = "Could not delete note — check Automation access for Notes"
-            objectWillChange.send()
-            onChangeWire?()
+            lastError = Self.friendlyError(from: "Could not delete note")
+            isAvailable = false
             return false
         }
-        if let err = Self.parseErrorPayload(out) {
-            lastError = Self.friendlyError(err)
-            objectWillChange.send()
-            onChangeWire?()
+        if out.hasPrefix("ERR|||") {
+            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
+            isAvailable = false
             return false
         }
         items.removeAll { $0.id == id }
@@ -242,13 +247,12 @@ final class NotesProvider: ObservableObject {
             end try
         end timeout
         """
-        guard let out = Self.runAppleScript(script) else {
-            markUnavailable("Could not connect to Notes — allow Automation for Dynamo → Notes.")
-            return
-        }
-        if let err = Self.parseErrorPayload(out) {
-            markUnavailable(Self.friendlyError(err))
-            return
+        if let out = Self.runAppleScript(script), out.hasPrefix("ERR|||") {
+            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
+            isAvailable = false
+        } else {
+            isAvailable = true
+            lastError = nil
         }
         isAvailable = true
         lastError = nil
@@ -256,48 +260,16 @@ final class NotesProvider: ObservableObject {
         refresh()
     }
 
-    // MARK: - Helpers
-
-    private func markUnavailable(_ message: String) {
-        lastError = message
-        isAvailable = false
-        lastStatus = "Unavailable"
-        objectWillChange.send()
-        onChangeWire?()
-    }
-
-    /// Parses `ERR|…` / `ERR|||…` payloads from script or NSAppleScript failures.
-    private static func parseErrorPayload(_ out: String) -> String? {
-        if out.hasPrefix("ERR|||") {
-            return String(out.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+    /// Turns a raw AppleScript/AppleEvent error into an actionable sentence
+    /// instead of surfacing a bare error code like "-1743:Not authorized…".
+    private static func friendlyError(from raw: String) -> String {
+        if raw.contains("-1743") {
+            return "Notes access isn't allowed yet — open System Settings → Privacy & Security → Automation and turn on Notes for Dynamo."
         }
-        if out.hasPrefix("ERR|") {
-            return String(out.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+        if raw.contains("-600") || raw.contains("-609") {
+            return "Notes isn't responding — open the Notes app once, then try again."
         }
-        if out.hasPrefix("ERR") {
-            return String(out.dropFirst(3))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "|\t "))
-        }
-        return nil
-    }
-
-    private static func friendlyError(_ raw: String) -> String {
-        let lower = raw.lowercased()
-        // -1743 / not authorized
-        if lower.contains("-1743")
-            || lower.contains("not authorized")
-            || lower.contains("not allowed")
-            || lower.contains("user cancelled")
-            || lower.contains("user canceled") {
-            return "Automation blocked — enable Dynamo → Notes in System Settings → Privacy & Security → Automation."
-        }
-        if lower.contains("-1712") || lower.contains("timed out") {
-            return "Notes timed out — open the Notes app, then tap Connect Notes again."
-        }
-        if lower.contains("-600") || lower.contains("application isn’t running") {
-            return "Notes isn’t responding — open Notes, then try Connect again."
-        }
-        return raw
+        return "Couldn't reach Notes (\(raw))."
     }
 
     private static func runAppleScript(_ source: String) -> String? {

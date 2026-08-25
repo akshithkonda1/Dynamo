@@ -19,6 +19,7 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
     case notificationMirror
     case automationMusic
     case automationSpotify
+    case automationNotes
 
     var id: String { rawValue }
 
@@ -34,6 +35,7 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .notificationMirror: return "Notification Center (mirror)"
         case .automationMusic: return "Control Music"
         case .automationSpotify: return "Control Spotify"
+        case .automationNotes: return "Control Notes"
         }
     }
 
@@ -60,6 +62,8 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
             return "Play/pause, skip, cover art, playlists, Amplify EQ"
         case .automationSpotify:
             return "Play/pause, skip, cover art"
+        case .automationNotes:
+            return "Checklist Notes tab: create, list, open, delete notes in the Dynamo folder"
         }
     }
 
@@ -85,6 +89,7 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .notificationMirror: return "bell.badge"
         case .automationMusic: return "music.note"
         case .automationSpotify: return "music.note.list"
+        case .automationNotes: return "note.text"
         }
     }
 }
@@ -143,6 +148,7 @@ final class PermissionsStore: ObservableObject {
         update(.notificationMirror, to: Self.probeNotificationMirror())
         update(.automationMusic, to: Self.probeAutomation(bundleID: "com.apple.Music"))
         update(.automationSpotify, to: Self.probeAutomation(bundleID: "com.spotify.client"))
+        update(.automationNotes, to: Self.probeAutomation(bundleID: "com.apple.Notes"))
         persist()
         NotificationCenter.default.post(name: .dynamoPermissionsDidRefresh, object: nil)
     }
@@ -186,7 +192,7 @@ final class PermissionsStore: ObservableObject {
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
             ]
-        case .automationMusic, .automationSpotify:
+        case .automationMusic, .automationSpotify, .automationNotes:
             urls = [
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
