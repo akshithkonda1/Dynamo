@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding {
+final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding, WidgetSettingsProviding {
     let id = "sports"
     let displayName = "Sports"
     let systemImage = "sportscourt.fill"
@@ -12,7 +12,10 @@ final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvi
 
     private let store = SportsStore.shared
 
-    var isAmbientActive: Bool { store.liveFollowed != nil || store.nextFollowedScheduled != nil }
+    var isAmbientActive: Bool {
+        guard store.liveAmbientEnabled else { return false }
+        return store.liveFollowed != nil || store.nextFollowedScheduled != nil
+    }
     var ambientPriority: Int { store.liveFollowed != nil ? 55 : 22 }
 
     func start() {
@@ -32,6 +35,10 @@ final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvi
 
     func ambientView() -> AnyView {
         AnyView(AmbientSportsView(store: store))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(SportsSettingsView(store: store))
     }
 }
 
@@ -121,6 +128,7 @@ private struct ExpandedSportsView: View {
             footerMeta
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
     }
 
     private var header: some View {
@@ -261,8 +269,9 @@ private struct ExpandedSportsView: View {
                 .font(NotchTheme.micro.weight(.semibold))
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .padding(.top, 2)
-            ForEach(events) { event in
+            ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
                 eventRow(event)
+                    .notchAppear(delay: Double(min(index, 8)) * 0.028)
             }
         }
     }
@@ -455,5 +464,27 @@ private struct ExpandedSportsView: View {
             .font(.system(size: 8, weight: .bold, design: .rounded))
             .foregroundStyle(color)
             .frame(width: 36, alignment: .leading)
+    }
+}
+
+// MARK: - Settings
+
+private struct SportsSettingsView: View {
+    @ObservedObject var store: SportsStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Live scores in ambient", isOn: $store.liveAmbientEnabled)
+            Stepper(
+                "Refresh every \(store.refreshIntervalSeconds)s",
+                value: $store.refreshIntervalSeconds,
+                in: 15...120,
+                step: 5
+            )
+            Text("Live games still poll a bit faster. Longer intervals save battery when idle.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

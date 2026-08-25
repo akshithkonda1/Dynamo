@@ -25,6 +25,56 @@ struct WebcamDeviceOption: Identifiable, Equatable {
     }
 }
 
+/// Target capture height (device may negotiate down if unsupported).
+enum WebcamResolutionTarget: String, CaseIterable, Identifiable {
+    case auto
+    case p720
+    case p1080
+    case p1440
+    case p2160 // 4K UHD
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Auto"
+        case .p720: return "720p"
+        case .p1080: return "1080p"
+        case .p1440: return "1440p"
+        case .p2160: return "4K"
+        }
+    }
+
+    /// Preferred minimum height in pixels; `nil` = let session choose.
+    var targetHeight: Int? {
+        switch self {
+        case .auto: return nil
+        case .p720: return 720
+        case .p1080: return 1080
+        case .p1440: return 1440
+        case .p2160: return 2160
+        }
+    }
+}
+
+enum WebcamFPSTarget: Int, CaseIterable, Identifiable {
+    case auto = 0
+    case fps24 = 24
+    case fps30 = 30
+    case fps60 = 60
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Auto"
+        case .fps24: return "24"
+        case .fps30: return "30"
+        case .fps60: return "60"
+        }
+    }
+}
+
 /// Owns the `AVCaptureSession` for the webcam mirror widget.
 ///
 /// **Continuity Camera:** discovers iPhone cameras via `.continuityCamera`
@@ -55,10 +105,25 @@ final class WebcamCaptureController: ObservableObject {
 
     @Published var zoomFactor: CGFloat = 1.0 {
         didSet {
-            let clamped = min(2.0, max(1.0, zoomFactor))
+            let clamped = min(maxZoomFactor, max(1.0, zoomFactor))
             if clamped != zoomFactor {
                 zoomFactor = clamped
+                return
             }
+            UserDefaults.standard.set(Double(zoomFactor), forKey: Self.zoomKey)
+        }
+    }
+
+    /// Upper zoom bound — mutable from settings / live UI.
+    @Published var maxZoomFactor: CGFloat = 3.0 {
+        didSet {
+            let clamped = min(6.0, max(1.5, maxZoomFactor))
+            if clamped != maxZoomFactor {
+                maxZoomFactor = clamped
+                return
+            }
+            UserDefaults.standard.set(Double(maxZoomFactor), forKey: Self.maxZoomKey)
+            if zoomFactor > maxZoomFactor { zoomFactor = maxZoomFactor }
         }
     }
 
@@ -68,6 +133,53 @@ final class WebcamCaptureController: ObservableObject {
             NotificationCenter.default.post(name: .dynamoWebcamMirrorDidChange, object: isMirrored)
         }
     }
+
+    /// Flip upside-down (in addition to selfie mirror).
+    @Published var isFlippedVertical: Bool {
+        didSet { UserDefaults.standard.set(isFlippedVertical, forKey: Self.flipVKey) }
+    }
+
+    /// 0…3 → 0° / 90° / 180° / 270°.
+    @Published var rotationQuarterTurns: Int {
+        didSet {
+            let r = ((rotationQuarterTurns % 4) + 4) % 4
+            if r != rotationQuarterTurns {
+                rotationQuarterTurns = r
+                return
+            }
+            UserDefaults.standard.set(rotationQuarterTurns, forKey: Self.rotationKey)
+        }
+    }
+
+    /// When true, quality didSets only persist — used while clamping unsupported picks.
+    private var suppressFormatReapply = false
+
+    @Published var resolutionTarget: WebcamResolutionTarget = .auto {
+        didSet {
+            guard resolutionTarget != oldValue else { return }
+            UserDefaults.standard.set(resolutionTarget.rawValue, forKey: Self.resolutionKey)
+            guard !suppressFormatReapply else { return }
+            reapplyActiveFormat(restartIfNeeded: isActiveTab || isRunning)
+        }
+    }
+
+    @Published var fpsTarget: WebcamFPSTarget = .auto {
+        didSet {
+            guard fpsTarget != oldValue else { return }
+            UserDefaults.standard.set(fpsTarget.rawValue, forKey: Self.fpsKey)
+            guard !suppressFormatReapply else { return }
+            reapplyActiveFormat(restartIfNeeded: isActiveTab || isRunning)
+        }
+    }
+
+    /// Resolutions this camera can actually deliver (subset of targets).
+    @Published private(set) var supportedResolutions: [WebcamResolutionTarget] = [.auto]
+    /// Frame rates available for the current resolution target.
+    @Published private(set) var supportedFPS: [WebcamFPSTarget] = [.auto]
+
+    /// Center Stage (Continuity / Apple silicon cameras that support framing).
+    @Published private(set) var isCenterStageEnabled: Bool = AVCaptureDevice.isCenterStageEnabled
+    @Published private(set) var isCenterStageAvailable: Bool = false
 
     let session = AVCaptureSession()
     private var videoInput: AVCaptureDeviceInput?
@@ -85,10 +197,21 @@ final class WebcamCaptureController: ObservableObject {
     private var lastSystemPreferredID: String?
     /// True while Webcam tab is on-screen (soft-stop may still leave session warm).
     private var isActiveTab = false
+    /// Apply smart 4K/1080 default once we know the device’s formats.
+    private var pendingDefaultResolution = false
+    /// Avoid re-entrant didSet while syncing Center Stage from the system.
+    private var suppressCenterStageWrite = false
 
     private static let mirrorKey = "dynamo.webcam.isMirrored"
+    private static let flipVKey = "dynamo.webcam.flipVertical"
+    private static let rotationKey = "dynamo.webcam.rotationQuarterTurns"
+    private static let zoomKey = "dynamo.webcam.zoomFactor"
+    private static let maxZoomKey = "dynamo.webcam.maxZoomFactor"
     private static let deviceKey = "dynamo.webcam.deviceID"
     private static let followSystemKey = "dynamo.webcam.followSystemPreferred"
+    private static let resolutionKey = "dynamo.webcam.resolutionTarget"
+    private static let fpsKey = "dynamo.webcam.fpsTarget"
+    private static let centerStageKey = "dynamo.webcam.centerStageEnabled"
 
     init() {
         if UserDefaults.standard.object(forKey: Self.mirrorKey) == nil {
@@ -96,12 +219,36 @@ final class WebcamCaptureController: ObservableObject {
         } else {
             isMirrored = UserDefaults.standard.bool(forKey: Self.mirrorKey)
         }
+        isFlippedVertical = UserDefaults.standard.bool(forKey: Self.flipVKey)
+        rotationQuarterTurns = UserDefaults.standard.integer(forKey: Self.rotationKey)
+        if UserDefaults.standard.object(forKey: Self.maxZoomKey) != nil {
+            maxZoomFactor = CGFloat(UserDefaults.standard.double(forKey: Self.maxZoomKey))
+        }
+        if UserDefaults.standard.object(forKey: Self.zoomKey) != nil {
+            zoomFactor = CGFloat(UserDefaults.standard.double(forKey: Self.zoomKey))
+        }
         if UserDefaults.standard.object(forKey: Self.followSystemKey) == nil {
             followSystemPreferredCamera = true
         } else {
             followSystemPreferredCamera = UserDefaults.standard.bool(forKey: Self.followSystemKey)
         }
+        if let raw = UserDefaults.standard.string(forKey: Self.resolutionKey),
+           let parsed = WebcamResolutionTarget(rawValue: raw) {
+            resolutionTarget = parsed
+            pendingDefaultResolution = false
+        } else {
+            // Prefer 4K when the camera supports it (applied after capability scan).
+            resolutionTarget = .auto
+            pendingDefaultResolution = true
+        }
+        let storedFPS = UserDefaults.standard.integer(forKey: Self.fpsKey)
+        fpsTarget = WebcamFPSTarget(rawValue: storedFPS) ?? .auto
         selectedDeviceID = UserDefaults.standard.string(forKey: Self.deviceKey)
+
+        if UserDefaults.standard.object(forKey: Self.centerStageKey) != nil {
+            let want = UserDefaults.standard.bool(forKey: Self.centerStageKey)
+            applyCenterStageEnabled(want, reapplyFormat: false)
+        }
 
         switch PermissionsStore.shared.status(for: .camera) {
         case .granted: authState = .authorized
@@ -112,6 +259,7 @@ final class WebcamCaptureController: ObservableObject {
         refreshDevices()
         installDeviceObservers()
         lastSystemPreferredID = AVCaptureDevice.systemPreferredCamera?.uniqueID
+        syncCenterStageFromSystem()
     }
 
     deinit {
@@ -239,6 +387,8 @@ final class WebcamCaptureController: ObservableObject {
     // MARK: - Devices & Continuity
 
     func refreshDevices() {
+        // Keep quality menus in sync whenever the device list changes.
+        defer { refreshCaptureCapabilities() }
         let devices = Self.discoverDevices()
         availableDevices = devices.map { Self.option(for: $0) }
 
@@ -280,6 +430,13 @@ final class WebcamCaptureController: ObservableObject {
         zoomFactor = min(maxZ, max(1.0, factor))
     }
 
+    /// Toggle Center Stage (cooperative with Control Center). No-op when unavailable.
+    func setCenterStageEnabled(_ enabled: Bool) {
+        guard isCenterStageAvailable || enabled == false else { return }
+        applyCenterStageEnabled(enabled, reapplyFormat: true)
+        UserDefaults.standard.set(enabled, forKey: Self.centerStageKey)
+    }
+
     var captureResolution: CGSize? {
         guard let device = videoInput?.device else { return nil }
         let format = device.activeFormat
@@ -297,7 +454,16 @@ final class WebcamCaptureController: ObservableObject {
         return rate > 0 ? rate : nil
     }
 
-    var maxZoomFactor: CGFloat { 2.0 }
+    func rotateClockwise() {
+        rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+    }
+
+    func resetTransform() {
+        isMirrored = true
+        isFlippedVertical = false
+        rotationQuarterTurns = 0
+        zoomFactor = 1.0
+    }
 
     func toggleFreeze() {
         if isFrozen {
@@ -346,10 +512,44 @@ final class WebcamCaptureController: ObservableObject {
 
     private func pollSystemPreferredCamera() {
         refreshDevices()
+        syncCenterStageFromSystem()
         let currentID = AVCaptureDevice.systemPreferredCamera?.uniqueID
         guard currentID != lastSystemPreferredID else { return }
         lastSystemPreferredID = currentID
         handleSystemPreferredCameraChange()
+    }
+
+    private func syncCenterStageFromSystem() {
+        let systemOn = AVCaptureDevice.isCenterStageEnabled
+        if systemOn != isCenterStageEnabled {
+            suppressCenterStageWrite = true
+            isCenterStageEnabled = systemOn
+            suppressCenterStageWrite = false
+        }
+        refreshCenterStageAvailability()
+    }
+
+    private func refreshCenterStageAvailability() {
+        let device = videoInput?.device ?? Self.device(for: selectedDeviceID)
+        let available = device?.formats.contains(where: { $0.isCenterStageSupported }) ?? false
+        if available != isCenterStageAvailable {
+            isCenterStageAvailable = available
+        }
+    }
+
+    private func applyCenterStageEnabled(_ enabled: Bool, reapplyFormat: Bool) {
+        guard !suppressCenterStageWrite else {
+            isCenterStageEnabled = enabled
+            return
+        }
+        AVCaptureDevice.centerStageControlMode = .cooperative
+        if AVCaptureDevice.isCenterStageEnabled != enabled {
+            AVCaptureDevice.isCenterStageEnabled = enabled
+        }
+        isCenterStageEnabled = AVCaptureDevice.isCenterStageEnabled
+        if reapplyFormat {
+            reapplyActiveFormat(restartIfNeeded: isActiveTab || isRunning)
+        }
     }
 
     private func handleSystemPreferredCameraChange() {
@@ -510,7 +710,7 @@ final class WebcamCaptureController: ObservableObject {
         }
 
         session.beginConfiguration()
-        // Continuity Camera works best at .high; fall back gracefully.
+        // Balanced default; explicit quality targets lock `activeFormat` after commit.
         if session.canSetSessionPreset(.high) {
             session.sessionPreset = .high
         } else if session.canSetSessionPreset(.medium) {
@@ -530,6 +730,212 @@ final class WebcamCaptureController: ObservableObject {
         session.commitConfiguration()
         configured = videoInput != nil
         authState = videoInput != nil ? .authorized : .unavailable
+        if let videoInput {
+            refreshSupportedCaptureOptions(for: videoInput.device)
+            applyPreferredFormat(to: videoInput.device)
+        }
+    }
+
+    /// Re-lock activeFormat after the user changes resolution / FPS.
+    private func reapplyActiveFormat(restartIfNeeded: Bool) {
+        let device = videoInput?.device ?? Self.device(for: selectedDeviceID)
+        refreshSupportedCaptureOptions(for: device)
+        guard let device else { return }
+
+        nonisolated(unsafe) let session = self.session
+        sessionQueue.async { [weak self] in
+            let wasRunning = session.isRunning
+            if wasRunning { session.stopRunning() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyPreferredFormat(to: device)
+                if (restartIfNeeded || wasRunning), self.isActiveTab, self.authState == .authorized {
+                    self.startSessionRunning()
+                }
+            }
+        }
+    }
+
+    /// Always keeps Auto + every tier; unsupported tiers stay listed but `isResolutionSupported` gates UI.
+    func isResolutionSupported(_ target: WebcamResolutionTarget) -> Bool {
+        // Auto is always allowed.
+        if target == .auto { return true }
+        return supportedResolutions.contains(target)
+    }
+
+    func isFPSSupported(_ target: WebcamFPSTarget) -> Bool {
+        if target == .auto { return true }
+        return supportedFPS.contains(target)
+    }
+
+    /// Scan the current / preferred camera so quality chips populate before Start.
+    func refreshCaptureCapabilities() {
+        let device = videoInput?.device ?? Self.device(for: selectedDeviceID)
+        refreshSupportedCaptureOptions(for: device)
+    }
+
+    private func refreshSupportedCaptureOptions(for device: AVCaptureDevice?) {
+        guard let device else {
+            // Before a device is known, still show the full menu — Auto always works.
+            supportedResolutions = WebcamResolutionTarget.allCases
+            supportedFPS = WebcamFPSTarget.allCases
+            isCenterStageAvailable = false
+            return
+        }
+        var heights = Set<Int>()
+        var fpsCaps = Set<Int>()
+        for format in device.formats {
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let h = Int(dims.height)
+            guard h > 0 else { continue }
+            heights.insert(h)
+            for range in format.videoSupportedFrameRateRanges {
+                if range.maxFrameRate >= 23.5 { fpsCaps.insert(24) }
+                if range.maxFrameRate >= 29.5 { fpsCaps.insert(30) }
+                if range.maxFrameRate >= 59.0 { fpsCaps.insert(60) }
+            }
+        }
+        var resolutions: [WebcamResolutionTarget] = [.auto]
+        if heights.contains(where: { $0 >= 700 }) { resolutions.append(.p720) }
+        if heights.contains(where: { $0 >= 1000 }) { resolutions.append(.p1080) }
+        if heights.contains(where: { $0 >= 1360 }) { resolutions.append(.p1440) }
+        if heights.contains(where: { $0 >= 2000 }) { resolutions.append(.p2160) }
+        var seenRes = Set<WebcamResolutionTarget>()
+        supportedResolutions = resolutions.filter { seenRes.insert($0).inserted }
+
+        var fps: [WebcamFPSTarget] = [.auto]
+        if fpsCaps.contains(24) { fps.append(.fps24) }
+        if fpsCaps.contains(30) { fps.append(.fps30) }
+        if fpsCaps.contains(60) { fps.append(.fps60) }
+        supportedFPS = fps
+
+        isCenterStageAvailable = device.formats.contains(where: \.isCenterStageSupported)
+
+        // First launch (no saved resolution): prefer 4K → 1080p → Auto.
+        if pendingDefaultResolution {
+            pendingDefaultResolution = false
+            suppressFormatReapply = true
+            if supportedResolutions.contains(.p2160) {
+                resolutionTarget = .p2160
+            } else if supportedResolutions.contains(.p1080) {
+                resolutionTarget = .p1080
+            } else {
+                resolutionTarget = .auto
+            }
+            suppressFormatReapply = false
+        }
+
+        // Fall back to Auto if a saved pick isn’t possible on this camera.
+        let fixRes = resolutionTarget != .auto && !supportedResolutions.contains(resolutionTarget)
+        let fixFPS = fpsTarget != .auto && !supportedFPS.contains(fpsTarget)
+        if fixRes || fixFPS {
+            suppressFormatReapply = true
+            if fixRes { resolutionTarget = .auto }
+            if fixFPS { fpsTarget = .auto }
+            suppressFormatReapply = false
+        }
+    }
+
+    /// Auto = session/device defaults. Explicit targets lock the closest format.
+    /// When Center Stage is on, prefer formats that advertise `isCenterStageSupported`.
+    private func applyPreferredFormat(to device: AVCaptureDevice) {
+        let preferCenterStage = isCenterStageEnabled || AVCaptureDevice.isCenterStageEnabled
+        let targetH = resolutionTarget.targetHeight
+        let wantFPS = Double(fpsTarget.rawValue)
+
+        struct Candidate {
+            let format: AVCaptureDevice.Format
+            let height: Int
+            let width: Int
+            let maxFPS: Double
+            let centerStage: Bool
+        }
+
+        var candidates: [Candidate] = []
+        for format in device.formats {
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let h = Int(dims.height)
+            let w = Int(dims.width)
+            guard h > 0, w > 0 else { continue }
+            let maxFPS = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+            candidates.append(Candidate(
+                format: format,
+                height: h,
+                width: w,
+                maxFPS: maxFPS,
+                centerStage: format.isCenterStageSupported
+            ))
+        }
+        guard !candidates.isEmpty else { return }
+
+        // Auto + Auto with no Center Stage preference → leave session preset.
+        if resolutionTarget == .auto, fpsTarget == .auto, !preferCenterStage {
+            objectWillChange.send()
+            return
+        }
+
+        var pool = candidates
+        if preferCenterStage {
+            let cs = pool.filter(\.centerStage)
+            if !cs.isEmpty { pool = cs }
+        }
+        if let targetH {
+            let near = pool.filter { abs($0.height - targetH) <= 40 || $0.height >= targetH - 8 }
+            if !near.isEmpty { pool = near }
+        }
+        if wantFPS >= 24 {
+            let ok = pool.filter { $0.maxFPS + 0.5 >= wantFPS }
+            if !ok.isEmpty { pool = ok }
+        }
+
+        let chosen: Candidate = {
+            if let targetH {
+                return pool.min { a, b in
+                    let da = abs(a.height - targetH)
+                    let db = abs(b.height - targetH)
+                    if da != db { return da < db }
+                    if preferCenterStage, a.centerStage != b.centerStage {
+                        return a.centerStage && !b.centerStage
+                    }
+                    let arA = abs(Double(a.width) / Double(a.height) - 16.0 / 9.0)
+                    let arB = abs(Double(b.width) / Double(b.height) - 16.0 / 9.0)
+                    if abs(arA - arB) > 0.02 { return arA < arB }
+                    return a.maxFPS > b.maxFPS
+                }!
+            }
+            // Resolution Auto: prefer Center Stage–capable, then highest FPS/height.
+            return pool.max { a, b in
+                if preferCenterStage, a.centerStage != b.centerStage {
+                    return !a.centerStage && b.centerStage
+                }
+                if a.maxFPS != b.maxFPS { return a.maxFPS < b.maxFPS }
+                return a.height < b.height
+            }!
+        }()
+
+        let fpsToLock: Double? = {
+            guard wantFPS >= 24 else { return nil } // FPS Auto → don't force duration
+            return min(wantFPS, chosen.maxFPS)
+        }()
+
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = chosen.format
+            if let fpsToLock,
+               let range = chosen.format.videoSupportedFrameRateRanges.first(where: {
+                   $0.minFrameRate - 0.5 <= fpsToLock && fpsToLock <= $0.maxFrameRate + 0.5
+               }) {
+                let clamped = min(max(fpsToLock, range.minFrameRate), range.maxFrameRate)
+                let t = CMTime(value: 1, timescale: CMTimeScale(max(1, Int(clamped.rounded()))))
+                device.activeVideoMinFrameDuration = t
+                device.activeVideoMaxFrameDuration = t
+            }
+            device.unlockForConfiguration()
+            refreshCenterStageAvailability()
+            objectWillChange.send()
+        } catch {
+            // Busy / Continuity — keep current format.
+        }
     }
 
     // MARK: - Discovery

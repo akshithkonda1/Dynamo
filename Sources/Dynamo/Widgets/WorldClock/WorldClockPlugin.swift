@@ -203,13 +203,12 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
 
     func distanceLabel(for entry: WorldClockEntry) -> String? {
         guard sortMode == .nearest || sortMode == .farthest else { return nil }
-        if entry.kind == .currentLocation { return "0 km" }
+        if entry.kind == .currentLocation {
+            return MeasurementUnitsStore.shared.system == .metric ? "0 km" : "0 mi"
+        }
         let km = distanceKm(for: entry)
         if km >= 49_000 { return nil }
-        if km < 10 {
-            return String(format: "%.1f km", km)
-        }
-        return String(format: "%.0f km", km.rounded())
+        return MeasurementUnitsStore.shared.formatDistance(kilometers: km)
     }
 
     /// Origin for distance: live GPS if available, else first selected city with coords.
@@ -747,6 +746,8 @@ private struct AmbientWorldClockView: View {
 
 private struct ExpandedWorldClockView: View {
     @ObservedObject var plugin: WorldClockPlugin
+    @ObservedObject private var units = MeasurementUnitsStore.shared
+    @State private var showMeasureConvert = false
     @State private var convertHour: Int = {
         Calendar.current.component(.hour, from: Date())
     }()
@@ -766,6 +767,17 @@ private struct ExpandedWorldClockView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    withAnimation(NotchTheme.snappy) { showMeasureConvert.toggle() }
+                } label: {
+                    NotchChipLabel(
+                        title: units.system == .metric ? "Metric" : "Imperial",
+                        systemImage: "ruler",
+                        active: showMeasureConvert || units.showConversionTable
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Measurement units & conversion")
                 sortControls
             }
 
@@ -774,13 +786,51 @@ private struct ExpandedWorldClockView: View {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(plugin.activeEntries.enumerated()), id: \.element.id) { index, entry in
                             cityCard(entry, at: context.date, isHero: index == 0)
+                                .notchAppear(delay: Double(min(index, 5)) * 0.035)
                         }
                         converterCard(at: context.date)
+                            .notchAppear(delay: 0.12)
+                        if showMeasureConvert || units.showConversionTable {
+                            measureConvertCard
+                                .notchAppear(delay: 0.14)
+                        }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
+    }
+
+    private var measureConvertCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "ruler")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchTheme.calmGlow)
+                Text("Convert measurements")
+                    .font(NotchTheme.micro.weight(.semibold))
+                    .foregroundStyle(NotchTheme.textSecondary)
+                Spacer(minLength: 0)
+                Picker("", selection: $units.system) {
+                    ForEach(MeasurementUnitsStore.System.allCases) { sys in
+                        Text(sys.title).tag(sys)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 120)
+            }
+            MeasurementConvertPanel()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(NotchTheme.cardFill.opacity(0.9))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(NotchTheme.calmGlow.opacity(0.12), lineWidth: 0.5)
+                )
+        )
     }
 
     private var footerLine: String {
@@ -1110,6 +1160,7 @@ private struct ExpandedWorldClockView: View {
 
 private struct WorldClockSettingsView: View {
     @ObservedObject var plugin: WorldClockPlugin
+    @ObservedObject private var units = MeasurementUnitsStore.shared
     @State private var cityFilter = ""
     @State private var zoneFilter = ""
 
@@ -1119,6 +1170,28 @@ private struct WorldClockSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Measurements")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Units", selection: $units.system) {
+                    ForEach(MeasurementUnitsStore.System.allCases) { sys in
+                        Text(sys.title).tag(sys)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text("Distance labels on clocks use \(units.system.title.lowercased()) units. Same preference as Preferences → General.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Show measurement conversion table", isOn: $units.showConversionTable)
+                MeasurementConvertPanel()
+                    .padding(.top, 4)
+            }
+
+            Divider()
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Sort order")

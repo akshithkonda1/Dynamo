@@ -161,6 +161,7 @@ private struct ExpandedClipboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .confirmationDialog(
             "Clear clipboard history?",
             isPresented: $showClearHistoryConfirm,
@@ -184,8 +185,9 @@ private struct ExpandedClipboardView: View {
             )
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(store.snippets) { snippet in
+                ForEach(Array(store.snippets.enumerated()), id: \.element.id) { index, snippet in
                     snippetRow(snippet)
+                        .notchAppear(delay: Double(min(index, 6)) * 0.03)
                 }
             }
         }
@@ -212,8 +214,9 @@ private struct ExpandedClipboardView: View {
             )
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(filtered) { item in
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
                     historyRow(item)
+                        .notchAppear(delay: 0.06 + Double(min(index, 8)) * 0.028)
                 }
             }
         }

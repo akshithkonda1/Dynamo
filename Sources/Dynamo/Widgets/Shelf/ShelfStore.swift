@@ -37,16 +37,37 @@ struct ShelfItem: Identifiable, Codable, Equatable {
 @MainActor
 final class ShelfStore: ObservableObject {
     private static let fileName = "shelf.json"
-    private static let maxItems = 24
+    private static let maxItemsKey = "dynamo.shelf.maxItems"
+    private static let defaultMaxItems = 24
     private static let stashFolder = "ShelfFiles"
 
     @Published private(set) var items: [ShelfItem] = []
     /// True right after "Clear" while the undo window is still open.
     @Published private(set) var canUndoClear = false
+    /// Cap on stashed items (oldest overflow is deleted).
+    @Published var maxItems: Int {
+        didSet {
+            let clamped = min(100, max(5, maxItems))
+            if clamped != maxItems {
+                maxItems = clamped
+                return
+            }
+            UserDefaults.standard.set(maxItems, forKey: Self.maxItemsKey)
+            trimToMaxIfNeeded()
+        }
+    }
 
     private var clearedItemsSnapshot: [ShelfItem]?
     private var clearUndoTimer: Timer?
     private static let clearUndoWindow: TimeInterval = 6
+
+    init() {
+        if UserDefaults.standard.object(forKey: Self.maxItemsKey) == nil {
+            maxItems = Self.defaultMaxItems
+        } else {
+            maxItems = min(100, max(5, UserDefaults.standard.integer(forKey: Self.maxItemsKey)))
+        }
+    }
 
     private var stashRoot: URL {
         let dir = AppSupportStore.rootDirectory.appendingPathComponent(Self.stashFolder, isDirectory: true)
@@ -80,15 +101,22 @@ final class ShelfStore: ObservableObject {
                 changed = true
             }
         }
-        if items.count > Self.maxItems {
-            let overflow = items.suffix(from: Self.maxItems)
-            for item in overflow {
-                deleteStashFiles(for: item)
-            }
-            items = Array(items.prefix(Self.maxItems))
+        if trimToMaxIfNeeded() {
             changed = true
         }
         if changed { persist() }
+    }
+
+    @discardableResult
+    private func trimToMaxIfNeeded() -> Bool {
+        guard items.count > maxItems else { return false }
+        let overflow = items.suffix(from: maxItems)
+        for item in overflow {
+            deleteStashFiles(for: item)
+        }
+        items = Array(items.prefix(maxItems))
+        persist()
+        return true
     }
 
     func remove(id: UUID) {

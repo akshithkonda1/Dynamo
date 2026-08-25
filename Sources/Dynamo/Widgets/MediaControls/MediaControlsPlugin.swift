@@ -4,10 +4,12 @@ import SwiftUI
 /// Media controls widget. Talks only to `NowPlayingProvider` — never to a
 /// concrete data source. Swapping mock ↔ real happens at construction time.
 @MainActor
-final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding, PlayerAppOpening {
+final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding, PlayerAppOpening, WidgetSettingsProviding {
     let id = "media"
     let displayName = "Media"
     let systemImage = "music.note"
+
+    private static let motionArtworkKey = "dynamo.media.motionArtwork"
 
     var expandedContentHeight: CGFloat { 268 }
 
@@ -16,6 +18,10 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     @Published var showPlaylistPicker = false
     @Published private(set) var isTrackLiked: Bool = false
     @Published private(set) var isLikeLoading: Bool = false
+    /// When false, Apple Music covers stay static (no Album Motion).
+    @Published var motionArtworkEnabled: Bool {
+        didSet { UserDefaults.standard.set(motionArtworkEnabled, forKey: Self.motionArtworkKey) }
+    }
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let provider: NowPlayingProvider
@@ -26,6 +32,11 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     private var skipProbeWorkItems: [DispatchWorkItem] = []
 
     init(provider: NowPlayingProvider? = nil) {
+        if UserDefaults.standard.object(forKey: Self.motionArtworkKey) == nil {
+            motionArtworkEnabled = true
+        } else {
+            motionArtworkEnabled = UserDefaults.standard.bool(forKey: Self.motionArtworkKey)
+        }
         let resolved = provider ?? MockNowPlayingProvider()
         self.provider = resolved
         self.info = resolved.current
@@ -122,6 +133,10 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
     func expandedView() -> AnyView {
         AnyView(ExpandedMediaView(plugin: self))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(MediaControlsSettingsView(plugin: self))
     }
 
     func togglePlayPause() { provider.togglePlayPause() }
@@ -369,8 +384,9 @@ private struct ExpandedMediaView: View {
             HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
                 artwork(size: artSize)
                     .padding(.top, 2)
+                    .notchAppear()
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 7) {
                     header
                     if hasTrack {
                         MarqueeText(
@@ -388,6 +404,7 @@ private struct ExpandedMediaView: View {
                             speed: 28
                         )
                         .frame(height: 16)
+                        .padding(.bottom, 1)
                         timelineBar
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
@@ -424,6 +441,7 @@ private struct ExpandedMediaView: View {
 
                     Spacer(minLength: 0)
                 }
+                .notchAppear(delay: 0.04)
                 Spacer(minLength: 0)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
@@ -478,19 +496,31 @@ private struct ExpandedMediaView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(plugin.info.isPlaying ? "Now Playing" : "Media")
-                .font(NotchTheme.section)
-                .foregroundStyle(NotchTheme.textTertiary)
-                .textCase(.uppercase)
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(plugin.info.isPlaying ? "Now Playing" : "Music")
+                    .font(NotchTheme.section)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                if hasTrack, !plugin.info.album.isEmpty, plugin.info.artist != plugin.info.album {
+                    Text(plugin.info.album)
+                        .font(NotchTheme.micro)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .lineLimit(1)
+                }
+            }
             if plugin.info.isPlaying {
+                // Album-accent bars from MediaPeekPulse cover palette.
                 MusicBarsView(
                     isPlaying: plugin.info.isPlaying,
                     barCount: 6,
                     maxHeight: 16,
-                    color: NotchTheme.mediaGlow.opacity(0.95)
+                    color: MediaPeekPulse.shared.palette.accent
+                        .boosted(saturation: 1.35).color
                 )
-                    .fixedSize()
+                .fixedSize()
+                .padding(.leading, 2)
             }
             // Explicit badge
             if plugin.info.isExplicit {
@@ -529,12 +559,14 @@ private struct ExpandedMediaView: View {
                 .onTapGesture { plugin.openConnectedApp() }
                 .help("Open \(playerAppName)")
         }
+        .padding(.bottom, 2)
     }
 
-    /// Scrubbable playback position — the “time bar”, not a content scrollbar.
+    /// Scrubbable playback position — album-accent tint; mini EQ stays in the header.
     private var timelineBar: some View {
         let duration = max(plugin.info.duration, 0)
         let canSeek = duration > 0.5 && hasTrack
+        let accent = MediaPeekPulse.shared.palette.accent.boosted(saturation: 1.35).color
         return VStack(spacing: 2) {
             Slider(
                 value: Binding(
@@ -561,7 +593,8 @@ private struct ExpandedMediaView: View {
             .controlSize(.mini)
             .disabled(!canSeek)
             .opacity(canSeek ? 1 : 0.35)
-            .tint(Color.white.opacity(0.85))
+            .tint(accent.opacity(0.9))
+            .animation(NotchTheme.contentSpring, value: MediaPeekPulse.shared.trackKey)
 
             HStack {
                 Text(Self.formatTime(effectiveElapsed))
@@ -1054,5 +1087,34 @@ private struct OutputDeviceMenu: View {
             return match.name
         }
         return SystemVolumeController.shared.deviceName ?? "Output"
+    }
+}
+
+// MARK: - Settings
+
+private struct MediaControlsSettingsView: View {
+    @ObservedObject var plugin: MediaControlsPlugin
+    @ObservedObject private var amplify = MediaAmplifyController.shared
+    @ObservedObject private var meeting = MeetingMode.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Amplify (Symphony EQ)", isOn: $amplify.isEnabled)
+            Picker("Profile", selection: $amplify.profile) {
+                ForEach(MediaAmplifyProfile.allCases) { profile in
+                    Text(profile.title).tag(profile)
+                }
+            }
+            .disabled(!amplify.isEnabled)
+            Text(amplify.profile.subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Animated Apple Music artwork", isOn: $plugin.motionArtworkEnabled)
+            Toggle("Dim media ambient in meetings", isOn: $meeting.dimMediaAmbient)
+        }
     }
 }

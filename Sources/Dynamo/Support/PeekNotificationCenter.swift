@@ -21,8 +21,9 @@ final class PeekNotificationCenter: ObservableObject {
     private static let primaryKey = "dynamo.peek.primaryDelivery"
     private static let hapticsKey = "dynamo.peek.haptics"
     private static let soundKey = "dynamo.peek.sound"
+    private static let historyCapKey = "dynamo.peek.historyRetention"
     private static let maxQueue = 14
-    private static let maxHistory = 60
+    private static let defaultMaxHistory = 60
 
     /// When true (default), every alert goes through the Peek hub.
     @Published var isPrimaryDelivery: Bool {
@@ -37,6 +38,21 @@ final class PeekNotificationCenter: ObservableObject {
     @Published var criticalSoundEnabled: Bool {
         didSet { UserDefaults.standard.set(criticalSoundEnabled, forKey: Self.soundKey) }
     }
+
+    /// How many delivered Peeks to keep in the hub inbox.
+    @Published var historyRetention: Int {
+        didSet {
+            let clamped = min(200, max(20, historyRetention))
+            if clamped != historyRetention {
+                historyRetention = clamped
+                return
+            }
+            UserDefaults.standard.set(historyRetention, forKey: Self.historyCapKey)
+            trimHistoryIfNeeded()
+        }
+    }
+
+    private var maxHistory: Int { historyRetention }
 
     @Published private(set) var pendingCount: Int = 0
     @Published private(set) var history: [PeekHistoryItem] = []
@@ -85,6 +101,21 @@ final class PeekNotificationCenter: ObservableObject {
         } else {
             criticalSoundEnabled = UserDefaults.standard.bool(forKey: Self.soundKey)
         }
+        if UserDefaults.standard.object(forKey: Self.historyCapKey) == nil {
+            historyRetention = Self.defaultMaxHistory
+        } else {
+            historyRetention = min(200, max(20, UserDefaults.standard.integer(forKey: Self.historyCapKey)))
+        }
+    }
+
+    private func trimHistoryIfNeeded() {
+        guard history.count > maxHistory else { return }
+        let dropped = history.suffix(from: maxHistory)
+        for item in dropped {
+            replayStore.removeValue(forKey: item.id)
+        }
+        history = Array(history.prefix(maxHistory))
+        unreadCount = history.filter(\.isUnread).count
     }
 
     // MARK: - Attach
@@ -150,7 +181,7 @@ final class PeekNotificationCenter: ObservableObject {
         if preempt, let presenter {
             isPresenting = true
             recordHistory(item, presented: true)
-            feedback(for: peek)
+            feedback(for: peek, category: category, id: key)
             presenter.showDirect(peek)
             pendingCount = queue.count
             return
@@ -242,7 +273,7 @@ final class PeekNotificationCenter: ObservableObject {
             pendingCount = queue.count
             isPresenting = true
             recordHistory(next, presented: true)
-            feedback(for: next.peek)
+            feedback(for: next.peek, category: next.category, id: next.id)
             presenter.showDirect(next.peek)
             return
         }
@@ -282,14 +313,14 @@ final class PeekNotificationCenter: ObservableObject {
             isUnread: true
         )
         history.insert(h, at: 0)
-        if history.count > Self.maxHistory {
-            let dropped = history.suffix(from: Self.maxHistory)
+        if history.count > maxHistory {
+            let dropped = history.suffix(from: maxHistory)
             for d in dropped { replayStore.removeValue(forKey: d.id) }
-            history = Array(history.prefix(Self.maxHistory))
+            history = Array(history.prefix(maxHistory))
         }
         replayStore[item.id] = item.peek
         // Cap replay payloads (artwork-heavy).
-        if replayStore.count > Self.maxHistory + 8 {
+        if replayStore.count > maxHistory + 8 {
             let keep = Set(history.map(\.id))
             replayStore = replayStore.filter { keep.contains($0.key) }
         }
@@ -303,7 +334,7 @@ final class PeekNotificationCenter: ObservableObject {
         unreadCount = history.filter(\.isUnread).count
     }
 
-    private func feedback(for peek: NotchSneakPeek) {
+    private func feedback(for peek: NotchSneakPeek, category: String = "", id: String = "") {
         if hapticsEnabled {
             let pattern: NSHapticFeedbackManager.FeedbackPattern
             switch peek.urgency {
@@ -313,9 +344,37 @@ final class PeekNotificationCenter: ObservableObject {
             }
             NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
         }
-        if criticalSoundEnabled, peek.urgency >= .critical {
-            NSSound.beep()
+        // Always play a notification sound for battery 10% / full-charge Peeks.
+        // Other critical Peeks respect the Preferences toggle.
+        let batteryAlertSound = Self.isBatteryAlertSound(category: category, id: id, title: peek.title)
+        if batteryAlertSound || (criticalSoundEnabled && peek.urgency >= .critical) {
+            Self.playNotificationSound(battery: batteryAlertSound)
         }
+    }
+
+    /// 10% / critically low / fully charged — always audible, even if critical sound is off.
+    private static func isBatteryAlertSound(category: String, id: String, title: String) -> Bool {
+        guard category == "battery" else { return false }
+        let idLower = id.lowercased()
+        if idLower.contains("|p10") || idLower.contains("|p5") || idLower.contains("|full") {
+            return true
+        }
+        let t = title.lowercased()
+        return t.contains("10%") || t.contains("critically low") || t.contains("fully charged")
+    }
+
+    private static func playNotificationSound(battery: Bool) {
+        // Prefer distinct system sounds; fall back to beep.
+        let names = battery
+            ? ["Glass", "Hero", "Ping", "Submarine"]
+            : ["Tink", "Pop", "Glass"]
+        for name in names {
+            if let sound = NSSound(named: NSSound.Name(name)) {
+                sound.play()
+                return
+            }
+        }
+        NSSound.beep()
     }
 
     private static func makeID(peek: NotchSneakPeek, category: String) -> String {

@@ -2,10 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding {
+final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding, WidgetSettingsProviding {
     let id = "checklist"
-    let displayName = "Checklist"
+    let displayName = "Notes"
     let systemImage = "checklist"
+
+    private static let showCompletedKey = "dynamo.checklist.showCompleted"
+    private static let peekOnOverdueKey = "dynamo.checklist.peekOnOverdue"
 
     let store = ChecklistStore() // kept for migration / offline scratch if needed
     let reminders = RemindersProvider()
@@ -13,7 +16,28 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     @Published var draft: String = ""
     /// Where the draft field writes: system Reminders (default) or Apple Notes.
     @Published var draftTarget: DraftTarget = .reminders
+    /// When true, completed local checklist items appear under Reminders.
+    @Published var showCompleted: Bool {
+        didSet { UserDefaults.standard.set(showCompleted, forKey: Self.showCompletedKey) }
+    }
+    /// When true, overdue reminders still fire sneak peeks.
+    @Published var peekOnOverdue: Bool {
+        didSet { UserDefaults.standard.set(peekOnOverdue, forKey: Self.peekOnOverdueKey) }
+    }
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
+
+    init() {
+        if UserDefaults.standard.object(forKey: Self.showCompletedKey) == nil {
+            showCompleted = false
+        } else {
+            showCompleted = UserDefaults.standard.bool(forKey: Self.showCompletedKey)
+        }
+        if UserDefaults.standard.object(forKey: Self.peekOnOverdueKey) == nil {
+            peekOnOverdue = true
+        } else {
+            peekOnOverdue = UserDefaults.standard.bool(forKey: Self.peekOnOverdueKey)
+        }
+    }
 
     enum DraftTarget: String, CaseIterable, Identifiable {
         case reminders
@@ -81,6 +105,10 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
     func expandedView() -> AnyView {
         AnyView(ExpandedChecklistView(plugin: self))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(ChecklistSettingsView(plugin: self))
     }
 
     // MARK: - Ambient
@@ -168,8 +196,13 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                 }
             }
         case .notes:
+            if !notes.isAvailable {
+                notes.ensureFolder()
+            }
             if notes.create(title: text) {
                 draft = ""
+                refreshNotes()
+            } else {
                 objectWillChange.send()
             }
         }
@@ -181,6 +214,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
     func connectNotes() {
         notes.ensureFolder()
+        notes.refresh()
         objectWillChange.send()
     }
 
@@ -241,6 +275,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
             if reminder.isAllDay {
                 let cal = Calendar.current
                 guard cal.isDateInToday(due) || reminder.isOverdue else { continue }
+                if reminder.isOverdue, !peekOnOverdue { continue }
                 let stage = reminder.isOverdue ? "now" : "t15"
                 var seen = notifiedReminderStages[reminder.id] ?? []
                 guard !seen.contains(stage) else { continue }
@@ -258,6 +293,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
             let interval = due.timeIntervalSinceNow
             guard interval <= leadTime, interval > -12 * 60 * 60 else { continue }
+            if interval < -60, !peekOnOverdue { continue }
 
             let stage: String
             if interval <= 45 { stage = "now" }
@@ -342,13 +378,18 @@ private struct ExpandedChecklistView: View {
 
             composer
                 .padding(.top, 8)
+                .notchAppear(delay: 0.08)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .onAppear {
-            // Instant data when opening the tab — don’t wait for sparse background polls.
+            // Always refresh both sources when the tab appears.
             plugin.refreshReminders()
-            if plugin.draftTarget == .notes {
-                plugin.refreshNotes()
+            plugin.refreshNotes()
+            if reminders.authState == .notDetermined {
+                plugin.requestRemindersAccess()
+            } else if reminders.authState == .authorized {
+                plugin.refreshReminders()
             }
         }
     }
@@ -358,7 +399,7 @@ private struct ExpandedChecklistView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Checklist")
+                Text("Notes & Reminders")
                     .font(NotchTheme.section)
                     .foregroundStyle(NotchTheme.textTertiary)
                     .textCase(.uppercase)
@@ -371,17 +412,15 @@ private struct ExpandedChecklistView: View {
             Spacer(minLength: 0)
 
             Button {
-                switch plugin.draftTarget {
-                case .reminders: plugin.refreshReminders()
-                case .notes: plugin.refreshNotes()
-                }
+                plugin.refreshReminders()
+                plugin.refreshNotes()
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchTheme.textTertiary)
             }
             .buttonStyle(.notchIcon(diameter: 22))
-            .help("Refresh")
+            .help("Refresh Notes & Reminders")
 
             Button {
                 switch plugin.draftTarget {
@@ -426,9 +465,8 @@ private struct ExpandedChecklistView: View {
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) {
                         plugin.draftTarget = target
-                        if target == .notes {
-                            plugin.refreshNotes()
-                        }
+                        plugin.refreshReminders()
+                        plugin.refreshNotes()
                     }
                 } label: {
                     HStack(spacing: 5) {
@@ -508,18 +546,60 @@ private struct ExpandedChecklistView: View {
                 secondaryAction: { plugin.requestRemindersAccess() }
             )
         case .authorized:
+            if let err = reminders.lastError {
+                errorBanner(err)
+            }
             if reminders.items.isEmpty {
                 emptyStrip(
                     icon: "sparkles",
-                    title: "Inbox zero vibes",
-                    caption: "Type below to add one — it syncs straight to Reminders."
+                    title: "No open reminders",
+                    caption: "Type below and hit ↑ — saves to Apple Reminders."
                 )
             } else {
-                ForEach(reminders.items) { item in
+                ForEach(Array(reminders.items.enumerated()), id: \.element.id) { index, item in
                     reminderRow(item)
+                        .notchAppear(delay: Double(min(index, 8)) * 0.028)
+                }
+            }
+            if plugin.showCompleted {
+                let done = plugin.store.items.filter(\.isDone)
+                if !done.isEmpty {
+                    Text("Completed")
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .padding(.top, 8)
+                    ForEach(done) { item in
+                        localCompletedRow(item)
+                    }
                 }
             }
         }
+    }
+
+    private func localCompletedRow(_ item: ChecklistItem) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(NotchTheme.positive.opacity(0.85))
+            Text(item.text)
+                .font(NotchTheme.body)
+                .foregroundStyle(NotchTheme.textTertiary)
+                .strikethrough()
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                plugin.store.remove(id: item.id)
+                plugin.objectWillChange.send()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(NotchTheme.textQuaternary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -528,23 +608,63 @@ private struct ExpandedChecklistView: View {
             accessCard(
                 icon: "note.text",
                 title: "Connect Apple Notes",
-                body: "Allow Automation so Dynamo can read and write notes in the “Dynamo” folder in Notes.",
+                body: notes.lastError
+                    ?? "Allow Automation so Dynamo can read and write notes in the “Dynamo” folder.",
                 primary: "Connect Notes",
                 primaryAction: { plugin.connectNotes() },
-                secondary: "Open Notes",
-                secondaryAction: { plugin.openNotesApp() }
+                secondary: "Open Settings",
+                secondaryAction: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                        NSWorkspace.shared.open(url)
+                    } else {
+                        plugin.openNotesApp()
+                    }
+                }
             )
+            if let err = notes.lastError {
+                errorBanner(err)
+            }
         } else if notes.items.isEmpty {
+            if let err = notes.lastError {
+                errorBanner(err)
+            }
             emptyStrip(
                 icon: "pencil.and.outline",
-                title: "Blank page energy",
-                caption: "Capture a thought below — lives in Apple Notes → Dynamo."
+                title: "No notes yet",
+                caption: "Type below — saved to Apple Notes → Dynamo folder."
             )
         } else {
-            ForEach(notes.items) { item in
+            if let err = notes.lastError {
+                errorBanner(err)
+            }
+            ForEach(Array(notes.items.enumerated()), id: \.element.id) { index, item in
                 noteRow(item)
+                    .notchAppear(delay: Double(min(index, 8)) * 0.028)
             }
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NotchTheme.caution)
+            Text(message)
+                .font(NotchTheme.micro.weight(.medium))
+                .foregroundStyle(NotchTheme.caution)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(NotchTheme.caution.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(NotchTheme.caution.opacity(0.25), lineWidth: 0.5)
+                )
+        )
     }
 
     private func accessCard(
@@ -910,29 +1030,31 @@ private struct ExpandedChecklistView: View {
 
             if plugin.draftTarget == .reminders, reminders.authState != .authorized {
                 Text(reminders.authState == .denied
-                     ? "Reminders access is off — open Settings from the tab above."
+                     ? "Reminders access is off — tap Allow Access or Open Settings above."
                      : "Allow Reminders access to save here.")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))
             }
 
             if plugin.draftTarget == .notes, !notes.isAvailable {
-                Text("Allow Automation for Notes when prompted (System Settings → Privacy → Automation).")
+                Text(notes.lastError
+                     ?? "Tap Connect Notes above, then allow Automation when macOS prompts.")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let err = reminders.lastError, plugin.draftTarget == .reminders {
                 Text(err)
-                    .font(NotchTheme.micro)
+                    .font(NotchTheme.micro.weight(.medium))
                     .foregroundStyle(NotchTheme.negative)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
-            if let err = notes.lastError, plugin.draftTarget == .notes {
+            if let err = notes.lastError, plugin.draftTarget == .notes, notes.isAvailable {
                 Text(err)
-                    .font(NotchTheme.micro)
+                    .font(NotchTheme.micro.weight(.medium))
                     .foregroundStyle(NotchTheme.negative)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
         }
     }
@@ -953,5 +1075,26 @@ private struct AmbientChecklistView: View {
         }
         .padding(.horizontal, NotchTheme.ambientInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Settings
+
+private struct ChecklistSettingsView: View {
+    @ObservedObject var plugin: ChecklistPlugin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Show completed local items", isOn: $plugin.showCompleted)
+            Text("Lists finished items from Dynamo’s local checklist under Reminders.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Peek on overdue", isOn: $plugin.peekOnOverdue)
+            Text("When off, overdue reminders stay in the list but won’t interrupt with a Peek.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

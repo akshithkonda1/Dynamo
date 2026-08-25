@@ -19,6 +19,7 @@ struct AlbumCoverHost: View {
 
     private var motionURL: URL? {
         // Only Apple Music album motion — Spotify stays static.
+        guard plugin.motionArtworkEnabled else { return nil }
         guard plugin.info.sourceApp == .music else { return nil }
         let key = "\(plugin.info.title)\u{1}\(plugin.info.artist)\u{1}\(plugin.info.album)"
         guard motion.trackKey == key else { return nil }
@@ -39,11 +40,14 @@ struct AlbumCoverHost: View {
         .onChange(of: plugin.info.musicKitCatalogID) { _ in
             resolveMotion()
         }
+        .onChange(of: plugin.motionArtworkEnabled) { _ in
+            resolveMotion()
+        }
         .onAppear { resolveMotion() }
     }
 
     private func resolveMotion() {
-        guard plugin.info.sourceApp == .music else {
+        guard plugin.motionArtworkEnabled, plugin.info.sourceApp == .music else {
             MusicMotionArtworkLoader.shared.clear()
             return
         }

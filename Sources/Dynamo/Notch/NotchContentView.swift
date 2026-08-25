@@ -52,11 +52,15 @@ struct NotchContentView: View {
         }
         .shadow(
             color: controller.isExpanded
-                ? Color.black.opacity(0.22)
-                : (isShowingOverlay ? Color.black.opacity(0.22) : ambientAccent.opacity(0.08)),
-            // Wide soft bloom — depth without a hard outlined bottom rim.
-            radius: controller.isExpanded ? 20 : (isShowingOverlay ? 10 : 2),
+                ? NotchTheme.neonCyan.opacity(0.10)
+                : (isShowingOverlay ? Color.black.opacity(0.22) : ambientAccent.opacity(0.10)),
+            radius: controller.isExpanded ? 22 : (isShowingOverlay ? 10 : 2),
             y: controller.isExpanded ? 6 : (isShowingOverlay ? 2 : 0)
+        )
+        .shadow(
+            color: controller.isExpanded ? Color.black.opacity(0.28) : .clear,
+            radius: controller.isExpanded ? 18 : 0,
+            y: controller.isExpanded ? 8 : 0
         )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
@@ -82,10 +86,11 @@ struct NotchContentView: View {
         // Full solid scrim top → bottom (no fade-to-clear; that left a hollow lip).
         .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
         .overlay(
-            // Soft top sheen only — bottom stays solid glass.
+            // Soft integrated top sheen — cyan hint only when expanded.
             LinearGradient(
                 colors: [
-                    Color.white.opacity(controller.isExpanded ? 0.06 : 0.035),
+                    Color.white.opacity(controller.isExpanded ? 0.055 : 0.03),
+                    NotchTheme.neonCyan.opacity(controller.isExpanded ? 0.035 : 0.0),
                     Color.clear
                 ],
                 startPoint: .top,
@@ -174,7 +179,12 @@ struct NotchContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, NotchTheme.contentInset)
                     .padding(.bottom, NotchTheme.chromeContentBottom)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 6)),
+                            removal: .opacity.combined(with: .offset(y: -4))
+                        )
+                    )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -365,8 +375,8 @@ private struct TrayIconButton: View {
     }
 
     private var strokeColor: Color {
-        if isActive { return NotchTheme.controlAccent.opacity(0.32) }
-        return isHovering ? Color.white.opacity(0.12) : Color.clear
+        if isActive { return NotchTheme.neonCyan.opacity(0.45) }
+        return isHovering ? Color.white.opacity(0.14) : Color.clear
     }
 }
 

@@ -13,11 +13,32 @@ final class SportsStore: ObservableObject {
     @Published var categoryFilter: SportsCategory = .all
     @Published var followOnly = false
     @Published var follow = SportsFollowList(teamNames: [])
+    /// When false, live/upcoming scores stay out of the collapsed ambient strip.
+    @Published var liveAmbientEnabled: Bool {
+        didSet { UserDefaults.standard.set(liveAmbientEnabled, forKey: liveAmbientKey) }
+    }
+    /// Idle board poll seconds (live games still poll faster).
+    @Published var refreshIntervalSeconds: Int {
+        didSet {
+            let clamped = min(120, max(15, refreshIntervalSeconds))
+            if clamped != refreshIntervalSeconds {
+                refreshIntervalSeconds = clamped
+                return
+            }
+            UserDefaults.standard.set(refreshIntervalSeconds, forKey: refreshIntervalKey)
+            // Only retune while running — avoid starting a timer from init.
+            if timer != nil {
+                scheduleAdaptivePoll()
+            }
+        }
+    }
 
     private let client = ESPNScoreboardClient()
     private var timer: Timer?
     private let followKey = "dynamo.sports.follow"
     private let leagueKey = "dynamo.sports.selectedLeague"
+    private let liveAmbientKey = "dynamo.sports.liveAmbient"
+    private let refreshIntervalKey = "dynamo.sports.refreshInterval"
     private let cacheDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
@@ -31,6 +52,16 @@ final class SportsStore: ObservableObject {
     var onScorePeek: ((NotchSneakPeek) -> Void)?
 
     private init() {
+        if UserDefaults.standard.object(forKey: liveAmbientKey) == nil {
+            liveAmbientEnabled = true
+        } else {
+            liveAmbientEnabled = UserDefaults.standard.bool(forKey: liveAmbientKey)
+        }
+        if UserDefaults.standard.object(forKey: refreshIntervalKey) == nil {
+            refreshIntervalSeconds = 40
+        } else {
+            refreshIntervalSeconds = min(120, max(15, UserDefaults.standard.integer(forKey: refreshIntervalKey)))
+        }
         if let data = UserDefaults.standard.data(forKey: followKey),
            let decoded = try? JSONDecoder().decode(SportsFollowList.self, from: data) {
             follow = decoded
@@ -78,7 +109,8 @@ final class SportsStore: ObservableObject {
         let anyLive = liveFollowed != nil
             || currentEvents.contains(where: { $0.status == .live })
             || liveAllEvents.contains(where: { $0.status == .live })
-        return anyLive ? 18 : 40
+        let idle = TimeInterval(refreshIntervalSeconds)
+        return anyLive ? min(18, idle) : idle
     }
 
     func stop() {

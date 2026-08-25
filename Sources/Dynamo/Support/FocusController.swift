@@ -459,6 +459,13 @@ final class FocusController: ObservableObject {
 
     func shouldSuppress(peek: NotchSneakPeek) -> Bool {
         if peek.style == .media { return false }
+        // Critical battery (10% / full) always surfaces — never drop safety alerts.
+        if peek.urgency >= .critical {
+            let t = peek.title.lowercased()
+            if t.contains("battery") || t.contains("fully charged") || t.contains("10%") {
+                return false
+            }
+        }
         // Calls / texts / mail always surface (same priority as due reminders).
         let detail = peek.detail.lowercased()
         if detail.hasPrefix("call") || detail.hasPrefix("text") || detail.hasPrefix("mail") {
@@ -466,6 +473,11 @@ final class FocusController: ObservableObject {
         }
         if isMeetingActive, peek.urgency < .high {
             if peek.detail.contains("Meeting companion") { return false }
+            return true
+        }
+        if MeetingMode.shared.quietOnFocus,
+           MeetingMode.shared.isFocusActive(),
+           peek.urgency < .high {
             return true
         }
         if effective == .trueFocus, peek.urgency == .low { return true }
