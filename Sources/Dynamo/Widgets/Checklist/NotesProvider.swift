@@ -83,13 +83,13 @@ final class NotesProvider: ObservableObject {
         end try
         """
         guard let out = Self.runAppleScript(script) else {
-            lastError = "Could not talk to Notes — allow Automation for Notes"
+            lastError = Self.friendlyError(from: "Could not talk to Notes")
             isAvailable = false
             lastStatus = "Unavailable"
             return
         }
         if out.hasPrefix("ERR|") {
-            lastError = String(out.dropFirst(4))
+            lastError = Self.friendlyError(from: String(out.dropFirst(4)))
             isAvailable = false
             lastStatus = "Notes error"
             items = []
@@ -148,11 +148,14 @@ final class NotesProvider: ObservableObject {
         end try
         """
         guard let out = Self.runAppleScript(script) else {
-            lastError = "Could not create note — allow Automation for Notes"
+            lastError = Self.friendlyError(from: "Could not create note")
+            isAvailable = false
             return false
         }
         if out.hasPrefix("ERR") {
-            lastError = out.replacingOccurrences(of: "ERR\t", with: "").replacingOccurrences(of: "ERR|||", with: "")
+            let raw = out.replacingOccurrences(of: "ERR\t", with: "").replacingOccurrences(of: "ERR|||", with: "")
+            lastError = Self.friendlyError(from: raw)
+            isAvailable = false
             return false
         }
         lastError = nil
@@ -174,11 +177,13 @@ final class NotesProvider: ObservableObject {
         end try
         """
         guard let out = Self.runAppleScript(script) else {
-            lastError = "Could not delete note"
+            lastError = Self.friendlyError(from: "Could not delete note")
+            isAvailable = false
             return false
         }
         if out.hasPrefix("ERR|||") {
-            lastError = String(out.dropFirst(6))
+            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
+            isAvailable = false
             return false
         }
         items.removeAll { $0.id == id }
@@ -227,13 +232,25 @@ final class NotesProvider: ObservableObject {
         end try
         """
         if let out = Self.runAppleScript(script), out.hasPrefix("ERR|||") {
-            lastError = String(out.dropFirst(6))
+            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
             isAvailable = false
         } else {
             isAvailable = true
             lastError = nil
         }
         refresh()
+    }
+
+    /// Turns a raw AppleScript/AppleEvent error into an actionable sentence
+    /// instead of surfacing a bare error code like "-1743:Not authorized…".
+    private static func friendlyError(from raw: String) -> String {
+        if raw.contains("-1743") {
+            return "Notes access isn't allowed yet — open System Settings → Privacy & Security → Automation and turn on Notes for Dynamo."
+        }
+        if raw.contains("-600") || raw.contains("-609") {
+            return "Notes isn't responding — open the Notes app once, then try again."
+        }
+        return "Couldn't reach Notes (\(raw))."
     }
 
     private static func runAppleScript(_ source: String) -> String? {

@@ -301,6 +301,7 @@ private struct ExpandedChecklistView: View {
     @ObservedObject var plugin: ChecklistPlugin
     @ObservedObject private var notes: NotesProvider
     @ObservedObject private var reminders: RemindersProvider
+    @ObservedObject private var permissions = PermissionsStore.shared
     @State private var hoveringID: String?
 
     init(plugin: ChecklistPlugin) {
@@ -405,7 +406,11 @@ private struct ExpandedChecklistView: View {
             if reminderCount == 0 { return "No open reminders" }
             return reminderCount == 1 ? "1 open reminder" : "\(reminderCount) open reminders"
         case .notes:
-            if !notes.isAvailable { return "Connect Apple Notes" }
+            if !notes.isAvailable {
+                return permissions.status(for: .automationNotes) == .denied
+                    ? "Notes access is off"
+                    : "Connect Apple Notes"
+            }
             if notesCount == 0 { return "Apple Notes · Dynamo folder" }
             return notesCount == 1 ? "1 note" : "\(notesCount) notes"
         }
@@ -525,15 +530,27 @@ private struct ExpandedChecklistView: View {
     @ViewBuilder
     private var notesContent: some View {
         if !notes.isAvailable {
-            accessCard(
-                icon: "note.text",
-                title: "Connect Apple Notes",
-                body: "Allow Automation so Dynamo can read and write notes in the “Dynamo” folder in Notes.",
-                primary: "Connect Notes",
-                primaryAction: { plugin.connectNotes() },
-                secondary: "Open Notes",
-                secondaryAction: { plugin.openNotesApp() }
-            )
+            if permissions.status(for: .automationNotes) == .denied {
+                accessCard(
+                    icon: "note.text",
+                    title: "Notes access is off",
+                    body: "Dynamo was denied permission to automate Notes. Turn it on in System Settings → Privacy & Security → Automation.",
+                    primary: "Open Settings",
+                    primaryAction: { permissions.openSystemSettings(for: .automationNotes) },
+                    secondary: "Open Notes",
+                    secondaryAction: { plugin.openNotesApp() }
+                )
+            } else {
+                accessCard(
+                    icon: "note.text",
+                    title: "Connect Apple Notes",
+                    body: "Allow Automation so Dynamo can read and write notes in the “Dynamo” folder in Notes.",
+                    primary: "Connect Notes",
+                    primaryAction: { plugin.connectNotes() },
+                    secondary: "Open Notes",
+                    secondaryAction: { plugin.openNotesApp() }
+                )
+            }
         } else if notes.items.isEmpty {
             emptyStrip(
                 icon: "pencil.and.outline",
@@ -917,7 +934,9 @@ private struct ExpandedChecklistView: View {
             }
 
             if plugin.draftTarget == .notes, !notes.isAvailable {
-                Text("Allow Automation for Notes when prompted (System Settings → Privacy → Automation).")
+                Text(permissions.status(for: .automationNotes) == .denied
+                     ? "Notes access is off — open Settings from the tab above."
+                     : "Allow Automation for Notes when prompted (System Settings → Privacy → Automation).")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))
             }
