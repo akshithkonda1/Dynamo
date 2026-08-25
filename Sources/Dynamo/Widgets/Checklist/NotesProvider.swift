@@ -42,45 +42,46 @@ final class NotesProvider: ObservableObject {
     }
 
     func refresh() {
-        lastError = nil
         let script = """
-        try
-            tell application "Notes"
-                if not (exists folder "\(Self.folderName)") then
-                    return "OK|"
-                end if
-                set outLines to {}
-                tell folder "\(Self.folderName)"
-                    repeat with n in notes
-                        try
-                            set nid to id of n as text
-                            set nname to name of n as text
-                            set nbody to ""
+        with timeout of 12 seconds
+            try
+                tell application "Notes"
+                    if not (exists folder "\(Self.folderName)") then
+                        return "OK|"
+                    end if
+                    set outLines to {}
+                    tell folder "\(Self.folderName)"
+                        repeat with n in notes
                             try
-                                set nbody to plaintext of n as text
+                                set nid to id of n as text
+                                set nname to name of n as text
+                                set nbody to ""
+                                try
+                                    set nbody to plaintext of n as text
+                                end try
+                                set AppleScript's text item delimiters to {linefeed, return, tab, ASCII character 30, "|"}
+                                set bodyBits to text items of nbody
+                                set nameBits to text items of nname
+                                set AppleScript's text item delimiters to " "
+                                set flatBody to bodyBits as text
+                                set flatName to nameBits as text
+                                set AppleScript's text item delimiters to ""
+                                if length of flatBody > 100 then
+                                    set flatBody to text 1 thru 100 of flatBody
+                                end if
+                                set end of outLines to nid & "||" & flatName & "||" & flatBody
                             end try
-                            set AppleScript's text item delimiters to {linefeed, return, tab}
-                            set bodyBits to text items of nbody
-                            set AppleScript's text item delimiters to " "
-                            set flatBody to bodyBits as text
-                            set nameBits to text items of nname
-                            set flatName to nameBits as text
-                            set AppleScript's text item delimiters to ""
-                            if length of flatBody > 100 then
-                                set flatBody to text 1 thru 100 of flatBody
-                            end if
-                            set end of outLines to nid & "||" & flatName & "||" & flatBody
-                        end try
-                    end repeat
+                        end repeat
+                    end tell
+                    set AppleScript's text item delimiters to ASCII character 30
+                    set joined to outLines as text
+                    set AppleScript's text item delimiters to ""
+                    return "OK|" & joined
                 end tell
-                set AppleScript's text item delimiters to ASCII character 30
-                set joined to outLines as text
-                set AppleScript's text item delimiters to ""
-                return "OK|" & joined
-            end tell
-        on error errMsg number errNum
-            return "ERR|" & errNum & ":" & errMsg
-        end try
+            on error errMsg number errNum
+                return "ERR|" & errNum & ":" & errMsg
+            end try
+        end timeout
         """
         guard let out = Self.runAppleScript(script) else {
             lastError = Self.friendlyError(from: "Could not talk to Notes")
@@ -96,11 +97,11 @@ final class NotesProvider: ObservableObject {
             return
         }
         isAvailable = true
+        lastError = nil
         lastStatus = "Synced"
         var payload = out
         if payload.hasPrefix("OK|") { payload = String(payload.dropFirst(3)) }
         var parsed: [NoteItem] = []
-        // Records separated by ASCII 30 (record separator)
         let records = payload.components(separatedBy: "\u{1e}")
         for record in records {
             let fields = record.components(separatedBy: "||")
@@ -127,25 +128,34 @@ final class NotesProvider: ObservableObject {
     func create(title: String, body: String? = nil) -> Bool {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return false }
+
+        // If Automation previously failed, try to (re)establish the Dynamo folder first.
+        if !isAvailable {
+            ensureFolder()
+            guard isAvailable else { return false }
+        }
+
         let titleEsc = t.appleScriptEscaped
         let extra = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let htmlBody = "<div>\(t.htmlEscaped)</div>"
             + (extra.isEmpty ? "" : "<div>\(extra.htmlEscaped)</div>")
         let htmlEsc = htmlBody.appleScriptEscaped
         let script = """
-        try
-            tell application "Notes"
-                if not (exists folder "\(Self.folderName)") then
-                    make new folder with properties {name:"\(Self.folderName)"}
-                end if
-                tell folder "\(Self.folderName)"
-                    make new note with properties {name:"\(titleEsc)", body:"\(htmlEsc)"}
+        with timeout of 12 seconds
+            try
+                tell application "Notes"
+                    if not (exists folder "\(Self.folderName)") then
+                        make new folder with properties {name:"\(Self.folderName)"}
+                    end if
+                    tell folder "\(Self.folderName)"
+                        make new note with properties {name:"\(titleEsc)", body:"\(htmlEsc)"}
+                    end tell
                 end tell
-            end tell
-            return "OK"
-        on error errMsg number errNum
-            return "ERR\\t" & errNum & ":" & errMsg
-        end try
+                return "OK"
+            on error errMsg number errNum
+                return "ERR|" & errNum & ":" & errMsg
+            end try
+        end timeout
         """
         guard let out = Self.runAppleScript(script) else {
             lastError = Self.friendlyError(from: "Could not create note")
@@ -159,6 +169,7 @@ final class NotesProvider: ObservableObject {
             return false
         }
         lastError = nil
+        isAvailable = true
         refresh()
         return true
     }
@@ -167,14 +178,16 @@ final class NotesProvider: ObservableObject {
     func delete(id: String) -> Bool {
         let esc = id.appleScriptEscaped
         let script = """
-        try
-            tell application "Notes"
-                delete note id "\(esc)"
-            end tell
-            return "OK"
-        on error errMsg number errNum
-            return "ERR|||" & errNum & ":" & errMsg
-        end try
+        with timeout of 12 seconds
+            try
+                tell application "Notes"
+                    delete note id "\(esc)"
+                end tell
+                return "OK"
+            on error errMsg number errNum
+                return "ERR|" & errNum & ":" & errMsg
+            end try
+        end timeout
         """
         guard let out = Self.runAppleScript(script) else {
             lastError = Self.friendlyError(from: "Could not delete note")
@@ -189,6 +202,7 @@ final class NotesProvider: ObservableObject {
         items.removeAll { $0.id == id }
         lastError = nil
         objectWillChange.send()
+        onChangeWire?()
         return true
     }
 
@@ -217,19 +231,21 @@ final class NotesProvider: ObservableObject {
         }
     }
 
-    /// Ensure Dynamo folder exists (first Automation prompt).
+    /// Ensure Dynamo folder exists (first Automation prompt). Always refreshes afterward.
     func ensureFolder() {
         let script = """
-        try
-            tell application "Notes"
-                if not (exists folder "\(Self.folderName)") then
-                    make new folder with properties {name:"\(Self.folderName)"}
-                end if
-            end tell
-            return "OK"
-        on error errMsg number errNum
-            return "ERR|||" & errNum & ":" & errMsg
-        end try
+        with timeout of 12 seconds
+            try
+                tell application "Notes"
+                    if not (exists folder "\(Self.folderName)") then
+                        make new folder with properties {name:"\(Self.folderName)"}
+                    end if
+                end tell
+                return "OK"
+            on error errMsg number errNum
+                return "ERR|" & errNum & ":" & errMsg
+            end try
+        end timeout
         """
         if let out = Self.runAppleScript(script), out.hasPrefix("ERR|||") {
             lastError = Self.friendlyError(from: String(out.dropFirst(6)))
@@ -238,6 +254,9 @@ final class NotesProvider: ObservableObject {
             isAvailable = true
             lastError = nil
         }
+        isAvailable = true
+        lastError = nil
+        lastStatus = "Connected"
         refresh()
     }
 
@@ -258,10 +277,14 @@ final class NotesProvider: ObservableObject {
         guard let script = NSAppleScript(source: source) else { return nil }
         let result = script.executeAndReturnError(&error)
         if let error {
+            let num = error[NSAppleScript.errorNumber] as? Int
             let msg = error[NSAppleScript.errorMessage] as? String ?? "\(error)"
-            return "ERR||| \(msg)"
+            if let num {
+                return "ERR|\(num):\(msg)"
+            }
+            return "ERR|\(msg)"
         }
-        return result.stringValue
+        return result.stringValue ?? "OK"
     }
 }
 

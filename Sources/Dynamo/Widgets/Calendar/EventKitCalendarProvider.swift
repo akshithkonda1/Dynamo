@@ -80,8 +80,10 @@ final class EventKitCalendarProvider: CalendarProvider {
         }
 
         let start = Date()
-        let end = Calendar.current.date(byAdding: .day, value: 21, to: start)
-            ?? start.addingTimeInterval(21 * 86_400)
+        // Fetch far enough for CalendarPlugin’s lookahead setting (up to 30 days).
+        let days = 30
+        let end = Calendar.current.date(byAdding: .day, value: days, to: start)
+            ?? start.addingTimeInterval(TimeInterval(days) * 86_400)
 
         // Prefer every event calendar the user can see. `nil` calendars uses
         // EventKit’s default (all accessible) — more reliable after partial TCC.

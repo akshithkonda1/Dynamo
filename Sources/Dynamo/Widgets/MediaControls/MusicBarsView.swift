@@ -7,10 +7,15 @@ struct MusicBarsView: View {
     var isPlaying: Bool
     var barCount: Int = 6
     var maxHeight: CGFloat = 17
-    var color: Color = NotchTheme.textPrimary
+    /// When nil, uses the live album accent from `MediaPeekPulse`.
+    var color: Color? = nil
 
     @ObservedObject private var pulse = MediaPeekPulse.shared
     @ObservedObject private var sampler = MusicAudioSampler.shared
+
+    private var barColor: Color {
+        color ?? pulse.palette.accent.boosted(saturation: 1.35).color
+    }
 
     var body: some View {
         let _ = sampler.bands
@@ -20,6 +25,7 @@ struct MusicBarsView: View {
         let _ = sampler.lastOnsetAt
         let _ = sampler.level
         let _ = pulse.isPlaying
+        let _ = pulse.palette
 
         TimelineView(
             .animation(
@@ -33,6 +39,7 @@ struct MusicBarsView: View {
             // Continuous pump peaking hard at downbeat (phase ≈ 0 / 1).
             let near = min(phase, 1 - phase)
             let pump = exp(-(near * near) * 100)
+            let tint = barColor
 
             HStack(alignment: .center, spacing: 2.5) {
                 ForEach(0..<barCount, id: \.self) { index in
@@ -47,8 +54,8 @@ struct MusicBarsView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    color.opacity(0.35 + kick * 0.4),
-                                    color
+                                    tint.opacity(0.35 + kick * 0.4),
+                                    tint
                                 ],
                                 startPoint: .bottom,
                                 endPoint: .top
@@ -56,7 +63,7 @@ struct MusicBarsView: View {
                         )
                         .frame(width: 2.8, height: max(3.5, maxHeight * CGFloat(wave)))
                         .shadow(
-                            color: color.opacity(0.12 + kick * 0.4),
+                            color: tint.opacity(0.12 + kick * 0.4),
                             radius: kick > 0.25 ? 2.2 : 0.5
                         )
                 }
@@ -101,3 +108,4 @@ struct MusicBarsView: View {
         return min(1, max(0.10, shaped))
     }
 }
+

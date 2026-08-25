@@ -134,6 +134,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
 
 private struct AmbientWeatherView: View {
     let snapshot: WeatherSnapshot?
+    @ObservedObject private var units = MeasurementUnitsStore.shared
 
     var body: some View {
         HStack(spacing: 6) {
@@ -141,9 +142,10 @@ private struct AmbientWeatherView: View {
                 Image(systemName: snapshot.symbolName)
                     .symbolRenderingMode(.multicolor)
                     .font(.system(size: 11, weight: .semibold))
-                Text(TemperatureFormat.short(snapshot.temperature))
+                Text(TemperatureFormat.short(snapshot.temperature, system: units.system))
                     .font(NotchTheme.micro.weight(.semibold).monospacedDigit())
                     .foregroundStyle(NotchTheme.textPrimary)
+                    .id(units.system)
                 Text(snapshot.conditionDescription)
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.textTertiary)
@@ -158,18 +160,35 @@ private struct AmbientWeatherView: View {
 
 // MARK: - Temperature formatting
 
-/// Formats WeatherKit temperatures in the viewer's locale unit (°F in the US),
-/// showing just the degree number for the compact notch.
+/// Formats WeatherKit temperatures using `MeasurementUnitsStore` when available,
+/// with an optional per-call override (Metric / Imperial). Falls back to locale.
 enum TemperatureFormat {
-    private static let formatter: MeasurementFormatter = {
+    private static let localeFormatter: MeasurementFormatter = {
         let f = MeasurementFormatter()
         f.unitOptions = .temperatureWithoutUnit
         f.numberFormatter.maximumFractionDigits = 0
         return f
     }()
 
-    static func short(_ temperature: Measurement<UnitTemperature>) -> String {
-        formatter.string(from: temperature)
+    @MainActor
+    static func short(
+        _ temperature: Measurement<UnitTemperature>,
+        system: MeasurementUnitsStore.System? = nil
+    ) -> String {
+        let units = system ?? MeasurementUnitsStore.shared.system
+        switch units {
+        case .metric:
+            let c = temperature.converted(to: .celsius).value
+            return String(format: "%.0f°", c.rounded())
+        case .imperial:
+            let f = temperature.converted(to: .fahrenheit).value
+            return String(format: "%.0f°", f.rounded())
+        }
+    }
+
+    /// Non-isolated fallback for previews / tests without hopping to MainActor.
+    static func shortLocale(_ temperature: Measurement<UnitTemperature>) -> String {
+        localeFormatter.string(from: temperature)
     }
 }
 
@@ -177,6 +196,7 @@ enum TemperatureFormat {
 
 private struct ExpandedWeatherView: View {
     @ObservedObject var plugin: WeatherPlugin
+    @ObservedObject private var units = MeasurementUnitsStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
@@ -186,6 +206,8 @@ private struct ExpandedWeatherView: View {
             attributionFooter
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
+        .id(units.system)
     }
 
     private var header: some View {
@@ -229,14 +251,18 @@ private struct ExpandedWeatherView: View {
             )
         } else if let snapshot = plugin.snapshot {
             currentConditions(snapshot)
+                .notchAppear(delay: 0.03)
             if !snapshot.hourly.isEmpty {
                 hourlyStrip(snapshot.hourly)
+                    .notchAppear(delay: 0.07)
             }
             if !snapshot.daily.isEmpty {
                 dailyStrip(snapshot.daily)
+                    .notchAppear(delay: 0.1)
             }
             if !plugin.alerts.isEmpty {
                 alertList
+                    .notchAppear(delay: 0.12)
             }
             if let error = plugin.lastError {
                 Text(error)
@@ -414,6 +440,7 @@ private struct ExpandedWeatherView: View {
 /// Settings panel for Weather — shown generically via `WidgetSettingsProviding`.
 private struct WeatherSettingsView: View {
     @ObservedObject var plugin: WeatherPlugin
+    @ObservedObject private var units = MeasurementUnitsStore.shared
 
     private var locationSummary: String {
         guard plugin.isManualLocation else {
@@ -460,6 +487,23 @@ private struct WeatherSettingsView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider()
+
+            Text("Temperature units")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("Units", selection: $units.system) {
+                ForEach(MeasurementUnitsStore.System.allCases) { sys in
+                    Text(sys.title).tag(sys)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("Metric shows °C; Imperial shows °F. Same preference as World Clock and Preferences → General.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

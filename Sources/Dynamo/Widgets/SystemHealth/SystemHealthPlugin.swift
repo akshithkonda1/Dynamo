@@ -5,16 +5,26 @@ import SwiftUI
 /// Health tab — software updates + system vitals (disk, uptime, memory, thermal).
 /// Metrics are read-only; actions deep-link into System Settings / Restart.
 @MainActor
-final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding {
+final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, NotchSneakPeekProviding, WidgetSettingsProviding {
     let id = "system-health"
     let displayName = "Health"
     let systemImage = "heart.text.square"
+
+    private static let weeklyPeekKey = "dynamo.health.weeklyPeek"
+    private static let cautionPeeksKey = "dynamo.health.cautionPeeks"
 
     var expandedContentHeight: CGFloat { 268 }
 
     @Published private(set) var report: MacHealthReport = .empty
     @Published private(set) var updates: SoftwareUpdateSnapshot = .empty
     @Published private(set) var isRefreshing = false
+    @Published var weeklyPeekEnabled: Bool {
+        didSet { UserDefaults.standard.set(weeklyPeekEnabled, forKey: Self.weeklyPeekKey) }
+    }
+    /// When false, caution/warning health findings won't Peek (updates still can).
+    @Published var cautionPeeksEnabled: Bool {
+        didSet { UserDefaults.standard.set(cautionPeeksEnabled, forKey: Self.cautionPeeksKey) }
+    }
 
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
@@ -24,6 +34,19 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
     private var lastUpdateCount = 0
     private var didStart = false
     private var didPeekUpdatesThisSession = false
+
+    init() {
+        if UserDefaults.standard.object(forKey: Self.weeklyPeekKey) == nil {
+            weeklyPeekEnabled = true
+        } else {
+            weeklyPeekEnabled = UserDefaults.standard.bool(forKey: Self.weeklyPeekKey)
+        }
+        if UserDefaults.standard.object(forKey: Self.cautionPeeksKey) == nil {
+            cautionPeeksEnabled = true
+        } else {
+            cautionPeeksEnabled = UserDefaults.standard.bool(forKey: Self.cautionPeeksKey)
+        }
+    }
 
     func start() {
         guard !didStart else { return }
@@ -67,6 +90,10 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
 
     func expandedView() -> AnyView {
         AnyView(ExpandedSystemHealthView(plugin: self))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(SystemHealthSettingsView(plugin: self))
     }
 
     // MARK: - Actions
@@ -165,17 +192,19 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
     }
 
     private func maybePresentWeeklyPeek() {
+        guard weeklyPeekEnabled else { return }
         guard MacHealthModel.shouldPeekWeeklyReport else { return }
         if report.weekKey != MacHealthModel.weekKey() {
             refreshHealth(forceWeekly: true)
         }
         guard report.weekKey == MacHealthModel.weekKey() else { return }
         MacHealthModel.markWeeklyPeekShown(report.weekKey)
+        let hasCaution = report.warningCount > 0
         onSneakPeek?(NotchSneakPeek(
             systemImage: "heart.text.square.fill",
             title: "Weekly health check",
             subtitle: report.summary,
-            urgency: report.warningCount > 0 ? .high : .normal
+            urgency: (hasCaution && cautionPeeksEnabled) ? .high : .normal
         ))
     }
 
@@ -183,7 +212,7 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
 
     var isAmbientActive: Bool {
         if updates.hasUpdates { return true }
-        if report.warningCount > 0 { return true }
+        if cautionPeeksEnabled, report.warningCount > 0 { return true }
         return false
     }
 
@@ -341,6 +370,7 @@ private struct ExpandedSystemHealthView: View {
                     .frame(height: 5)
                 }
             }
+            .notchAppear(delay: 0.03)
 
             // Updates
             Button {
@@ -377,6 +407,7 @@ private struct ExpandedSystemHealthView: View {
             }
             .buttonStyle(.plain)
             .help("Open Software Update")
+            .notchAppear(delay: 0.06)
 
             // Vitals grid (2×2)
             if !metrics.isEmpty {
@@ -387,8 +418,9 @@ private struct ExpandedSystemHealthView: View {
                     ],
                     spacing: 8
                 ) {
-                    ForEach(metrics) { finding in
+                    ForEach(Array(metrics.enumerated()), id: \.element.id) { index, finding in
                         metricCell(finding)
+                            .notchAppear(delay: 0.09 + Double(min(index, 5)) * 0.03)
                     }
                 }
             }
@@ -438,6 +470,7 @@ private struct ExpandedSystemHealthView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .onAppear {
             // Ensure vitals are fresh when opening the tab.
             if report.generatedAt.timeIntervalSinceNow < -120 || report.score == 0 {
@@ -588,6 +621,27 @@ private struct ExpandedSystemHealthView: View {
             return "Restart this Mac"
         case .generalSettings: return "Open System Settings"
         case .none: return f.detail
+        }
+    }
+}
+
+// MARK: - Settings
+
+private struct SystemHealthSettingsView: View {
+    @ObservedObject var plugin: SystemHealthPlugin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Weekly health Peek", isOn: $plugin.weeklyPeekEnabled)
+            Text("Once a week, summarize Mac health in the notch.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Caution findings in ambient / high urgency", isOn: $plugin.cautionPeeksEnabled)
+            Text("When off, disk/uptime cautions stay quieter — software update Peeks still fire.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

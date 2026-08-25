@@ -59,6 +59,8 @@ enum NotchTheme {
     static let body = Font.system(size: 12.5, weight: .medium, design: .default)
     static let caption = Font.system(size: 11, weight: .medium, design: .default)
     static let micro = Font.system(size: 10, weight: .medium, design: .default)
+    /// Futuristic micro-label tracking (section headers, prefs titles).
+    static let sectionTracking: CGFloat = 1.1
 
     // MARK: Color roles
     // Text on dark glass stays high-contrast white (island is always dark chrome).
@@ -66,21 +68,21 @@ enum NotchTheme {
     // and appearance, then slightly lifted for glass legibility.
 
     static let textPrimary = Color.white.opacity(0.96)
-    static let textSecondary = Color.white.opacity(0.72)
-    static let textTertiary = Color.white.opacity(0.48)
-    static let textQuaternary = Color.white.opacity(0.34)
+    static let textSecondary = Color.white.opacity(0.74)
+    static let textTertiary = Color.white.opacity(0.50)
+    static let textQuaternary = Color.white.opacity(0.36)
 
-    static let separator = Color.white.opacity(0.08)
-    static let hairline = Color.white.opacity(0.14)
+    static let separator = Color.white.opacity(0.09)
+    static let hairline = Color.white.opacity(0.16)
 
-    static let chipFill = Color.white.opacity(0.08)
-    static let chipFillActive = Color.white.opacity(0.18)
-    static let chipFillHover = Color.white.opacity(0.12)
-    static let cardFill = Color.white.opacity(0.06)
+    static let chipFill = Color.white.opacity(0.09)
+    static let chipFillActive = Color.white.opacity(0.20)
+    static let chipFillHover = Color.white.opacity(0.13)
+    static let cardFill = Color.white.opacity(0.07)
 
     /// Solid glass density — full coverage edge-to-edge (no transparent bottom).
-    static let panelScrim = Color.black.opacity(0.42)
-    static let panelScrimExpanded = Color.black.opacity(0.52)
+    static let panelScrim = Color.black.opacity(0.46)
+    static let panelScrimExpanded = Color.black.opacity(0.56)
 
     /// System semantic status, slightly boosted for dark glass.
     static var positive: Color { system(.systemGreen).opacity(0.95) }
@@ -90,10 +92,22 @@ enum NotchTheme {
     static var controlAccent: Color { system(.controlAccentColor).opacity(0.95) }
 
     static let accent = Color.white.opacity(0.95)
-    static let glow = Color.white.opacity(0.05)
+    static let glow = Color.white.opacity(0.06)
     /// Dynamo media energy — soft violet (identity, not system purple alone).
-    static let mediaGlow = Color(red: 0.62, green: 0.48, blue: 1.0).opacity(0.48)
-    static let calmGlow = Color(red: 0.40, green: 0.78, blue: 1.0).opacity(0.40)
+    static let mediaGlow = Color(red: 0.62, green: 0.48, blue: 1.0).opacity(0.55)
+    static let calmGlow = Color(red: 0.38, green: 0.82, blue: 1.0).opacity(0.48)
+    /// Tasteful neon glass accents (cyan ↔ violet).
+    static let neonCyan = Color(red: 0.35, green: 0.92, blue: 1.0)
+    static let neonViolet = Color(red: 0.72, green: 0.48, blue: 1.0)
+    static let neonEdge = LinearGradient(
+        colors: [
+            neonCyan.opacity(0.55),
+            Color.white.opacity(0.18),
+            neonViolet.opacity(0.45)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     // MARK: Materials (NSVisualEffectView)
     /// Collapsed notch / HUD — matches menu bar / HUD chrome.

@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting {
+final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting, WidgetSettingsProviding {
     let id = "shelf"
     let displayName = "Shelf"
     let systemImage = "tray.and.arrow.down.fill"
@@ -26,6 +26,10 @@ final class ShelfPlugin: ObservableObject, NotchWidgetPlugin, FileDropAccepting 
 
     func expandedView() -> AnyView {
         AnyView(ExpandedShelfView(plugin: self))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(ShelfSettingsView(store: store))
     }
 
     /// Open a system file picker and stash the chosen files.
@@ -106,11 +110,13 @@ private struct ExpandedShelfView: View {
                 dropHint
                     .contentShape(Rectangle())
                     .onTapGesture { plugin.pickFiles() }
+                    .notchAppear(delay: 0.04)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.items) { item in
+                        ForEach(Array(store.items.enumerated()), id: \.element.id) { index, item in
                             row(item)
+                                .notchAppear(delay: Double(min(index, 8)) * 0.028)
                         }
                     }
                 }
@@ -122,6 +128,7 @@ private struct ExpandedShelfView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .animation(.easeInOut(duration: 0.2), value: store.canUndoClear)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleProviders(providers)
@@ -290,5 +297,25 @@ private struct ExpandedShelfView: View {
             }
         }
         return handled
+    }
+}
+
+// MARK: - Settings
+
+private struct ShelfSettingsView: View {
+    @ObservedObject var store: ShelfStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Stepper("Max items: \(store.maxItems)", value: $store.maxItems, in: 5...100, step: 1)
+            Text("Oldest stashed copies are removed when the shelf is full.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Clear shelf", role: .destructive) {
+                store.clear()
+            }
+            .disabled(store.items.isEmpty)
+        }
     }
 }

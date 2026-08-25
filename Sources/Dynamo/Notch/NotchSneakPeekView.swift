@@ -14,6 +14,8 @@ struct NotchSneakPeekView: View {
     let peek: NotchSneakPeek
     /// Live transport + cover palette for media aurora EQ.
     @ObservedObject private var mediaPulse = MediaPeekPulse.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var entrance = false
 
     private var isMedia: Bool { peek.style == .media }
     private var isUrgent: Bool { peek.urgency >= .high }
@@ -186,6 +188,25 @@ struct NotchSneakPeekView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background { peekBackground }
+        .scaleEffect(entrance || reduceMotion ? 1 : 0.96)
+        .opacity(entrance || reduceMotion ? 1 : 0.0)
+        .onAppear {
+            guard !reduceMotion else {
+                entrance = true
+                return
+            }
+            withAnimation(NotchTheme.snappy) {
+                entrance = true
+            }
+        }
+        .onChange(of: peek.title) { _ in
+            // New peek identity — replay a light settle.
+            guard !reduceMotion else { return }
+            entrance = false
+            DispatchQueue.main.async {
+                withAnimation(NotchTheme.snappy) { entrance = true }
+            }
+        }
     }
 
     @ViewBuilder

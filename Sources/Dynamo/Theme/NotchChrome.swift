@@ -22,8 +22,8 @@ struct NotchCard<Content: View>: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.08),
-                                    NotchTheme.cardFill.opacity(0.5),
+                                    Color.white.opacity(0.07),
+                                    NotchTheme.cardFill.opacity(0.55),
                                     Color.clear
                                 ],
                                 startPoint: .top,
@@ -33,14 +33,18 @@ struct NotchCard<Content: View>: View {
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
-                                colors: [Color.white.opacity(0.20), Color.white.opacity(0.05)],
+                                colors: [
+                                    Color.white.opacity(0.18),
+                                    NotchTheme.neonCyan.opacity(0.12),
+                                    Color.white.opacity(0.05)
+                                ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
                             lineWidth: 0.6
                         )
                 }
-                .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+                .shadow(color: Color.black.opacity(0.2), radius: 7, y: 2)
             }
     }
 }
@@ -58,11 +62,21 @@ struct NotchSectionHeader: View {
 
     var body: some View {
         HStack(spacing: NotchTheme.spaceSM) {
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [NotchTheme.neonCyan.opacity(0.9), NotchTheme.neonViolet.opacity(0.7)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 2.5, height: 10)
+                .shadow(color: NotchTheme.neonCyan.opacity(0.45), radius: 3, y: 0)
             Text(title)
                 .font(NotchTheme.section)
                 .foregroundStyle(NotchTheme.textTertiary)
                 .textCase(.uppercase)
-                .tracking(0.7)
+                .tracking(NotchTheme.sectionTracking)
             Spacer(minLength: 0)
             if let trailing {
                 trailing
@@ -156,9 +170,11 @@ struct NotchStatusChip: View {
                     .fill(kind.fill)
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(kind.foreground.opacity(0.16), lineWidth: 0.5)
+                            .strokeBorder(kind.foreground.opacity(0.28), lineWidth: 0.6)
                     )
+                    .shadow(color: kind.foreground.opacity(0.22), radius: 4, y: 0)
             )
+            .animation(NotchTheme.snappy, value: text)
     }
 }
 
@@ -172,9 +188,7 @@ struct NotchChipLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
+                chipIcon(systemImage)
             }
             Text(title)
                 .font(NotchTheme.micro.weight(.semibold))
@@ -189,12 +203,45 @@ struct NotchChipLabel: View {
                     Capsule(style: .continuous)
                         .strokeBorder(
                             active
-                                ? NotchTheme.controlAccent.opacity(0.35)
-                                : NotchTheme.hairline.opacity(0.45),
-                            lineWidth: 0.5
+                                ? LinearGradient(
+                                    colors: [
+                                        NotchTheme.neonCyan.opacity(0.65),
+                                        NotchTheme.neonViolet.opacity(0.5)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                : LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.18),
+                                        Color.white.opacity(0.06)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                            lineWidth: active ? 0.8 : 0.5
                         )
                 )
+                .shadow(
+                    color: active ? NotchTheme.neonCyan.opacity(0.28) : .clear,
+                    radius: active ? 5 : 0,
+                    y: 0
+                )
         )
+        .scaleEffect(active ? 1.02 : 1.0)
+        .animation(NotchTheme.snappy, value: active)
+    }
+
+    @ViewBuilder
+    private func chipIcon(_ systemImage: String) -> some View {
+        let image = Image(systemName: systemImage)
+            .font(.system(size: 10, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+        if #available(macOS 14.0, *) {
+            image.symbolEffect(.bounce, value: active)
+        } else {
+            image
+        }
     }
 }
 

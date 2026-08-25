@@ -2,21 +2,76 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding {
+final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekProviding, NotchAmbientProviding, WidgetSettingsProviding {
     let id = "calendar"
     let displayName = "Calendar"
     let systemImage = "calendar"
+
+    private static let lookaheadKey = "dynamo.calendar.lookaheadDays"
+    private static let showAllDayKey = "dynamo.calendar.showAllDay"
+    private static let peekLeadKey = "dynamo.calendar.peekLeadMinutes"
 
     @Published private(set) var events: [CalendarEventItem] = []
     @Published private(set) var authState: CalendarAuthState = .notDetermined
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
+    /// How many days ahead to keep in the notch list (1…30).
+    @Published var lookaheadDays: Int {
+        didSet {
+            guard !isConfiguring else { return }
+            let clamped = min(30, max(1, lookaheadDays))
+            if clamped != lookaheadDays {
+                lookaheadDays = clamped
+                return
+            }
+            UserDefaults.standard.set(lookaheadDays, forKey: Self.lookaheadKey)
+            applyProviderSnapshot()
+        }
+    }
+
+    @Published var showAllDay: Bool {
+        didSet {
+            guard !isConfiguring else { return }
+            UserDefaults.standard.set(showAllDay, forKey: Self.showAllDayKey)
+            applyProviderSnapshot()
+        }
+    }
+
+    /// Minutes before start when peeks begin (5…60).
+    @Published var peekLeadMinutes: Int {
+        didSet {
+            guard !isConfiguring else { return }
+            let clamped = min(60, max(5, peekLeadMinutes))
+            if clamped != peekLeadMinutes {
+                peekLeadMinutes = clamped
+                return
+            }
+            UserDefaults.standard.set(peekLeadMinutes, forKey: Self.peekLeadKey)
+        }
+    }
+
     private let provider: CalendarProvider
     /// Stages already announced per event id (e.g. "t15", "t5", "now").
     private var notifiedEventStages: [String: Set<String>] = [:]
-    private let leadTime: TimeInterval = 15 * 60
+    private var leadTime: TimeInterval { TimeInterval(peekLeadMinutes) * 60 }
+    private var isConfiguring = true
 
     init(provider: CalendarProvider? = nil) {
+        if UserDefaults.standard.object(forKey: Self.lookaheadKey) == nil {
+            lookaheadDays = 14
+        } else {
+            lookaheadDays = min(30, max(1, UserDefaults.standard.integer(forKey: Self.lookaheadKey)))
+        }
+        if UserDefaults.standard.object(forKey: Self.showAllDayKey) == nil {
+            showAllDay = true
+        } else {
+            showAllDay = UserDefaults.standard.bool(forKey: Self.showAllDayKey)
+        }
+        if UserDefaults.standard.object(forKey: Self.peekLeadKey) == nil {
+            peekLeadMinutes = 15
+        } else {
+            peekLeadMinutes = min(60, max(5, UserDefaults.standard.integer(forKey: Self.peekLeadKey)))
+        }
         // Events only — system Reminders live in the Checklist tab.
         let resolved = provider ?? EventKitCalendarProvider()
         self.provider = resolved
@@ -25,6 +80,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
             self.applyProviderSnapshot()
             self.checkUpcomingEvents()
         }
+        isConfiguring = false
     }
 
     var ambientEvent: CalendarEventItem? {
@@ -88,7 +144,11 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         let now = Date()
         let previousCount = events.count
         let previousAuth = authState
+        let horizon = Calendar.current.date(byAdding: .day, value: lookaheadDays, to: now)
+            ?? now.addingTimeInterval(TimeInterval(lookaheadDays) * 86_400)
         events = provider.upcoming.filter { item in
+            if !showAllDay, item.isAllDay { return false }
+            if item.start > horizon { return false }
             if item.end > now { return true }
             // Keep all-day items that still land on today.
             if item.isAllDay {
@@ -173,6 +233,10 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     func expandedView() -> AnyView {
         AnyView(ExpandedCalendarView(plugin: self))
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(CalendarSettingsView(plugin: self))
     }
 
     /// Compact when empty / no read access; taller only when listing events.
@@ -439,6 +503,7 @@ private struct ExpandedCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .onAppear { plugin.refresh() }
     }
 
@@ -446,11 +511,12 @@ private struct ExpandedCalendarView: View {
     private func calendarEventList(columns: Int) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
-                ForEach(groupedDays, id: \.dayStart) { group in
+                ForEach(Array(groupedDays.enumerated()), id: \.element.dayStart) { groupIndex, group in
                     Text(dayLabel(group.dayStart))
                         .font(NotchTheme.micro.weight(.semibold))
                         .foregroundStyle(NotchTheme.textQuaternary)
                         .padding(.top, 2)
+                        .notchAppear(delay: Double(min(groupIndex, 4)) * 0.04)
                     if columns == 2 {
                         LazyVGrid(
                             columns: [
@@ -459,13 +525,15 @@ private struct ExpandedCalendarView: View {
                             ],
                             spacing: 6
                         ) {
-                            ForEach(group.events) { event in
+                            ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
                                 eventRow(event)
+                                    .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
                             }
                         }
                     } else {
-                        ForEach(group.events) { event in
+                        ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
                             eventRow(event)
+                                .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
                         }
                     }
                 }
@@ -681,5 +749,28 @@ private struct ExpandedCalendarView: View {
             return Color(red: c.red, green: c.green, blue: c.blue, opacity: c.alpha)
         }
         return Color.accentColor
+    }
+}
+
+// MARK: - Settings
+
+private struct CalendarSettingsView: View {
+    @ObservedObject var plugin: CalendarPlugin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Stepper("Lookahead: \(plugin.lookaheadDays) days", value: $plugin.lookaheadDays, in: 1...30)
+            Toggle("Show all-day events", isOn: $plugin.showAllDay)
+            Stepper(
+                "Peek lead: \(plugin.peekLeadMinutes) min",
+                value: $plugin.peekLeadMinutes,
+                in: 5...60,
+                step: 5
+            )
+            Text("Peeks fire when an event starts within this many minutes.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding {
+final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProviding, WidgetSettingsProviding {
     let id = "focus"
     let displayName = "Focus"
     let systemImage = "scope"
@@ -45,6 +45,10 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
 
     func ambientView() -> AnyView {
         AnyView(AmbientFocusView())
+    }
+
+    func settingsView() -> AnyView {
+        AnyView(FocusSettingsView())
     }
 }
 
@@ -129,6 +133,7 @@ private struct ExpandedFocusView: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .notchAppear()
         .onAppear {
             SystemVolumeController.shared.start()
             FocusController.shared.reevaluateMeeting()
@@ -460,13 +465,16 @@ private struct ExpandedFocusView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let now = agenda.snapshot.now {
                 agendaRow("Now", now, NotchTheme.positive)
+                    .notchAppear()
             }
             let upNext = agenda.snapshot.upNext
-            ForEach(upNext.prefix(showAllAgenda ? upNext.count : 3)) { item in
+            ForEach(Array(upNext.prefix(showAllAgenda ? upNext.count : 3).enumerated()), id: \.element.id) { index, item in
                 agendaRow(nil, item, NotchTheme.mediaGlow)
+                    .notchAppear(delay: 0.04 + Double(min(index, 6)) * 0.03)
             }
-            ForEach(agenda.snapshot.needsAttention.prefix(2)) { item in
+            ForEach(Array(agenda.snapshot.needsAttention.prefix(2).enumerated()), id: \.element.id) { index, item in
                 agendaRow("Due", item, NotchTheme.caution)
+                    .notchAppear(delay: 0.1 + Double(index) * 0.03)
             }
             if upNext.count > 3 {
                 Button(showAllAgenda ? "Show less" : "Show all \(upNext.count)") {
@@ -1042,6 +1050,27 @@ private struct MeetingHistoryPanel: View {
         case .decision: return NotchTheme.mediaGlow
         case .action:   return NotchTheme.positive
         case .risk:     return NotchTheme.caution
+        }
+    }
+}
+
+// MARK: - Settings
+
+private struct FocusSettingsView: View {
+    @ObservedObject private var meeting = MeetingMode.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Dim media ambient in meetings", isOn: $meeting.dimMediaAmbient)
+            Text("Hides the media ambient strip while a meeting is active.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Quiet peeks when Focus / Low Power is on", isOn: $meeting.quietOnFocus)
+            Text("Suppresses low and normal urgency Peeks while system Low Power Mode (Focus proxy) is active. Critical alerts still show.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

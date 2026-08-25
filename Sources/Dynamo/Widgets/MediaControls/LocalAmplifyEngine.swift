@@ -88,10 +88,19 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private var liveMakeupTarget: Float = 1.0
     private var liveHFMul: Float = 1.0
     private var liveHFTarget: Float = 1.0
-    /// Scales wet only (≤1) so Amplify doesn’t win A/B by loudness. Never boosts dry.
+    /// Presence / note intelligibility (Tone AI).
+    private var livePresenceMul: Float = 1.0
+    private var livePresenceTarget: Float = 1.0
+    /// Sub / body weight (Tone AI).
+    private var liveBassMul: Float = 1.0
+    private var liveBassTarget: Float = 1.0
+    /// Scales wet only so Amplify doesn’t win A/B by loudness alone.
     private var wetLoudnessMatch: Float = 1.0
     private var wetLoudnessTarget: Float = 1.0
-    private static let analysisIntervalSeconds: Float = 0.75
+    private static let analysisIntervalSeconds: Float = 0.65
+    /// Last genre used for curve rebuild (avoids thrashing).
+    private var lastToneGenreApplied: String = ""
+    private var lastToneRebuildAt: Date = .distantPast
 
     private(set) var isRunning = false
     private(set) var lastError: String?
@@ -278,7 +287,17 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         ) {
             return fromPy
         }
-        return DynamoEQCurves.curve(for: profile, device: device, sampleRate: sampleRate, path: path)
+        let bias = AmplifyToneAI.scaledNoteBias(
+            for: toneGenre.isEmpty ? "unknown" : toneGenre,
+            confidence: max(0.4, toneConfidence)
+        )
+        return DynamoEQCurves.curve(
+            for: profile,
+            device: device,
+            sampleRate: sampleRate,
+            path: path,
+            toneBias: bias
+        )
     }
 
     private func applyProfileLocked(
@@ -582,8 +601,13 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         liveMakeupTarget = 1
         liveHFMul = 1
         liveHFTarget = 1
+        livePresenceMul = 1
+        livePresenceTarget = 1
+        liveBassMul = 1
+        liveBassTarget = 1
         wetLoudnessMatch = 1
         wetLoudnessTarget = 1
+        lastToneGenreApplied = ""
         liveMediaHint = ""
         channelRoles = []
     }
@@ -793,6 +817,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         var yA = dry
         for f in aChain { yA = f.process(yA) }
 
+        // Tone AI volume: makeup × bass emphasis on full-range (not LFE double-boost).
+        let volMul = makeup * liveMakeupMul * (useLFE ? 1.0 : (0.65 + 0.35 * liveBassMul))
+
         var eq: Float
         if let target = targetChannelFilters, !target.isEmpty {
             let tIdx = min(channel, target.count - 1)
@@ -805,11 +832,17 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             var yB = dry
             for f in bChain { yB = f.process(yB) }
             let (gA, gB) = Self.equalPower(crossfadePos)
-            let mA = makeup * liveMakeupMul
-            let mB = targetMakeup * liveMakeupMul
+            let mA = volMul
+            let mB = targetMakeup * liveMakeupMul * (useLFE ? 1.0 : (0.65 + 0.35 * liveBassMul))
             eq = yA * mA * gA + yB * mB * gB
         } else {
-            eq = yA * makeup * liveMakeupMul
+            eq = yA * volMul
+        }
+
+        // Presence / note intelligibility: gently emphasize the EQ residual vs dry.
+        if livePresenceMul > 1.001, role != .lfe {
+            let residual = eq - dry
+            eq = dry + residual * livePresenceMul
         }
 
         // Height beds: gently pull HF energy without a second filter bank.
@@ -874,7 +907,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         let highRatio = (sqrt(analysisHighEnergy / Float(n)) + 1e-9) / rms
         let zcr = Float(analysisZCR) / Float(n)
 
-        // On-device Tone AI: classify live features + optional local metadata.
+        // On-device Tone AI: genre + volume + note-region intent.
         let feats = AmplifyToneAI.featuresFromLive(
             rms: rms,
             crest: crest,
@@ -890,51 +923,73 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
         var makeupT = verdict.makeupMul
         var hfT = verdict.hfMul
-        var hint = verdict.genre
+        var presenceT = verdict.presenceMul
+        var bassT = verdict.bassMul
+        var hint = verdict.displayLabel
 
-        // Legacy media-type fallbacks blend lightly when AI is low-confidence.
-        if verdict.confidence < 0.35 {
+        // Low-confidence: still apply mild intelligibility from spectrum.
+        if verdict.confidence < 0.32 {
             if zcr > 0.18 && highRatio > 0.55 {
-                makeupT = 0.96
-                hfT = 1.0
+                makeupT = 1.04; hfT = 1.0; presenceT = 1.10; bassT = 0.95
                 hint = "speech"
-            } else if highRatio < 0.35 && crest < 6 {
-                makeupT = 1.02
-                hfT = 0.92
+            } else if highRatio < 0.32 && crest < 6 {
+                makeupT = 1.05; hfT = 0.92; presenceT = 1.03; bassT = 1.08
                 hint = "bass"
             } else if highRatio > 0.85 {
-                makeupT = 0.97
-                hfT = 0.85
+                makeupT = 1.01; hfT = 0.88; presenceT = 1.05; bassT = 1.02
                 hint = "bright"
-            } else if crest > 12 {
-                makeupT = 0.94
-                hfT = 0.95
-                hint = "dynamic"
             } else if rms < 0.02 {
-                makeupT = 1.0
-                hfT = 1.0
+                makeupT = 1.08; hfT = 0.98; presenceT = 1.08; bassT = 1.02
                 hint = "quiet"
             }
         }
 
         if profileRaw == "reference" {
-            makeupT = 1.0 + (makeupT - 1.0) * 0.25
-            hfT = 1.0 + (hfT - 1.0) * 0.25
+            // Keep Reference transparent — tiny fraction of AI guidance.
+            makeupT = 1.0 + (makeupT - 1.0) * 0.20
+            hfT = 1.0 + (hfT - 1.0) * 0.20
+            presenceT = 1.0 + (presenceT - 1.0) * 0.25
+            bassT = 1.0 + (bassT - 1.0) * 0.20
         }
 
-        liveMakeupTarget = max(0.88, min(1.08, makeupT))
-        liveHFTarget = max(0.8, min(1.05, hfT))
+        liveMakeupTarget = max(0.92, min(1.16, makeupT))
+        liveHFTarget = max(0.82, min(1.06, hfT))
+        livePresenceTarget = max(0.96, min(1.14, presenceT))
+        liveBassTarget = max(0.92, min(1.12, bassT))
         liveMediaHint = hint
 
-        // Fair A/B: never boost dry. If wet would be hotter, attenuate wet slightly.
-        // Inverse of makeup target, clamped so we only turn wet down, not up.
-        wetLoudnessTarget = max(0.88, min(1.0, 1.0 / max(0.92, liveMakeupTarget)))
+        // Fair A/B: if wet is hotter, pull wet slightly (never boost dry).
+        wetLoudnessTarget = max(0.86, min(1.0, 1.0 / max(0.90, liveMakeupTarget * 0.98)))
+
+        // Rebuild EQ curve when genre settles so note regions match the mix.
+        maybeRebuildForTone(verdict: verdict)
 
         analysisEnergy = 0
         analysisPeak = 0
         analysisHighEnergy = 0
         analysisFrames = 0
         analysisZCR = 0
+    }
+
+    private func maybeRebuildForTone(verdict: AmplifyToneAI.Verdict) {
+        guard profileRaw != "reference" else { return }
+        guard verdict.confidence >= 0.34 else { return }
+        let genre = verdict.genre
+        let now = Date()
+        // Rebuild at most every 2.5s and only on genre change.
+        guard genre != lastToneGenreApplied || now.timeIntervalSince(lastToneRebuildAt) > 8 else {
+            return
+        }
+        guard now.timeIntervalSince(lastToneRebuildAt) > 2.5 || lastToneGenreApplied.isEmpty else {
+            return
+        }
+        lastToneGenreApplied = genre
+        lastToneRebuildAt = now
+        let profile = MediaAmplifyProfile.resolved(fromStored: profileRaw)
+        let device = AmplifyOutputDevice(rawValue: deviceRaw) ?? .auto
+        let sr = format.mSampleRate > 0 ? format.mSampleRate : 48_000
+        let ch = max(1, channelCount)
+        applyProfileLocked(profile, device: device, sampleRate: sr, channels: ch, seamless: true)
     }
 
     /// Advance crossfade + wet + live adaptive ramps once per audio frame.
@@ -948,9 +1003,11 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         if wetInc != 0 || abs(wetGain - wetTarget) > 1e-5 {
             wetGain = advanceToward(wetGain, target: wetTarget, inc: &wetInc)
         }
-        let liveSmooth: Float = 0.002
+        let liveSmooth: Float = 0.0025
         liveMakeupMul += (liveMakeupTarget - liveMakeupMul) * liveSmooth
         liveHFMul += (liveHFTarget - liveHFMul) * liveSmooth
+        livePresenceMul += (livePresenceTarget - livePresenceMul) * liveSmooth
+        liveBassMul += (liveBassTarget - liveBassMul) * liveSmooth
         wetLoudnessMatch += (wetLoudnessTarget - wetLoudnessMatch) * liveSmooth
     }
 
@@ -1359,7 +1416,8 @@ enum DynamoEQCurves {
         for profile: MediaAmplifyProfile,
         device: AmplifyOutputDevice,
         sampleRate: Double,
-        path: AmplifySpatialPath = .stereo
+        path: AmplifySpatialPath = .stereo,
+        toneBias: [String: Float] = [:]
     ) -> AmplifyEQCurve {
         let sr = Float(sampleRate)
         var bands: [(String, Float, Float, Float, String)] // kind, freq, gain, q, label
@@ -1387,7 +1445,7 @@ enum DynamoEQCurves {
                 ("highshelf", 8000, 0.6, 0.7, "brilliance")
             ]
             makeupDB = 0.2
-            gainCap = 2.0
+            gainCap = 2.2
         case .cinema:
             bands = [
                 ("lowshelf", 70, 1.2, 0.7, "sub"),
@@ -1397,7 +1455,7 @@ enum DynamoEQCurves {
                 ("highshelf", 9000, 0.6, 0.7, "air")
             ]
             makeupDB = 0.2
-            gainCap = 2.0
+            gainCap = 2.2
         case .impact:
             bands = [
                 ("lowshelf", 60, 2.0, 0.7, "sub"),
@@ -1406,28 +1464,42 @@ enum DynamoEQCurves {
                 ("peak", 800, -0.8, 0.9, "mud"),
                 ("highshelf", 7000, 0.4, 0.7, "air")
             ]
-            makeupDB = 0.25
+            makeupDB = 0.28
             width = 0.08 // only Impact may widen (and only on pure stereo)
-            gainCap = 2.5
+            gainCap = 2.8
         case .symphony:
-            // Mild concert contour — quieter than original “loudness bias” curves.
+            // Mild concert contour + room for Tone AI note boosts.
             bands = [
                 ("lowshelf", 65, 0.9, 0.7, "sub"),
+                ("peak", 110, 0.35, 1.0, "punch"),
                 ("peak", 180, 0.5, 0.95, "body"),
                 ("peak", 700, -0.9, 1.0, "mud"),
-                ("peak", 2200, 0.9, 1.05, "presence"),
-                ("peak", 4500, 0.4, 1.0, "sheen"),
-                ("highshelf", 10000, 0.5, 0.7, "air")
+                ("peak", 2200, 0.95, 1.05, "presence"),
+                ("peak", 4500, 0.45, 1.0, "sheen"),
+                ("highshelf", 10000, 0.55, 0.7, "air")
             ]
-            makeupDB = 0.18
+            makeupDB = 0.22
             width = 0
-            gainCap = 1.8
+            gainCap = 2.4
         }
 
         // Mild device calibration (Tier B) — not aggressive immersive.
         let bias = device.calibrationBias
         bands = bands.map { kind, freq, gain, q, label in
             (kind, freq, gain + (bias[label] ?? 0), q, label)
+        }
+
+        // Tone AI note-region boosts — hear every part as intended for the genre.
+        if !toneBias.isEmpty, profile != .reference {
+            bands = bands.map { kind, freq, gain, q, label in
+                let delta = toneBias[label] ?? 0
+                return (kind, freq, gain + delta, q, label)
+            }
+            // Extra mid presence peak when AI asks for vocals/notes and none exists.
+            if let p = toneBias["presence"], p > 0.35,
+               !bands.contains(where: { abs($0.1 - 2800) < 50 }) {
+                bands.append(("peak", 2800, min(1.2, p * 0.55), 1.1, "presence"))
+            }
         }
 
         // Path voicing — Atmos/Spatial: gentle sub + mud only; no air boost.

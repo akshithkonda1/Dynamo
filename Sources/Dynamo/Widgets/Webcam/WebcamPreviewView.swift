@@ -3,17 +3,19 @@ import AppKit
 import SwiftUI
 
 /// Hosts an `AVCaptureVideoPreviewLayer` bound to the capture session.
-/// Boring Notch style: aspect-fill, optional selfie mirror.
+/// Supports fill vs fit gravity and optional selfie mirror.
 struct WebcamPreviewView: NSViewRepresentable {
     let session: AVCaptureSession
     var isMirrored: Bool
     var isRunning: Bool
+    /// When true, letterbox (fit); when false, crop (fill).
+    var fitToFrame: Bool = false
 
     func makeNSView(context: Context) -> PreviewHostView {
         let view = PreviewHostView()
         // Same as Boring Notch: the preview layer *is* the view layer.
         view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
+        view.previewLayer.videoGravity = fitToFrame ? .resizeAspect : .resizeAspectFill
         view.applyMirroring(isMirrored)
         return view
     }
@@ -22,6 +24,7 @@ struct WebcamPreviewView: NSViewRepresentable {
         if nsView.previewLayer.session !== session {
             nsView.previewLayer.session = session
         }
+        nsView.previewLayer.videoGravity = fitToFrame ? .resizeAspect : .resizeAspectFill
         nsView.applyMirroring(isMirrored)
         if isRunning {
             nsView.needsLayout = true

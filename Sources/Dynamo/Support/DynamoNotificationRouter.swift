@@ -23,6 +23,7 @@ final class DynamoNotificationRouter: ObservableObject {
     private static let widgetRouteKey = "dynamo.router.widgetsEnabled"
     private static let externalRouteKey = "dynamo.router.externalEnabled"
     private static let focusRouteKey = "dynamo.router.focusEnabled"
+    private static let peekOnlyKey = "dynamo.router.peekOnlyDelivery"
 
     /// Where an alert came from (for hub labels + policy).
     enum Source: String, CaseIterable, Identifiable {
@@ -89,6 +90,30 @@ final class DynamoNotificationRouter: ObservableObject {
         didSet { UserDefaults.standard.set(routeExternal, forKey: Self.externalRouteKey) }
     }
 
+    /// **Deliver through Peek, not typical macOS banners.**
+    ///
+    /// Dynamo never posts system banners for its own alerts. With Peek-only on:
+    /// - Everything the router handles is presented as a notch Peek
+    /// - Messages/calls get longer dwell + hub priority
+    /// - You still need to set Messages/FaceTime/etc. alert style to **None**
+    ///   in System Settings (Apple does not let apps hide other apps’ banners)
+    @Published var peekOnlyDelivery: Bool {
+        didSet {
+            UserDefaults.standard.set(peekOnlyDelivery, forKey: Self.peekOnlyKey)
+            if peekOnlyDelivery {
+                isEnabled = true
+                PeekNotificationCenter.shared.isPrimaryDelivery = true
+                // Prefer ingesting system apps so texts/calls still arrive via Peek.
+                if !routeSystemApps {
+                    routeSystemApps = true
+                }
+                lastStatus = "Peek-only · alerts via notch (not banners)"
+            } else {
+                lastStatus = "Router on · Peek + system banners may both show"
+            }
+        }
+    }
+
     @Published private(set) var routedCount: Int = 0
     @Published private(set) var lastRoutedSource: Source?
     @Published private(set) var lastRoutedTitle: String = ""
@@ -124,6 +149,11 @@ final class DynamoNotificationRouter: ObservableObject {
             routeSystemApps = SystemNotificationMirror.shared.isEnabled
         } else {
             routeSystemApps = UserDefaults.standard.bool(forKey: Self.systemRouteKey)
+        }
+        if UserDefaults.standard.object(forKey: Self.peekOnlyKey) == nil {
+            peekOnlyDelivery = true
+        } else {
+            peekOnlyDelivery = UserDefaults.standard.bool(forKey: Self.peekOnlyKey)
         }
     }
 
@@ -168,9 +198,15 @@ final class DynamoNotificationRouter: ObservableObject {
         }
 
         SystemNotificationMirror.shared.start()
-        lastStatus = routeSystemApps
-            ? "Routing widgets · Focus · system apps → Peek"
-            : "Routing widgets · Focus → Peek (system apps off)"
+        // Ensure Peek is the presentation surface when Peek-only is the default.
+        if peekOnlyDelivery {
+            PeekNotificationCenter.shared.isPrimaryDelivery = true
+        }
+        lastStatus = peekOnlyDelivery
+            ? "Peek-only delivery · routed into the notch"
+            : (routeSystemApps
+                ? "Routing widgets · Focus · system apps → Peek"
+                : "Routing widgets · Focus → Peek (system apps off)")
     }
 
     func stop() {
@@ -205,18 +241,84 @@ final class DynamoNotificationRouter: ObservableObject {
         let cat = category ?? defaultCategory(for: source, peek: peek)
         let hub = self.hub ?? PeekNotificationCenter.shared
 
+        // Peek-only: never fall back to system banners; present only via hub.
+        var delivery = peek
+        if peekOnlyDelivery {
+            PeekNotificationCenter.shared.isPrimaryDelivery = true
+            delivery = Self.elevateForPeekOnly(peek, category: cat, source: source)
+        }
+
         hub.deliver(
-            peek,
-            id: id ?? "\(source.rawValue)|\(cat)|\(peek.title)|\(peek.subtitle)",
+            delivery,
+            id: id ?? "\(source.rawValue)|\(cat)|\(delivery.title)|\(delivery.subtitle)",
             category: cat,
             coalesce: coalesce
         )
 
         routedCount &+= 1
         lastRoutedSource = source
-        lastRoutedTitle = peek.title
-        lastStatus = "Routed \(source.title) · \(peek.title)"
+        lastRoutedTitle = delivery.title
+        lastStatus = peekOnlyDelivery
+            ? "Peek · \(source.title) · \(delivery.title)"
+            : "Routed \(source.title) · \(delivery.title)"
         return true
+    }
+
+    /// Longer-lived / higher-urgency presentation so Peek feels like the real alert.
+    private static func elevateForPeekOnly(
+        _ peek: NotchSneakPeek,
+        category: String,
+        source: Source
+    ) -> NotchSneakPeek {
+        var p = peek
+        let isMessage = category == "text" || p.detail.lowercased().hasPrefix("text")
+        let isCall = category == "call" || source == .call || p.detail.lowercased().hasPrefix("call")
+        if isMessage || isCall {
+            // Critical so they preempt quieter peeks and stay up longer.
+            if p.urgency < .critical {
+                p.urgency = .critical
+            }
+        } else if p.urgency < .high, source == .system {
+            p.urgency = .high
+        }
+        return p
+    }
+
+    // MARK: - Peek-only setup (system banners)
+
+    /// Apps users typically want delivered as Peeks instead of corner banners.
+    static let peekOnlyTargetApps: [(name: String, bundleID: String)] = [
+        ("Messages", "com.apple.MobileSMS"),
+        ("FaceTime", "com.apple.FaceTime"),
+        ("Mail", "com.apple.mail"),
+        ("Phone / Continuity", "com.apple.InCallService"),
+        ("Slack", "com.tinyspeck.slackmacgap"),
+        ("Discord", "com.hnc.Discord")
+    ]
+
+    /// Open System Settings → Notifications so the user can set alert style to **None**.
+    /// Apple does not allow third-party apps to hide other apps’ banners for you.
+    func openNotificationSettingsForPeekOnly() {
+        // Sequoia+ Notifications pane
+        let candidates = [
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+            "x-apple.systempreferences:com.apple.preference.notifications",
+            "x-apple.systempreferences:com.apple.focus"
+        ]
+        for s in candidates {
+            if let url = URL(string: s) {
+                NSWorkspace.shared.open(url)
+                lastStatus = "Set Messages/FaceTime alert style to None — keep Allow Notifications on so Dynamo can still route them into Peek"
+                return
+            }
+        }
+    }
+
+    func openFocusForPeekOnly() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.focus") {
+            NSWorkspace.shared.open(url)
+            lastStatus = "Optional: Focus can silence banners while Dynamo still shows Peeks"
+        }
     }
 
     /// Convenience for API / system ingest payloads.

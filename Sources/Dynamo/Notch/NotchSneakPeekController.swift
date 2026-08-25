@@ -20,14 +20,22 @@ final class NotchSneakPeekController: ObservableObject {
     /// Generation so delayed hide only clears the matching session.
     private var sessionID: UInt64 = 0
 
-    private func displayDuration(for urgency: NotchSneakPeekUrgency) -> TimeInterval {
+    private func displayDuration(for urgency: NotchSneakPeekUrgency, peek: NotchSneakPeek? = nil) -> TimeInterval {
         let multiplier = UserDefaults.standard.object(forKey: "peekDwellMultiplier") as? Double ?? 1.0
-        let base: TimeInterval
+        var base: TimeInterval
         switch urgency {
         case .low: base = 2.4
         case .normal: base = 2.8
         case .high: base = 4.5
         case .critical: base = 6.0
+        }
+        // Peek-only: hold messages/calls longer so the notch is the real alert surface.
+        if DynamoNotificationRouter.shared.peekOnlyDelivery, let peek {
+            let d = peek.detail.lowercased()
+            if d.hasPrefix("text") || d.hasPrefix("call") || peek.systemImage.contains("message")
+                || peek.systemImage.contains("phone") {
+                base *= 1.4
+            }
         }
         return base * multiplier
     }
@@ -89,8 +97,8 @@ final class NotchSneakPeekController: ObservableObject {
         }
         hideWorkItem = work
         let duration = content.style == .media
-            ? max(displayDuration(for: content.urgency), 2.4)
-            : displayDuration(for: content.urgency)
+            ? max(displayDuration(for: content.urgency, peek: content), 2.4)
+            : displayDuration(for: content.urgency, peek: content)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 }
