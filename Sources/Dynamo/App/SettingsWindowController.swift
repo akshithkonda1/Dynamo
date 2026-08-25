@@ -538,6 +538,23 @@ struct SettingsView: View {
                 set: { PeekNotificationCenter.shared.criticalSoundEnabled = $0 }
             ))
 
+            Divider()
+
+            Text("System volume & brightness")
+                .font(.subheadline.weight(.semibold))
+            Text("Dynamo shows a compact notch Peek when you change volume or display brightness. Optionally hide the stock macOS center overlay so only Dynamo appears.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Replace system volume & brightness HUD", isOn: Binding(
+                get: { SystemOSDSuppressor.isEnabled },
+                set: { SystemOSDSuppressor.isEnabled = $0 }
+            ))
+            Text("When on, Dynamo suppresses OSDUIHelper and owns the feedback in the notch (same approach as other notch HUD apps). Turn off to restore the default macOS overlay.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Stop the usual corner banners")

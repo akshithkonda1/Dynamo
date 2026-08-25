@@ -18,6 +18,9 @@ final class SystemVolumeController: ObservableObject {
 
     /// Fired when volume/mute changes from outside Dynamo (keys, Control Center).
     var onExternalChange: (() -> Void)?
+    /// Fired for any change that should show Dynamo’s notch volume HUD
+    /// (keys, Control Center, or Dynamo’s own slider/mute).
+    var onHUDRelevantChange: (() -> Void)?
 
     private var started = false
     private var listeningDeviceID: AudioDeviceID = kAudioObjectUnknown
@@ -58,6 +61,7 @@ final class SystemVolumeController: ObservableObject {
         let p = min(100, max(0, value))
         _ = SystemLevelReader.setOutputVolumePercent(p)
         applyLocal(percent: p, muted: p == 0 ? isMuted : false)
+        onHUDRelevantChange?()
         // Confirm from system after the change settles.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             self?.refreshFromSystem(announceExternal: false)
@@ -77,6 +81,7 @@ final class SystemVolumeController: ObservableObject {
             percent = settings.percent
             level = Float(settings.percent) / 100.0
         }
+        onHUDRelevantChange?()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             self?.refreshFromSystem(announceExternal: false)
         }
@@ -115,6 +120,10 @@ final class SystemVolumeController: ObservableObject {
         guard announceExternal else { return }
         if let until = suppressExternalUntil, Date() < until { return }
         onExternalChange?()
+        // Prefer HUD callback when attached; fall back so older listeners still work.
+        if onHUDRelevantChange != nil {
+            onHUDRelevantChange?()
+        }
     }
 
     private func applyLocal(percent p: Int, muted: Bool) {

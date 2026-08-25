@@ -1,13 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Compact volume / brightness meter shown over the notch tray.
-/// Volume HUD reflects live Core Audio levels (keys, Control Center, or Dynamo).
+/// Compact volume / brightness Peek shown in the notch — Dynamo’s replacement
+/// for the stock macOS OSD when takeover is enabled.
 struct SystemHUDView: View {
     let state: SystemHUDState
     @ObservedObject private var volume = SystemVolumeController.shared
 
-    /// Prefer live machine volume when showing the volume HUD.
     private var displayLevel: Float {
         if state.kind == .volume {
             return volume.isMuted ? 0 : volume.level
@@ -19,44 +18,75 @@ struct SystemHUDView: View {
         state.kind == .volume ? volume.isMuted : state.isMuted
     }
 
+    private var accent: Color {
+        switch state.kind {
+        case .volume: return NotchTheme.neonCyan
+        case .brightness: return Color(red: 1.0, green: 0.84, blue: 0.35)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Clear the camera housing on notched MacBooks.
             Color.clear
                 .frame(height: NotchGeometry.peekContentTopInset(for: NSScreen.main))
 
-            HStack(spacing: NotchTheme.spaceMD) {
-                Image(systemName: iconName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .frame(width: 22)
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(NotchTheme.chipFill)
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.95), Color.white.opacity(0.75)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: max(displayMuted ? 0 : 6, geo.size.width * CGFloat(displayLevel)))
-                    }
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.18))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: iconName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .symbolRenderingMode(.hierarchical)
                 }
-                .frame(height: 6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(titleLabel)
+                        .font(NotchTheme.micro.weight(.semibold))
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(NotchTheme.chipFill)
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            accent.opacity(0.95),
+                                            accent.opacity(0.65)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(displayMuted ? 0 : 8, geo.size.width * CGFloat(displayLevel)))
+                                .shadow(color: accent.opacity(0.35), radius: 4, y: 0)
+                        }
+                    }
+                    .frame(height: 7)
+                }
 
                 Text(percentLabel)
-                    .font(NotchTheme.caption.weight(.semibold).monospacedDigit())
+                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(NotchTheme.textPrimary)
-                    .frame(width: 40, alignment: .trailing)
+                    .frame(width: 48, alignment: .trailing)
+                    .contentTransition(.numericText())
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var titleLabel: String {
+        switch state.kind {
+        case .volume: return displayMuted ? "Muted" : "Volume"
+        case .brightness: return "Brightness"
+        }
     }
 
     private var iconName: String {
@@ -74,7 +104,6 @@ struct SystemHUDView: View {
     private var percentLabel: String {
         if state.kind == .volume {
             if displayMuted { return "Mute" }
-            // Use integer percent from the controller (exact system UI value).
             return "\(volume.percent)%"
         }
         if let bright = SystemLevelReader.displayBrightnessPercent() {
