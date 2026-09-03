@@ -496,22 +496,28 @@ struct SettingsView: View {
         SettingsSection(title: "Notifications & Peek") {
             Text("Notifications through Peek (not banners)")
                 .font(.subheadline.weight(.semibold))
-            Text("Dynamo delivers alerts as notch Peeks — the way you want them — not as typical top-right system banners. Calendar, battery, media, Focus, and Messages/FaceTime (when routed) all use Peek.")
+            Text("Turn on Replace Notification Center once. Hub becomes the inbox and Peek becomes the banner for Dynamo and this Mac. Apple still cannot hide leftover corner banners — keep Allow Notifications on and set Alert style to None.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Toggle("Deliver through Peek only", isOn: Binding(
-                get: { DynamoNotificationRouter.shared.peekOnlyDelivery },
-                set: { DynamoNotificationRouter.shared.peekOnlyDelivery = $0 }
+            Toggle("Replace Notification Center", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.replacesNotificationCenter },
+                set: { DynamoNotificationRouter.shared.replacesNotificationCenter = $0 }
             ))
             Toggle("Dynamo is the router", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.isEnabled },
                 set: { DynamoNotificationRouter.shared.isEnabled = $0 }
             ))
+            Toggle("Deliver through Peek only", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.peekOnlyDelivery },
+                set: { DynamoNotificationRouter.shared.peekOnlyDelivery = $0 }
+            ))
+            .disabled(DynamoNotificationRouter.shared.replacesNotificationCenter)
             Toggle("Route system apps into Peek (Messages, FaceTime…)", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeSystemApps },
                 set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
             ))
+            .disabled(DynamoNotificationRouter.shared.replacesNotificationCenter)
             Toggle("Route widgets", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeWidgets },
                 set: { DynamoNotificationRouter.shared.routeWidgets = $0 }
@@ -542,11 +548,11 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Stop the usual corner banners")
                         .font(.caption.weight(.semibold))
-                    Text("Apple does not let Dynamo turn off Messages/FaceTime banners for you. Keep “Allow Notifications” ON (so Dynamo can still see them), but set Alert style to None for each app:")
+                    Text("Apple does not let Dynamo hide other apps’ banners. Hub + Peek replace Notification Center when you ingest the store (Full Disk Access), keep Allow Notifications on, and set Alert style to None. Peek is the banner; Hub is the inbox.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Messages · FaceTime · Mail · Slack… → Notifications → Alert style → None")
+                    Text("Messages · FaceTime · Mail · Slack · Discord · Zoom… → Notifications → Alert style → None. Keep Allow Notifications on.")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
@@ -810,10 +816,10 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar")
+            Text("Hotkeys: ⌃⌥D notch · ⌃⌥P play/pause · ⌃⌥M mute · ⌃⌥S shelf · ⌃⌥C calendar · ⌃⌥B clipboard · ⌃⌥H hub")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text("URLs: dynamo://show · mute · play · shelf · calendar · peek?title=")
+            Text("URLs: dynamo://show · mute · play · shelf · calendar · clipboard · hub · airdrop · peek?title=")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

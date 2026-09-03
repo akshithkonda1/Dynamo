@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsController: SettingsWindowController?
     private var hiddenModeMenuItem: NSMenuItem?
     private var meetingModeMenuItem: NSMenuItem?
+    private var airDropShelfMenuItem: NSMenuItem?
     private weak var mediaPlugin: MediaControlsPlugin?
     private let hotKeys = GlobalHotKeys()
 
@@ -42,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated {
             for url in urls {
-                DynamoURLRouter.handle(url, notch: notchController, media: mediaPlugin)
+                DynamoURLRouter.handle(url, notch: notchController, media: mediaPlugin, registry: registry)
             }
         }
     }
@@ -188,9 +189,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Show Notch", action: #selector(showNotch), keyEquivalent: "n"))
         menu.addItem(NSMenuItem(title: "Focus File Shelf", action: #selector(focusShelf), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "Focus Calendar", action: #selector(focusCalendar), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem(title: "Focus Clipboard", action: #selector(focusClipboard), keyEquivalent: "b"))
+        menu.addItem(NSMenuItem(title: "Focus Hub", action: #selector(focusHub), keyEquivalent: "h"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Play/Pause", action: #selector(menuPlayPause), keyEquivalent: "p"))
         menu.addItem(NSMenuItem(title: "Mute / Unmute", action: #selector(menuMute), keyEquivalent: "m"))
+        menu.addItem(NSMenuItem(title: "AirDrop Last Shelf Item", action: #selector(airDropLastShelfItem), keyEquivalent: ""))
+        airDropShelfMenuItem = menu.items.last
         menu.addItem(NSMenuItem.separator())
         let meetingItem = NSMenuItem(title: "Meeting Mode", action: #selector(toggleMeetingMode), keyEquivalent: "")
         meetingItem.state = MeetingMode.shared.isEnabled ? .on : .off
@@ -224,6 +229,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.notchController?.focusPlugin(id: "shelf")
             case .focusCalendar:
                 self.notchController?.focusPlugin(id: "calendar")
+            case .focusClipboard:
+                self.notchController?.focusPlugin(id: "clipboard")
+            case .focusHub:
+                self.notchController?.focusPlugin(id: "peek-hub")
             case .focusToggle:
                 FocusController.shared.cycleMode()
             }
@@ -251,6 +260,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func focusClipboard() {
+        MainActor.assumeIsolated {
+            notchController?.focusPlugin(id: "clipboard")
+        }
+    }
+
+    @objc private func focusHub() {
+        MainActor.assumeIsolated {
+            notchController?.focusPlugin(id: "peek-hub")
+        }
+    }
+
+    @objc private func airDropLastShelfItem() {
+        MainActor.assumeIsolated {
+            registry?.firstPlugin(as: ShelfPlugin.self)?.store.airDropNewest()
+        }
+    }
+
     @objc private func menuPlayPause() {
         MainActor.assumeIsolated {
             mediaPlugin?.togglePlayPause()
@@ -275,6 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated {
             hiddenModeMenuItem?.state = (notchController?.isHiddenModeEnabled == true) ? .on : .off
             meetingModeMenuItem?.state = MeetingMode.shared.isEnabled ? .on : .off
+            let hasShelf = !(registry?.firstPlugin(as: ShelfPlugin.self)?.store.items.isEmpty ?? true)
+            airDropShelfMenuItem?.isEnabled = hasShelf
         }
     }
 

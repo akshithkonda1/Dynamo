@@ -28,14 +28,24 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                     systemImage: "doc.on.clipboard",
                     title: "Copied",
                     subtitle: preview,
-                    urgency: .low
+                    urgency: .low,
+                    category: "clipboard"
                 )
             case .image:
                 peek = NotchSneakPeek(
                     systemImage: "photo.on.rectangle",
                     title: "Copied",
                     subtitle: "Image",
-                    urgency: .low
+                    urgency: .low,
+                    category: "clipboard"
+                )
+            case .file:
+                peek = NotchSneakPeek(
+                    systemImage: "doc",
+                    title: "Copied",
+                    subtitle: item.text.isEmpty ? "File" : item.text,
+                    urgency: .low,
+                    category: "clipboard"
                 )
             }
             guard !FocusController.shared.shouldSuppress(peek: peek) else { return }
@@ -72,7 +82,9 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     }
 
     var canStripFormatting: Bool {
-        NSPasteboard.general.availableType(from: [.string]) != nil
+        let pb = NSPasteboard.general
+        let rich: [NSPasteboard.PasteboardType] = [.rtf, .rtfd, .html]
+        return pb.availableType(from: rich) != nil
     }
 }
 
@@ -123,14 +135,23 @@ private struct ExpandedClipboardView: View {
 
                     NotchSectionHeader(
                         "History",
-                        trailing: store.history.isEmpty
-                            ? nil
-                            : AnyView(
-                                Button("Clear") { showClearHistoryConfirm = true }
-                                    .buttonStyle(.plain)
-                                    .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textTertiary)
-                            )
+                        trailing: AnyView(
+                            HStack(spacing: 8) {
+                                if plugin.canStripFormatting {
+                                    Button("Paste as plain") { plugin.stripFormatting() }
+                                        .buttonStyle(.plain)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                        .help("Copy the current pasteboard as plain text")
+                                }
+                                if !store.history.isEmpty {
+                                    Button("Clear") { showClearHistoryConfirm = true }
+                                        .buttonStyle(.plain)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                }
+                            }
+                        )
                     )
 
                     if store.canUndoClearHistory {
@@ -195,14 +216,12 @@ private struct ExpandedClipboardView: View {
 
     @ViewBuilder
     private var historySection: some View {
-        let filtered = store.history.filter {
-            searchQuery.isEmpty || $0.text.localizedCaseInsensitiveContains(searchQuery)
-        }
+        let filtered = store.history.filter { ClipboardHistoryPolicy.matches($0, query: searchQuery) }
         if store.history.isEmpty {
             NotchEmptyState(
                 systemImage: "doc.on.clipboard",
                 title: "Clipboard is quiet",
-                caption: "Copy text or a screenshot — it lands here automatically.",
+                caption: "Copy text, a screenshot, or a Finder file — it lands here automatically.",
                 prominent: false
             )
         } else if filtered.isEmpty {
@@ -225,11 +244,30 @@ private struct ExpandedClipboardView: View {
     private func snippetRow(_ snippet: PinnedSnippet) -> some View {
         HStack(spacing: 8) {
             Button {
+                store.cycleSnippetTag(id: snippet.id)
+            } label: {
+                Circle()
+                    .fill(pinColor(snippet.tag))
+                    .frame(width: 8, height: 8)
+                    .overlay(
+                        Circle().strokeBorder(Color.white.opacity(snippet.tag == .none ? 0.35 : 0.12), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Color tag: \(snippet.tag.accessibilityName). Click to cycle.")
+            .accessibilityLabel("Color tag \(snippet.tag.accessibilityName)")
+
+            Button {
                 store.copySnippet(snippet)
             } label: {
                 HStack(spacing: 8) {
                     if snippet.kind == .image {
                         thumb(fileName: snippet.imageFileName)
+                    } else if snippet.kind == .file {
+                        Image(systemName: "doc")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                            .frame(width: 28, height: 28)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         if renamingID == snippet.id {
@@ -256,6 +294,11 @@ private struct ExpandedClipboardView: View {
                                 .font(NotchTheme.micro)
                                 .foregroundStyle(NotchTheme.textTertiary)
                                 .lineLimit(1)
+                        } else if snippet.kind == .file {
+                            Text(snippet.filePath ?? "File")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .lineLimit(1)
                         } else {
                             Text("Image")
                                 .font(NotchTheme.micro)
@@ -268,6 +311,18 @@ private struct ExpandedClipboardView: View {
             }
             .buttonStyle(.plain)
             .help("Copy")
+
+            if snippet.kind == .file {
+                Button {
+                    store.revealFile(path: snippet.filePath)
+                } label: {
+                    Image(systemName: "folder")
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.notchIcon(diameter: 24))
+                .help("Reveal in Finder")
+            }
 
             Button {
                 store.deleteSnippet(id: snippet.id)
@@ -286,11 +341,20 @@ private struct ExpandedClipboardView: View {
     private func historyRow(_ item: ClipboardHistoryItem) -> some View {
         HStack(spacing: 8) {
             Button {
-                store.copyHistoryItem(item)
+                if item.kind == .file {
+                    store.openFile(path: item.filePath)
+                } else {
+                    store.copyHistoryItem(item)
+                }
             } label: {
                 HStack(spacing: 8) {
                     if item.kind == .image {
                         thumb(fileName: item.imageFileName)
+                    } else if item.kind == .file {
+                        Image(systemName: "doc")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchTheme.textTertiary)
+                            .frame(width: 28, height: 28)
                     }
                     Group {
                         if item.kind == .text {
@@ -298,6 +362,19 @@ private struct ExpandedClipboardView: View {
                                 .font(NotchTheme.caption)
                                 .foregroundStyle(NotchTheme.textPrimary)
                                 .lineLimit(2)
+                        } else if item.kind == .file {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.text.isEmpty ? "File" : item.text)
+                                    .font(NotchTheme.caption)
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                    .lineLimit(1)
+                                if let path = item.filePath {
+                                    Text(path)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                        .lineLimit(1)
+                                }
+                            }
                         } else {
                             Text("Image")
                                 .font(NotchTheme.caption)
@@ -309,7 +386,19 @@ private struct ExpandedClipboardView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Copy again")
+            .help(item.kind == .file ? "Open" : "Copy again")
+
+            if item.kind == .file {
+                Button {
+                    store.copyHistoryItem(item)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(NotchTheme.caption)
+                        .foregroundStyle(NotchTheme.textQuaternary)
+                }
+                .buttonStyle(.notchIcon(diameter: 24))
+                .help("Copy file")
+            }
 
             Button {
                 store.pinHistoryItem(item)
@@ -339,6 +428,18 @@ private struct ExpandedClipboardView: View {
             }
         }
         .notchRowBackground()
+    }
+
+    private func pinColor(_ tag: ClipboardPinTag) -> Color {
+        switch tag {
+        case .none: return Color.white.opacity(0.18)
+        case .red: return NotchTheme.negative
+        case .orange: return NotchTheme.caution
+        case .yellow: return Color(nsColor: .systemYellow)
+        case .green: return NotchTheme.positive
+        case .blue: return NotchTheme.calmGlow
+        case .purple: return NotchTheme.mediaGlow
+        }
     }
 
     @ViewBuilder
@@ -421,7 +522,7 @@ private struct ClipboardSettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text("Older items are removed once the limit is reached.")
+            Text("Older items are removed once the limit is reached. Copied files from Finder are stored as paths (not extra copies). Pin color tags are local to Dynamo.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

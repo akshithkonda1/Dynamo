@@ -61,7 +61,8 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
                 systemImage: "exclamationmark.triangle.fill",
                 title: "Severe Weather Alert",
                 subtitle: alert.summary,
-                urgency: .critical
+                urgency: .critical,
+                category: "weather"
             ))
         }
     }

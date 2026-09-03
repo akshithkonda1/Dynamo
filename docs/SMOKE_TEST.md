@@ -90,7 +90,17 @@ Use this after a local build to confirm the app is usable day-to-day.
 
 - [ ] Drop files onto notch or Shelf; **Add** picker works
 - [ ] File size shown; drag-out / AirDrop / Reveal
-- [ ] Clipboard: pin, delete history row, clear
+- [ ] Hub **Replace** opt-in turns on ingest + Peek; without it Mac alerts stay in Apple’s NC
+- [ ] Hub groups by app; Open / Dismiss from the row menu; leftover-banner hint can be dismissed
+- [ ] Hub shows recent Mac notifications after FDA (not empty until the next alert)
+- [ ] Calendar: 30-day grid beside events; tap a day filters the list; New creates
+- [ ] Notes: Connect Automation → list/create/edit/delete in Dynamo folder
+- [ ] Reminders: create, complete, delete with Full Access
+- [ ] Sports: live score + clock updates without an API key
+- [ ] Notes: denied Automation shows an error (not “Connected”)
+- [ ] Calendar empty caption matches lookahead days; 30‑min lead peeks at 30 / 15 / 5 / now
+- [ ] Followed live game: score updates in Sports (not frozen first score)
+- [ ] Clipboard: copy a Finder file → history row → Open / copy / pin
 - [ ] Checklist: progress `done/total`, always-visible add field
 
 ---

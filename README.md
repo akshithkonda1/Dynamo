@@ -22,14 +22,14 @@ Registered in `AppDelegate.bootstrap()`:
 | Widget | What it does |
 |--------|----------------|
 | **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ + **Tone AI** genre tuning), cover-art equalizer |
-| **Hub** | **Notification inbox** — unread, mark read, clear, **replay** as Peek; ambient unread badge |
-| **Calendar** | Upcoming events (EventKit full access), in-notch **create event**, open Calendar.app |
-| **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist · Notes tab |
-| **Clipboard** | Recent snippets |
+| **Hub** | **Notification Center** (opt-in) — Dynamo Peeks + this Mac; unread, filters, replay |
+| **Calendar** | Upcoming events (EventKit **full** read/write), **30-day grid**, in-notch **create event**, open Calendar.app |
+| **Checklist** | Apple **Reminders** R/W + Apple **Notes** R/W (Automation) · local checklist |
+| **Clipboard** | Recent text, **images**, **Finder files**; pin with **color tags**; paste as plain |
 | **Clocks** | **World Clock** — major cities · **Here first** · GPS “Here” label · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
 | **Battery** | Charge, health, drain, vitals grid; **Low / Auto / High** power modes (`pmset`); ambient fill glyph |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
-| **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
+| **Sports** | Multi-league **live** scores via **free** ESPN public scoreboard (no API key) |
 | **System Health** | Local Mac health score + deep links to System Settings / updates |
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
@@ -54,7 +54,7 @@ Registered in `AppDelegate.bootstrap()`:
 |------|--------|
 | **Notifications → Peek** | **Deliver through Peek only** (default). Dynamo routes all alerts into the notch — not a dual system-banner mirror. |
 | **Router** | `DynamoNotificationRouter` owns policy; per-source toggles (widgets / Focus / system / external). |
-| **Hub tab** | Inbox with unread, mark read, clear, **replay**; ambient unread badge when collapsed. |
+| **Hub tab** | Inbox grouped by app; unread, mark read, dismiss, **replay**, Open app; replace-banners setup card. |
 | **Message Peeks** | Contact photo (Contacts) + **chrome tinted to the photo palette**; circular avatar. |
 | **Tone AI (Amplify)** | On-device genre/tone classifier (Python + Swift). Pop vs classical vs electronic, etc. **No APIs.** No audio stored on device. |
 | **Amplify fidelity** | Reference profile, linked true-peak (~−1 dBTP), live adaptive, Atmos/Spatial path auto, headroom, dry loudness match, device cal |
@@ -108,7 +108,8 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 |------|----------|
 | **Dynamo’s own alerts** | Always via **Peek only** — Dynamo does **not** post macOS corner banners for calendar, battery, media, Focus, Hub, API, etc. |
 | **System apps (optional)** | Ingested from Notification Center → **router** → Peek + Hub (Messages, FaceTime, Mail, Slack, …) |
-| **Peek-only mode** (default) | Longer dwell for messages/calls; hub is the presentation surface |
+| **Replace Notification Center** | **Opt-in.** One switch: ingest this Mac, Peek = banner, Hub = inbox. |
+| **Peek-only** (with Replace) | Longer dwell for messages/calls; leftover Mac banners need Alert style None |
 | **Hub tray tab** | Inbox, unread count, mark read, clear, tap to **replay** Peek |
 | **Message chrome** | Contact photo from **Contacts**; island wash/ring/lip match the photo colors |
 
@@ -120,18 +121,16 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 | URL | `dynamo://notify?title=Hello&subtitle=World&urgency=high` |
 | Distributed | `com.akshithkonda.Dynamo.notify` |
 
-### Stop the usual corner banners (Messages / FaceTime / …)
+### Replace the Mac notification system (Hub + Peek)
 
-Apple does **not** allow third-party apps to hide other apps’ system banners. For **Peek-only** with texts/calls:
+**One opt-in.** Hub → **Replace**, or Preferences → **Replace Notification Center**. That turns on Mac ingest, Peek-only delivery, and Hub as the inbox. The first time, Dynamo opens Full Disk Access if needed, then Notifications so you can set Alert style to None.
 
-1. Preferences → **Deliver through Peek only** + **Route system apps into Peek**  
-2. Grant **Full Disk Access** (so Dynamo can read the Notification Center store)  
-3. Grant **Contacts** (contact photo + color on message Peeks)  
-4. System Settings → **Notifications** → for **Messages**, **FaceTime**, **Mail** (etc.):
-   - Keep **Allow Notifications** **on** (so Dynamo can still see deliveries)  
-   - Set **Alert style → None** (kills the typical top-right banner)
+Apple does **not** allow third-party apps to hide other apps’ system banners. After opt-in, leftover corner banners still need:
 
-Preferences includes **Open Notifications settings** / **Open Focus** helpers for this.
+- **Allow Notifications** on (so Dynamo can ingest deliveries)
+- **Alert style → None** per app
+
+Then **Peek is the banner** and **Hub is the inbox**. Hub seeds recent Mac notifications without flooding the notch; new ones Peek live.
 
 ---
 
@@ -264,8 +263,10 @@ Signing → paid team if you enable WeatherKit.
 | ⌃⌥M | Mute |
 | ⌃⌥S | Focus Shelf |
 | ⌃⌥C | Focus Calendar |
+| ⌃⌥B | Focus Clipboard |
+| ⌃⌥H | Focus Hub |
 
-**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `notify?title=…` · `peek?title=…`
+**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `clipboard` · `hub` · `airdrop` · `notify?title=…` · `peek?title=…`
 
 ---
 
@@ -329,9 +330,11 @@ Quick checks:
 6. Checklist → add reminder  
 7. Battery power chips + vitals  
 8. Focus → Meeting → Leave  
-9. **Hub** tab lists Peeks; **Deliver through Peek only** on  
+9. **Hub** tab lists Peeks; Calendar filter shows calendar alerts; inbox survives relaunch  
 10. `open 'dynamo://notify?title=Test&subtitle=Hub&urgency=high'` → notch Peek + Hub inbox  
 11. Message Peek (with Contacts): photo + color-matched chrome  
+12. Copy text → Peek “Copied”; copy a Finder file → Clipboard history row; pin + color tag  
+13. `open 'dynamo://clipboard'` / `dynamo://hub` expand those tabs; menu **AirDrop Last Shelf Item** when Shelf is non-empty  
 
 ---
 
@@ -379,7 +382,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - **Power modes** may open Battery Settings if `pmset` is blocked  
 - **Sports** uses an undocumented free ESPN feed  
 - **System-app routing** needs Full Disk Access; best-effort against the Notification Center store  
-- **macOS banners for other apps** cannot be killed by Dynamo — set Alert style to **None** (or use Focus) for Peek-only visuals  
+- **macOS banners for other apps** cannot be killed by Dynamo — set Alert style to **None** (keep Allow Notifications on) so Hub + Peek can stand in for Notification Center  
 - Automated UI tests remain thin relative to surface area  
 
 ---

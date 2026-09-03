@@ -24,8 +24,8 @@ final class FocusAgendaEngine: ObservableObject {
 
     @Published private(set) var snapshot = FocusAgendaSnapshot(now: nil, upNext: [], needsAttention: [])
 
-    private var prepNotified = Set<String>()
-    private var endNotified = Set<String>()
+    private var prepNotified: [String] = []
+    private var endNotified: [String] = []
     private var lastEvents: [CalendarEventItem] = []
     private var lastReminders: [ReminderItem] = []
     private var lastLocal: [(id: UUID, text: String)] = []
@@ -137,8 +137,7 @@ final class FocusAgendaEngine: ObservableObject {
             // Prep at ~30 minutes.
             if untilStart > 25 * 60, untilStart <= 35 * 60 {
                 let key = "prep:\(e.id)"
-                if !prepNotified.contains(key) {
-                    prepNotified.insert(key)
+                if Self.remember(key, in: &prepNotified) {
                     var detail = e.calendarName
                     if let loc = e.location, !loc.isEmpty { detail += " · \(loc)" }
                     emit(NotchSneakPeek(
@@ -146,7 +145,8 @@ final class FocusAgendaEngine: ObservableObject {
                         title: "Prep · \(e.title)",
                         subtitle: "Starts in \(Int((untilStart / 60).rounded())) min",
                         urgency: .high,
-                        detail: detail
+                        detail: detail,
+                        category: "focus"
                     ))
                 }
             }
@@ -154,8 +154,7 @@ final class FocusAgendaEngine: ObservableObject {
             let sinceEnd = now.timeIntervalSince(e.end)
             if sinceEnd > 0, sinceEnd < 120 {
                 let key = "end:\(e.id)"
-                if !endNotified.contains(key) {
-                    endNotified.insert(key)
+                if Self.remember(key, in: &endNotified) {
                     let next = events
                         .filter { $0.start > e.end && !$0.isAllDay }
                         .sorted { $0.start < $1.start }
@@ -171,13 +170,22 @@ final class FocusAgendaEngine: ObservableObject {
                         title: "Done · \(e.title)",
                         subtitle: sub,
                         urgency: .normal,
-                        detail: "True Focus"
+                        detail: "True Focus",
+                        category: "focus"
                     ))
                 }
             }
         }
-        // Cap memory
-        if prepNotified.count > 40 { prepNotified = Set(prepNotified.suffix(20)) }
-        if endNotified.count > 40 { endNotified = Set(endNotified.suffix(20)) }
+    }
+
+    /// FIFO cap — keeps newest keys so True Focus peeks don't re-fire randomly.
+    @discardableResult
+    static func remember(_ key: String, in list: inout [String], cap: Int = 40, keep: Int = 20) -> Bool {
+        if list.contains(key) { return false }
+        list.append(key)
+        if list.count > cap {
+            list.removeFirst(list.count - keep)
+        }
+        return true
     }
 }

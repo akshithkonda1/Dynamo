@@ -24,6 +24,9 @@ final class DynamoNotificationRouter: ObservableObject {
     private static let externalRouteKey = "dynamo.router.externalEnabled"
     private static let focusRouteKey = "dynamo.router.focusEnabled"
     private static let peekOnlyKey = "dynamo.router.peekOnlyDelivery"
+    private static let replaceKey = "dynamo.router.replacesNotificationCenter"
+    private static let replaceSetupKey = "dynamo.router.replacementSetupOffered"
+    private static let bannerHintKey = "dynamo.router.replacementBannerHintDismissed"
 
     /// Where an alert came from (for hub labels + policy).
     enum Source: String, CaseIterable, Identifiable {
@@ -95,23 +98,41 @@ final class DynamoNotificationRouter: ObservableObject {
     /// Dynamo never posts system banners for its own alerts. With Peek-only on:
     /// - Everything the router handles is presented as a notch Peek
     /// - Messages/calls get longer dwell + hub priority
-    /// - You still need to set Messages/FaceTime/etc. alert style to **None**
-    ///   in System Settings (Apple does not let apps hide other apps’ banners)
+    /// - Leftover Mac corner banners still need Alert style **None**
+    ///   (Apple does not let apps hide other apps’ banners)
     @Published var peekOnlyDelivery: Bool {
         didSet {
             UserDefaults.standard.set(peekOnlyDelivery, forKey: Self.peekOnlyKey)
+            if isBootstrapping { return }
             if peekOnlyDelivery {
                 isEnabled = true
                 PeekNotificationCenter.shared.isPrimaryDelivery = true
-                // Prefer ingesting system apps so texts/calls still arrive via Peek.
                 if !routeSystemApps {
                     routeSystemApps = true
                 }
                 lastStatus = "Peek-only · alerts via notch (not banners)"
-            } else {
+            } else if !replacesNotificationCenter {
                 lastStatus = "Router on · Peek + system banners may both show"
             }
         }
+    }
+
+    /// One opt-in: Hub + Peek replace Notification Center **to a degree**.
+    /// Turns on ingest, Peek-only delivery, and a one-time permissions walkthrough.
+    @Published var replacesNotificationCenter: Bool {
+        didSet {
+            UserDefaults.standard.set(replacesNotificationCenter, forKey: Self.replaceKey)
+            if isBootstrapping { return }
+            if replacesNotificationCenter {
+                engageReplacement(offerSetup: true)
+            } else {
+                disengageReplacement()
+            }
+        }
+    }
+
+    @Published var bannerHintDismissed: Bool {
+        didSet { UserDefaults.standard.set(bannerHintDismissed, forKey: Self.bannerHintKey) }
     }
 
     @Published private(set) var routedCount: Int = 0
@@ -122,6 +143,7 @@ final class DynamoNotificationRouter: ObservableObject {
     private var registryCancellable: AnyCancellable?
     private var mirrorEnabledCancellable: AnyCancellable?
     private weak var hub: PeekNotificationCenter?
+    private var isBootstrapping = true
 
     private init() {
         if UserDefaults.standard.object(forKey: "dynamo.router.enabled") == nil {
@@ -144,16 +166,25 @@ final class DynamoNotificationRouter: ObservableObject {
         } else {
             routeExternal = UserDefaults.standard.bool(forKey: Self.externalRouteKey)
         }
-        // Prefer existing system-mirror preference as the system route default.
+        let peekOnlyWasSet = UserDefaults.standard.object(forKey: Self.peekOnlyKey) != nil
+        let peekOnlyValue = peekOnlyWasSet ? UserDefaults.standard.bool(forKey: Self.peekOnlyKey) : false
+        let storedReplace = UserDefaults.standard.object(forKey: Self.replaceKey) as? Bool
+        let replaceValue = HubNotificationCenter.Replacement.isOptedIn(
+            stored: storedReplace,
+            peekOnlyWasSet: peekOnlyWasSet,
+            peekOnly: peekOnlyValue
+        )
+        peekOnlyDelivery = peekOnlyValue
+        replacesNotificationCenter = replaceValue
         if UserDefaults.standard.object(forKey: Self.systemRouteKey) == nil {
-            routeSystemApps = SystemNotificationMirror.shared.isEnabled
+            routeSystemApps = replaceValue
         } else {
             routeSystemApps = UserDefaults.standard.bool(forKey: Self.systemRouteKey)
         }
-        if UserDefaults.standard.object(forKey: Self.peekOnlyKey) == nil {
-            peekOnlyDelivery = true
-        } else {
-            peekOnlyDelivery = UserDefaults.standard.bool(forKey: Self.peekOnlyKey)
+        bannerHintDismissed = UserDefaults.standard.bool(forKey: Self.bannerHintKey)
+        isBootstrapping = false
+        if replaceValue {
+            engageReplacement(offerSetup: false)
         }
     }
 
@@ -168,7 +199,7 @@ final class DynamoNotificationRouter: ObservableObject {
         registryCancellable = registry.sneakPeekPublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] peek in
-                self?.route(peek, source: .widget, category: "widget")
+                self?.route(peek, source: .widget)
             }
 
         // Keep system ingest toggle aligned with router policy.
@@ -197,16 +228,17 @@ final class DynamoNotificationRouter: ObservableObject {
             }
         }
 
-        SystemNotificationMirror.shared.start()
-        // Ensure Peek is the presentation surface when Peek-only is the default.
-        if peekOnlyDelivery {
+        if routeSystemApps {
+            SystemNotificationMirror.shared.start()
+        }
+        if replacesNotificationCenter || peekOnlyDelivery {
             PeekNotificationCenter.shared.isPrimaryDelivery = true
         }
-        lastStatus = peekOnlyDelivery
-            ? "Peek-only delivery · routed into the notch"
-            : (routeSystemApps
-                ? "Routing widgets · Focus · system apps → Peek"
-                : "Routing widgets · Focus → Peek (system apps off)")
+        lastStatus = HubNotificationCenter.Replacement.statusLine(
+            optedIn: replacesNotificationCenter,
+            accessDenied: SystemNotificationMirror.shared.accessDenied,
+            routerEnabled: isEnabled
+        )
     }
 
     func stop() {
@@ -218,6 +250,45 @@ final class DynamoNotificationRouter: ObservableObject {
         lastStatus = "Router stopped"
     }
 
+    /// Opt-in: Dynamo becomes the notification surface for this Mac (ingest + Peek + Hub).
+    func engageReplacement(offerSetup: Bool) {
+        isEnabled = true
+        if !peekOnlyDelivery { peekOnlyDelivery = true }
+        if !routeSystemApps { routeSystemApps = true }
+        PeekNotificationCenter.shared.isPrimaryDelivery = true
+        SystemNotificationMirror.shared.isEnabled = true
+        SystemNotificationMirror.shared.start()
+        lastStatus = HubNotificationCenter.Replacement.statusLine(
+            optedIn: true,
+            accessDenied: SystemNotificationMirror.shared.accessDenied,
+            routerEnabled: true
+        )
+        guard offerSetup else { return }
+        let alreadyOffered = UserDefaults.standard.bool(forKey: Self.replaceSetupKey)
+        UserDefaults.standard.set(true, forKey: Self.replaceSetupKey)
+        guard !alreadyOffered else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            if SystemNotificationMirror.shared.accessDenied {
+                HubNotificationCenter.openFullDiskAccess()
+            }
+            self?.openNotificationSettingsForPeekOnly()
+        }
+    }
+
+    func disengageReplacement() {
+        routeSystemApps = false
+        peekOnlyDelivery = false
+        lastStatus = HubNotificationCenter.Replacement.statusLine(
+            optedIn: false,
+            accessDenied: false,
+            routerEnabled: isEnabled
+        )
+    }
+
+    func dismissBannerHint() {
+        bannerHintDismissed = true
+    }
+
     // MARK: - Route
 
     /// Single entry for any source. Applies router policy, then Peek hub delivery.
@@ -227,7 +298,8 @@ final class DynamoNotificationRouter: ObservableObject {
         source: Source,
         category: String? = nil,
         id: String? = nil,
-        coalesce: Bool = true
+        coalesce: Bool = true,
+        present: Bool = true
     ) -> Bool {
         guard isEnabled else {
             lastStatus = "Router off — alert dropped"
@@ -238,12 +310,12 @@ final class DynamoNotificationRouter: ObservableObject {
             return false
         }
 
-        let cat = category ?? defaultCategory(for: source, peek: peek)
+        let cat = HubPeekPolicy.resolveCategory(peek: peek, source: source, explicit: category)
         let hub = self.hub ?? PeekNotificationCenter.shared
 
         // Peek-only: never fall back to system banners; present only via hub.
         var delivery = peek
-        if peekOnlyDelivery {
+        if peekOnlyDelivery || replacesNotificationCenter {
             PeekNotificationCenter.shared.isPrimaryDelivery = true
             delivery = Self.elevateForPeekOnly(peek, category: cat, source: source)
         }
@@ -252,15 +324,18 @@ final class DynamoNotificationRouter: ObservableObject {
             delivery,
             id: id ?? "\(source.rawValue)|\(cat)|\(delivery.title)|\(delivery.subtitle)",
             category: cat,
-            coalesce: coalesce
+            coalesce: coalesce,
+            present: present
         )
 
         routedCount &+= 1
         lastRoutedSource = source
         lastRoutedTitle = delivery.title
-        lastStatus = peekOnlyDelivery
-            ? "Peek · \(source.title) · \(delivery.title)"
-            : "Routed \(source.title) · \(delivery.title)"
+        lastStatus = replacesNotificationCenter
+            ? "Hub · \(source.title) · \(delivery.title)"
+            : (peekOnlyDelivery
+                ? "Peek · \(source.title) · \(delivery.title)"
+                : "Routed \(source.title) · \(delivery.title)")
         return true
     }
 
@@ -287,14 +362,9 @@ final class DynamoNotificationRouter: ObservableObject {
     // MARK: - Peek-only setup (system banners)
 
     /// Apps users typically want delivered as Peeks instead of corner banners.
-    static let peekOnlyTargetApps: [(name: String, bundleID: String)] = [
-        ("Messages", "com.apple.MobileSMS"),
-        ("FaceTime", "com.apple.FaceTime"),
-        ("Mail", "com.apple.mail"),
-        ("Phone / Continuity", "com.apple.InCallService"),
-        ("Slack", "com.tinyspeck.slackmacgap"),
-        ("Discord", "com.hnc.Discord")
-    ]
+    static var peekOnlyTargetApps: [(name: String, bundleID: String)] {
+        HubNotificationCenter.bannerSilenceApps
+    }
 
     /// Open System Settings → Notifications so the user can set alert style to **None**.
     /// Apple does not allow third-party apps to hide other apps’ banners for you.
@@ -333,7 +403,10 @@ final class DynamoNotificationRouter: ObservableObject {
         category: String? = nil,
         id: String? = nil,
         artworkData: Data? = nil,
-        coalesce: Bool = true
+        coalesce: Bool = true,
+        present: Bool = true,
+        sourceBundleID: String = "",
+        appName: String = ""
     ) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -344,12 +417,16 @@ final class DynamoNotificationRouter: ObservableObject {
                 subtitle: subtitle,
                 urgency: urgency,
                 artworkData: artworkData,
-                detail: detail
+                detail: detail,
+                category: category ?? "",
+                sourceBundleID: sourceBundleID,
+                appName: appName
             ),
             source: source,
             category: category,
             id: id,
-            coalesce: coalesce
+            coalesce: coalesce,
+            present: present
         )
     }
 
@@ -366,18 +443,6 @@ final class DynamoNotificationRouter: ObservableObject {
     }
 
     private func defaultCategory(for source: Source, peek: NotchSneakPeek) -> String {
-        let d = peek.detail.lowercased()
-        if d.hasPrefix("text") { return "text" }
-        if d.hasPrefix("call") { return "call" }
-        if d.hasPrefix("mail") { return "mail" }
-        switch source {
-        case .widget: return "widget"
-        case .focus: return "focus"
-        case .system: return "system"
-        case .call: return "call"
-        case .api: return "api"
-        case .external: return "external"
-        case .test: return "test"
-        }
+        HubPeekPolicy.resolveCategory(peek: peek, source: source)
     }
 }

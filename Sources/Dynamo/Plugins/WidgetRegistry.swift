@@ -158,6 +158,15 @@ final class WidgetRegistry: ObservableObject {
         }
     }
 
+    /// First registered plugin of a concrete type (enabled or not). Hosts can
+    /// request a capability type without hard-coding tray ids.
+    func firstPlugin<T>(as type: T.Type) -> T? {
+        for id in order {
+            if let match = allPlugins[id] as? T { return match }
+        }
+        return nil
+    }
+
     /// Widgets that expose their own configuration UI, in tray order. Generic
     /// protocol cast — no name switch, mirroring `dispatchFileDrop`.
     func settingsSections() -> [(id: String, name: String, view: AnyView)] {

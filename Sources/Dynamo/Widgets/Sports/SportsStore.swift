@@ -110,7 +110,7 @@ final class SportsStore: ObservableObject {
             || currentEvents.contains(where: { $0.status == .live })
             || liveAllEvents.contains(where: { $0.status == .live })
         let idle = TimeInterval(refreshIntervalSeconds)
-        return anyLive ? min(18, idle) : idle
+        return anyLive ? min(8, idle) : idle
     }
 
     func stop() {
@@ -279,7 +279,8 @@ final class SportsStore: ObservableObject {
                     title: "\(ev.displayAway) @ \(ev.displayHome)",
                     subtitle: "Live · \(ev.league.title)",
                     urgency: .high,
-                    detail: ev.statusText
+                    detail: ev.statusText,
+                    category: "sports"
                 ))
                 continue
             }
@@ -292,7 +293,8 @@ final class SportsStore: ObservableObject {
                 title: title,
                 subtitle: ev.isLive ? "Score · \(ev.league.title)" : "Final · \(ev.league.title)",
                 urgency: .normal,
-                detail: ev.statusText
+                detail: ev.statusText,
+                category: "sports"
             ))
         }
     }

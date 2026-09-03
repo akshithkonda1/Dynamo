@@ -7,7 +7,8 @@ import SQLite3
 ///
 /// This is not a second “mirror” surface: alerts are **ingested into the hub**
 /// and presented as notch Peeks. Apple does not publish an API to suppress
-/// system banners; users who want Peek-only can silence banners via Focus.
+/// system banners; set each app’s Alert style to **None** (keep Allow Notifications on)
+/// so Peek is the banner and Hub is the inbox.
 ///
 /// Implementation reads the local `usernoted` SQLite store when TCC allows
 /// (Full Disk Access / Group Containers).
@@ -68,7 +69,7 @@ final class SystemNotificationMirror: ObservableObject {
 
     private init() {
         if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
-            isEnabled = true
+            isEnabled = false
         } else {
             isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         }
@@ -83,6 +84,7 @@ final class SystemNotificationMirror: ObservableObject {
         guard isEnabled else { return }
         guard timer == nil else { return }
         bootstrapHighWater()
+        seedRecentNotifications()
         let t = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
@@ -123,6 +125,88 @@ final class SystemNotificationMirror: ObservableObject {
             : "Need Full Disk Access to route calls & texts into the hub"
     }
 
+    /// Pull the latest Mac notifications into Hub (inbox only) so Dynamo
+    /// behaves like Notification Center, not a firehose of old Peeks.
+    private func seedRecentNotifications() {
+        guard isEnabled, let path = Self.resolveDBPath() else { return }
+        let rows = Self.fetchRecentRecords(path: path, limit: 40)
+        guard !rows.isEmpty else { return }
+        databaseFound = true
+        accessDenied = false
+        for row in rows {
+            highWaterRecID = max(highWaterRecID, row.recID)
+            ingest(row, presentPeek: false)
+        }
+        UserDefaults.standard.set(highWaterRecID, forKey: Self.lastRecKey)
+        lastStatus = "Hub seeded · \(rows.count) from this Mac"
+    }
+
+    private func ingest(_ row: RawRow, presentPeek: Bool) {
+        guard let note = Self.parse(row) else { return }
+        if note.appIdentifier == Self.selfBundleID { return }
+        if note.appIdentifier.hasPrefix("com.akshithkonda.Dynamo") { return }
+
+        let uuidKey = note.uuid.isEmpty ? "\(row.recID)" : note.uuid
+        if seenUUIDs.contains(uuidKey) { return }
+        seenUUIDs.insert(uuidKey)
+        if seenUUIDs.count > maxSeen {
+            seenUUIDs = Set(seenUUIDs.suffix(maxSeen / 2))
+        }
+
+        let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty || !body.isEmpty else { return }
+
+        let kind = NotificationKind.classify(bundleID: note.appIdentifier, title: title, body: body)
+        let appName = Self.displayName(for: note.appIdentifier)
+        let peekTitle: String
+        let peekSubtitle: String
+        let detail: String
+
+        switch kind {
+        case .call:
+            peekTitle = title.isEmpty ? "Incoming call" : title
+            peekSubtitle = body.isEmpty ? appName : body
+            detail = "Call · \(appName)"
+        case .text:
+            peekTitle = title.isEmpty ? "Message" : title
+            peekSubtitle = body.isEmpty ? appName : body
+            detail = "Text · \(appName)"
+        case .mail:
+            peekTitle = title.isEmpty ? "Mail" : title
+            peekSubtitle = body.isEmpty ? appName : body
+            detail = "Mail · \(appName)"
+        case .general:
+            peekTitle = title.isEmpty ? appName : title
+            peekSubtitle = body.isEmpty ? appName : (title.isEmpty ? body : body)
+            detail = appName
+        }
+
+        let urgency = urgency(for: kind)
+        let artwork = resolveArtwork(
+            kind: kind,
+            title: peekTitle,
+            subtitle: peekSubtitle,
+            note: note
+        )
+        DynamoNotificationRouter.shared.route(
+            title: peekTitle,
+            subtitle: peekSubtitle,
+            detail: detail,
+            systemImage: kind.systemImage,
+            urgency: urgency,
+            source: kind == .call ? .call : .system,
+            category: kind.category,
+            id: "system|\(kind.category)|\(uuidKey)",
+            artworkData: artwork,
+            present: presentPeek,
+            sourceBundleID: note.appIdentifier,
+            appName: appName
+        )
+        mirroredCount &+= 1
+        lastMirroredApp = appName
+    }
+
     // MARK: - Poll
 
     private func poll() {
@@ -144,68 +228,7 @@ final class SystemNotificationMirror: ObservableObject {
 
         for row in rows {
             highWaterRecID = max(highWaterRecID, row.recID)
-            guard let note = Self.parse(row) else { continue }
-            if note.appIdentifier == Self.selfBundleID { continue }
-            if note.appIdentifier.hasPrefix("com.akshithkonda.Dynamo") { continue }
-
-            let uuidKey = note.uuid.isEmpty ? "\(row.recID)" : note.uuid
-            if seenUUIDs.contains(uuidKey) { continue }
-            seenUUIDs.insert(uuidKey)
-            if seenUUIDs.count > maxSeen {
-                seenUUIDs = Set(seenUUIDs.suffix(maxSeen / 2))
-            }
-
-            let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let body = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty || !body.isEmpty else { continue }
-
-            let kind = NotificationKind.classify(bundleID: note.appIdentifier, title: title, body: body)
-            let appName = Self.displayName(for: note.appIdentifier)
-            let peekTitle: String
-            let peekSubtitle: String
-            let detail: String
-
-            switch kind {
-            case .call:
-                peekTitle = title.isEmpty ? "Incoming call" : title
-                peekSubtitle = body.isEmpty ? appName : body
-                detail = "Call · \(appName)"
-            case .text:
-                peekTitle = title.isEmpty ? "Message" : title
-                peekSubtitle = body.isEmpty ? appName : body
-                detail = "Text · \(appName)"
-            case .mail:
-                peekTitle = title.isEmpty ? "Mail" : title
-                peekSubtitle = body.isEmpty ? appName : body
-                detail = "Mail · \(appName)"
-            case .general:
-                peekTitle = title.isEmpty ? appName : title
-                peekSubtitle = body.isEmpty ? appName : (title.isEmpty ? body : body)
-                detail = appName
-            }
-
-            let urgency = urgency(for: kind)
-            // Message Peeks: contact photo drives island tint (primary path).
-            let artwork = resolveArtwork(
-                kind: kind,
-                title: peekTitle,
-                subtitle: peekSubtitle,
-                note: note
-            )
-            // Ingest → Dynamo router (not a side-channel into the hub).
-            DynamoNotificationRouter.shared.route(
-                title: peekTitle,
-                subtitle: peekSubtitle,
-                detail: detail,
-                systemImage: kind.systemImage,
-                urgency: urgency,
-                source: kind == .call ? .call : .system,
-                category: kind.category,
-                id: "system|\(kind.category)|\(uuidKey)",
-                artworkData: artwork
-            )
-            mirroredCount &+= 1
-            lastMirroredApp = appName
+            ingest(row, presentPeek: true)
         }
 
         UserDefaults.standard.set(highWaterRecID, forKey: Self.lastRecKey)
@@ -427,6 +450,43 @@ final class SystemNotificationMirror: ObservableObject {
         return rows
     }
 
+    /// Newest-first snapshot for Hub seeding (Notification Center style).
+    private static func fetchRecentRecords(path: String, limit: Int) -> [RawRow] {
+        guard let db = openDB(path) else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT r.rec_id, r.data, IFNULL(r.delivered_date, 0), IFNULL(a.identifier, '')
+        FROM record r
+        LEFT JOIN app a ON a.app_id = r.app_id
+        ORDER BY r.rec_id DESC
+        LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            let alt = """
+            SELECT rec_id, data, 0, ''
+            FROM record
+            ORDER BY rec_id DESC
+            LIMIT ?;
+            """
+            guard sqlite3_prepare_v2(db, alt, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+        var rows: [RawRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let recID = sqlite3_column_int64(stmt, 0)
+            guard let blob = sqlite3_column_blob(stmt, 1) else { continue }
+            let nbytes = Int(sqlite3_column_bytes(stmt, 1))
+            guard nbytes > 0 else { continue }
+            let data = Data(bytes: blob, count: nbytes)
+            let delivered = sqlite3_column_double(stmt, 2)
+            let ident = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            rows.append(RawRow(recID: recID, data: data, deliveredDate: delivered, appIdentifier: ident))
+        }
+        return rows.reversed()
+    }
+
     private static func parse(_ row: RawRow) -> ParsedNote? {
         guard let root = try? PropertyListSerialization.propertyList(
             from: row.data,
@@ -576,6 +636,7 @@ final class SystemNotificationMirror: ObservableObject {
         switch last.lowercased() {
         case "mobilesms": return "Messages"
         case "facetime": return "FaceTime"
+        case "mail": return "Mail"
         default: return last
         }
     }

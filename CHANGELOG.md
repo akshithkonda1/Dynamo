@@ -2,6 +2,50 @@
 
 All notable changes to Dynamo are documented here.
 
+## [Unreleased]
+
+### Hub & peeks
+- Widget peeks are categorized (Calendar, reminders, media, sports, …) so Hub filters match real alerts
+- Hub inbox **persists** across relaunch; replay still works without in-memory art
+- Calendar peek stages scale with lead minutes; empty copy uses the lookahead setting
+- Notes Automation errors (`ERR|…`) no longer look like success
+- Sports live scores merge later updates (and ESPN `dates=` uses US Eastern)
+- Reminders write-only is no longer treated as full access
+- True Focus prep/end keys trim FIFO instead of a random `Set.suffix`
+
+### Hub as Notification Center
+- **One opt-in** (“Replace Notification Center”) turns on Mac ingest, Peek-only delivery, and Hub as the inbox
+- First opt-in opens Full Disk Access if needed, then Notifications (Alert style None) once
+- After that, leftover-banner hint is dismissible; Apple still cannot hide other apps’ corner banners
+- Hub + Peek can **replace** Mac Notification Center to that degree: seed recent NC rows; new alerts Peek
+- Inbox **groups by app**; Open app / Dismiss; persist bundle id + app name
+- Default hub history cap **100**
+
+### Calendar
+- Default lookahead **30 days**; compact **30-day grid** beside the event list (tap a day to filter / New)
+
+### Notes
+- Read **and write** (create, **edit**, delete) in the Dynamo Notes folder; Automation errors stay honest
+
+### Sports
+- ESPN **public** site API only (no key); live games poll ~8s with clock/period; cache bypassed
+
+### Reminders
+- Full EventKit read/write (create, complete, edit title, delete); write-only is not treated as authorized
+
+### Clipboard
+- Copy sneak peeks actually fire (history ingest now notifies the Hub/Peek path)
+- Finder **file** copies appear in history (open / copy / pin / reveal)
+- Pin **color tags** (click the dot to cycle)
+- **Paste as plain** when the pasteboard still has RTF/HTML
+
+### Command surface
+- Menu: Focus Clipboard, Focus Hub, **AirDrop Last Shelf Item**
+- Hotkeys: ⌃⌥B clipboard · ⌃⌥H Hub
+- URLs: `dynamo://clipboard` · `dynamo://hub` · `dynamo://airdrop`
+
+---
+
 ## [1.1.1] — 2026-08-15
 
 **Symphony Amplify + polish release.**

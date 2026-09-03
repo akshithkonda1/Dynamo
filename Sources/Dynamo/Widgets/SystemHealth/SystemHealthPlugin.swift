@@ -187,7 +187,8 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
             systemImage: "arrow.down.circle.fill",
             title: title,
             subtitle: subtitle,
-            urgency: updates.recommendedCount > 0 ? .high : .normal
+            urgency: updates.recommendedCount > 0 ? .high : .normal,
+            category: "health"
         ))
     }
 
@@ -204,7 +205,8 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
             systemImage: "heart.text.square.fill",
             title: "Weekly health check",
             subtitle: report.summary,
-            urgency: (hasCaution && cautionPeeksEnabled) ? .high : .normal
+            urgency: (hasCaution && cautionPeeksEnabled) ? .high : .normal,
+            category: "health"
         ))
     }
 

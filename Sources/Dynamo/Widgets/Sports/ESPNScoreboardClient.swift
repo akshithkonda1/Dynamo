@@ -1,11 +1,12 @@
 import Foundation
 
-/// Public ESPN CDN scoreboard (no API key). Multi-day + multi-path fan-out.
+/// Free public ESPN site API (no key, no paid endpoints). Live scoreboard payloads.
 actor ESPNScoreboardClient {
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 12
         c.timeoutIntervalForResource = 28
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.httpAdditionalHeaders = [
             "User-Agent": "Dynamo/1.0 (macOS; scoreboard)",
             "Accept": "application/json"
@@ -37,7 +38,7 @@ actor ESPNScoreboardClient {
                 }
             }
             for await batch in group {
-                merge(batch, into: &combined)
+                SportsScoreboardLogic.merge(batch, into: &combined)
             }
         }
 
@@ -58,30 +59,16 @@ actor ESPNScoreboardClient {
                 }
             }
             for await batch in group {
-                merge(batch, into: &combined)
+                SportsScoreboardLogic.merge(batch, into: &combined)
             }
         }
         return sortEvents(Array(combined.values))
     }
 
-    private func merge(_ batch: [SportsEvent], into combined: inout [String: SportsEvent]) {
-        for ev in batch {
-            if let existing = combined[ev.id] {
-                if existing.status != .live, ev.status == .live {
-                    combined[ev.id] = ev
-                } else if existing.homeLogoURL == nil, ev.homeLogoURL != nil {
-                    combined[ev.id] = ev
-                }
-            } else {
-                combined[ev.id] = ev
-            }
-        }
-    }
-
     private func sortEvents(_ events: [SportsEvent]) -> [SportsEvent] {
         events.sorted { lhs, rhs in
-            let lo = statusRank(lhs.status)
-            let ro = statusRank(rhs.status)
+            let lo = SportsScoreboardLogic.statusRank(lhs.status)
+            let ro = SportsScoreboardLogic.statusRank(rhs.status)
             if lo != ro { return lo < ro }
             let ld = lhs.startDate ?? .distantFuture
             let rd = rhs.startDate ?? .distantFuture
@@ -89,24 +76,18 @@ actor ESPNScoreboardClient {
         }
     }
 
-    private func statusRank(_ s: SportsEventStatus) -> Int {
-        switch s {
-        case .live: return 0
-        case .scheduled, .delayed: return 1
-        case .other: return 2
-        case .final: return 3
-        }
-    }
-
     private func fetchScoreboard(path: String, league: SportsLeague, date: Date?) async -> [SportsEvent] {
         var components = URLComponents(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/scoreboard")
         if let date {
-            components?.queryItems = [URLQueryItem(name: "dates", value: Self.dayString(date))]
+            components?.queryItems = [URLQueryItem(name: "dates", value: SportsScoreboardLogic.dayString(date))]
         }
         guard let url = components?.url else { return [] }
 
         do {
-            let (data, response) = try await session.data(from: url)
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 12
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return []
             }
@@ -141,6 +122,15 @@ actor ESPNScoreboardClient {
             else if state == "in" { status = .live }
             else if state == "pre" { status = .scheduled }
             else { status = .other }
+            let displayClock = statusObj?["displayClock"] as? String
+            let period = (statusObj?["period"] as? Int)
+                ?? (statusObj?["period"] as? NSNumber)?.intValue
+            let liveLine = SportsScoreboardLogic.liveStatusText(
+                detail: detail,
+                displayClock: displayClock,
+                period: period,
+                isLive: status == .live
+            )
 
             var homeName = "Home"
             var awayName = "Away"
@@ -229,7 +219,7 @@ actor ESPNScoreboardClient {
                 awayAbbrev: awayAbbrev,
                 homeLogoURL: homeLogo,
                 awayLogoURL: awayLogo,
-                statusText: detail,
+                statusText: liveLine,
                 startDate: start,
                 linkURL: link,
                 headlineScore: headline,
@@ -271,14 +261,6 @@ actor ESPNScoreboardClient {
                 return o0 < o1
             }
             .map { parseCompetitor($0) }
-    }
-
-    private static func dayString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone.current
-        f.dateFormat = "yyyyMMdd"
-        return f.string(from: date)
     }
 
     private static func parseISO(_ s: String?) -> Date? {

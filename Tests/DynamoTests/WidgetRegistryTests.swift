@@ -115,6 +115,18 @@ final class WidgetRegistryTests: XCTestCase {
         XCTAssertEqual(registry.plugins.map(\.id), ["c", "b", "a"])
     }
 
+    func testFirstPluginFindsByTypeIncludingDisabled() {
+        let registry = WidgetRegistry()
+        let a = ConfigurableMockPlugin(id: "a")
+        let b = MockPlugin(id: "b")
+        registry.register(a)
+        registry.register(b)
+        registry.setEnabled("a", isEnabled: false)
+
+        XCTAssertTrue(registry.firstPlugin(as: ConfigurableMockPlugin.self) === a)
+        XCTAssertNil(registry.firstPlugin(as: SneakPeekMockPlugin.self))
+    }
+
     func testSettingsSectionsOnlyIncludesConformers() {
         let registry = WidgetRegistry()
         registry.register(MockPlugin(id: "plain"))

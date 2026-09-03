@@ -8,6 +8,7 @@ final class RemindersProvider: ObservableObject {
     enum AuthState: Equatable {
         case notDetermined
         case authorized
+        case writeOnly
         case denied
     }
 
@@ -456,8 +457,7 @@ final class RemindersProvider: ObservableObject {
             switch EKEventStore.authorizationStatus(for: .reminder) {
             case .fullAccess, .authorized: authState = .authorized
             case .writeOnly:
-                // Write-only is rare; still treat as usable for create/complete.
-                authState = .authorized
+                authState = .writeOnly
             case .notDetermined: authState = .notDetermined
             default: authState = .denied
             }

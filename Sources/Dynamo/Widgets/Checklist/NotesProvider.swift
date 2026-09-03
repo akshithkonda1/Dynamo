@@ -89,39 +89,49 @@ final class NotesProvider: ObservableObject {
             lastStatus = "Unavailable"
             return
         }
-        if out.hasPrefix("ERR|") {
-            lastError = Self.friendlyError(from: String(out.dropFirst(4)))
+        lastError = nil
+        lastStatus = "Synced"
+        switch NotesScriptResult.parse(out) {
+        case .error(let message):
+            lastError = Self.friendlyError(from: message)
             isAvailable = false
             lastStatus = "Notes error"
             items = []
             return
+        case .unavailable:
+            lastError = Self.friendlyError(from: "Could not talk to Notes")
+            isAvailable = false
+            lastStatus = "Unavailable"
+            items = []
+            return
+        case .ok(let payloadRaw):
+            isAvailable = true
+            var payload = payloadRaw
+            if payload.hasPrefix("OK|") { payload = String(payload.dropFirst(3)) }
+            else if payload.hasPrefix("OK") { payload = String(payload.dropFirst(2)) }
+            if payload.hasPrefix("|") { payload.removeFirst() }
+            var parsed: [NoteItem] = []
+            let records = payload.components(separatedBy: "\u{1e}")
+            for record in records {
+                let fields = record.components(separatedBy: "||")
+                guard fields.count >= 2 else { continue }
+                let nid = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let title = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                let preview = fields.count > 2 ? fields[2].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                guard !nid.isEmpty else { continue }
+                let cleanPreview = (preview == title) ? "" : preview
+                parsed.append(NoteItem(
+                    id: nid,
+                    title: title.isEmpty ? "Untitled" : title,
+                    bodyPreview: cleanPreview,
+                    modified: nil,
+                    folderName: Self.folderName
+                ))
+            }
+            items = parsed
+            objectWillChange.send()
+            onChangeWire?()
         }
-        isAvailable = true
-        lastError = nil
-        lastStatus = "Synced"
-        var payload = out
-        if payload.hasPrefix("OK|") { payload = String(payload.dropFirst(3)) }
-        var parsed: [NoteItem] = []
-        let records = payload.components(separatedBy: "\u{1e}")
-        for record in records {
-            let fields = record.components(separatedBy: "||")
-            guard fields.count >= 2 else { continue }
-            let nid = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            let preview = fields.count > 2 ? fields[2].trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            guard !nid.isEmpty else { continue }
-            let cleanPreview = (preview == title) ? "" : preview
-            parsed.append(NoteItem(
-                id: nid,
-                title: title.isEmpty ? "Untitled" : title,
-                bodyPreview: cleanPreview,
-                modified: nil,
-                folderName: Self.folderName
-            ))
-        }
-        items = parsed
-        objectWillChange.send()
-        onChangeWire?()
     }
 
     @discardableResult
@@ -137,8 +147,10 @@ final class NotesProvider: ObservableObject {
 
         let titleEsc = t.appleScriptEscaped
         let extra = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let htmlBody = "<div>\(t.htmlEscaped)</div>"
-            + (extra.isEmpty ? "" : "<div>\(extra.htmlEscaped)</div>")
+        var htmlBody = "<div>\(t.htmlEscaped)</div>"
+        if !extra.isEmpty {
+            htmlBody += "<div>\(extra.htmlEscaped)</div>"
+        }
         let htmlEsc = htmlBody.appleScriptEscaped
         let script = """
         with timeout of 12 seconds
@@ -162,16 +174,49 @@ final class NotesProvider: ObservableObject {
             isAvailable = false
             return false
         }
-        if out.hasPrefix("ERR") {
-            let raw = out.replacingOccurrences(of: "ERR\t", with: "").replacingOccurrences(of: "ERR|||", with: "")
-            lastError = Self.friendlyError(from: raw)
+        if applyNotesResult(out, failureFallback: "Could not create note") {
+            refresh()
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    func update(id: String, title: String, body: String? = nil) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        let esc = id.appleScriptEscaped
+        let titleEsc = t.appleScriptEscaped
+        let extra = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var htmlBody = "<div>\(t.htmlEscaped)</div>"
+        if !extra.isEmpty {
+            htmlBody += "<div>\(extra.htmlEscaped)</div>"
+        }
+        let htmlEsc = htmlBody.appleScriptEscaped
+        let script = """
+        with timeout of 12 seconds
+            try
+                tell application "Notes"
+                    set n to note id "\(esc)"
+                    set name of n to "\(titleEsc)"
+                    set body of n to "\(htmlEsc)"
+                end tell
+                return "OK"
+            on error errMsg number errNum
+                return "ERR|" & errNum & ":" & errMsg
+            end try
+        end timeout
+        """
+        guard let out = Self.runAppleScript(script) else {
+            lastError = Self.friendlyError(from: "Could not update note")
             isAvailable = false
             return false
         }
-        lastError = nil
-        isAvailable = true
-        refresh()
-        return true
+        if applyNotesResult(out, failureFallback: "Could not update note") {
+            refresh()
+            return true
+        }
+        return false
     }
 
     @discardableResult
@@ -194,16 +239,13 @@ final class NotesProvider: ObservableObject {
             isAvailable = false
             return false
         }
-        if out.hasPrefix("ERR|||") {
-            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
-            isAvailable = false
-            return false
+        if applyNotesResult(out, failureFallback: "Could not delete note") {
+            items.removeAll { $0.id == id }
+            objectWillChange.send()
+            onChangeWire?()
+            return true
         }
-        items.removeAll { $0.id == id }
-        lastError = nil
-        objectWillChange.send()
-        onChangeWire?()
-        return true
+        return false
     }
 
     func open(id: String) {
@@ -247,17 +289,34 @@ final class NotesProvider: ObservableObject {
             end try
         end timeout
         """
-        if let out = Self.runAppleScript(script), out.hasPrefix("ERR|||") {
-            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
-            isAvailable = false
+        if let out = Self.runAppleScript(script) {
+            _ = applyNotesResult(out, failureFallback: "Could not reach Notes")
         } else {
-            isAvailable = true
-            lastError = nil
+            lastError = Self.friendlyError(from: "Could not reach Notes")
+            isAvailable = false
         }
-        isAvailable = true
-        lastError = nil
-        lastStatus = "Connected"
+        if lastError == nil {
+            lastStatus = "Connected"
+        }
         refresh()
+    }
+
+    @discardableResult
+    private func applyNotesResult(_ raw: String?, failureFallback: String) -> Bool {
+        switch NotesScriptResult.parse(raw) {
+        case .ok:
+            lastError = nil
+            isAvailable = true
+            return true
+        case .error(let message):
+            lastError = Self.friendlyError(from: message)
+            isAvailable = false
+            return false
+        case .unavailable:
+            lastError = Self.friendlyError(from: failureFallback)
+            isAvailable = false
+            return false
+        }
     }
 
     /// Turns a raw AppleScript/AppleEvent error into an actionable sentence

@@ -19,6 +19,8 @@ final class GlobalHotKeys: @unchecked Sendable {
         case focusShelf = 4
         case focusCalendar = 5
         case focusToggle = 6
+        case focusClipboard = 7
+        case focusHub = 8
     }
 
     /// Called on the main actor.
@@ -32,7 +34,7 @@ final class GlobalHotKeys: @unchecked Sendable {
 
     var registrationSummary: String {
         if failedActions.isEmpty {
-            return "All hotkeys registered (⌃⌥ D/P/M/S/C/F)."
+            return "All hotkeys registered (⌃⌥ D/P/M/S/C/F/B/H)."
         }
         let names = failedActions.map(\.label).joined(separator: ", ")
         return "Some hotkeys unavailable (conflict): \(names)."
@@ -90,6 +92,8 @@ final class GlobalHotKeys: @unchecked Sendable {
         register(keyCode: UInt32(kVK_ANSI_S), id: .focusShelf, modifiers: mods)
         register(keyCode: UInt32(kVK_ANSI_C), id: .focusCalendar, modifiers: mods)
         register(keyCode: UInt32(kVK_ANSI_F), id: .focusToggle, modifiers: mods)
+        register(keyCode: UInt32(kVK_ANSI_B), id: .focusClipboard, modifiers: mods)
+        register(keyCode: UInt32(kVK_ANSI_H), id: .focusHub, modifiers: mods)
     }
 
     func uninstall() {
@@ -140,6 +144,8 @@ extension GlobalHotKeys.Action {
         case .focusShelf: return "⌃⌥S"
         case .focusCalendar: return "⌃⌥C"
         case .focusToggle: return "⌃⌥F"
+        case .focusClipboard: return "⌃⌥B"
+        case .focusHub: return "⌃⌥H"
         }
     }
 
@@ -151,6 +157,8 @@ extension GlobalHotKeys.Action {
         case .focusShelf: return "Focus Shelf"
         case .focusCalendar: return "Focus Calendar"
         case .focusToggle: return "Toggle Focus Mode"
+        case .focusClipboard: return "Focus Clipboard"
+        case .focusHub: return "Focus Hub"
         }
     }
 }
