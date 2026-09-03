@@ -90,7 +90,8 @@ Use this after a local build to confirm the app is usable day-to-day.
 
 - [ ] Drop files onto notch or Shelf; **Add** picker works
 - [ ] File size shown; drag-out / AirDrop / Reveal
-- [ ] Hub groups by app; Open / Dismiss from the row menu; setup card for Alert style None
+- [ ] Hub **Replace** opt-in turns on ingest + Peek; without it Mac alerts stay in Apple’s NC
+- [ ] Hub groups by app; Open / Dismiss from the row menu; leftover-banner hint can be dismissed
 - [ ] Hub shows recent Mac notifications after FDA (not empty until the next alert)
 - [ ] Calendar: 30-day grid beside events; tap a day filters the list; New creates
 - [ ] Notes: Connect Automation → list/create/edit/delete in Dynamo folder

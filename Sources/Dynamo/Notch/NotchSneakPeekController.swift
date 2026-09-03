@@ -30,11 +30,14 @@ final class NotchSneakPeekController: ObservableObject {
         case .critical: base = 6.0
         }
         // Peek-only: hold messages/calls longer so the notch is the real alert surface.
-        if DynamoNotificationRouter.shared.peekOnlyDelivery, let peek {
+        if DynamoNotificationRouter.shared.replacesNotificationCenter || DynamoNotificationRouter.shared.peekOnlyDelivery, let peek {
             let d = peek.detail.lowercased()
+            let isSystem = !peek.sourceBundleID.isEmpty || d.hasPrefix("text") || d.hasPrefix("call") || d.hasPrefix("mail")
             if d.hasPrefix("text") || d.hasPrefix("call") || peek.systemImage.contains("message")
                 || peek.systemImage.contains("phone") {
-                base *= 1.4
+                base *= 1.5
+            } else if isSystem {
+                base *= 1.25
             }
         }
         return base * multiplier

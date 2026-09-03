@@ -121,6 +121,36 @@ final class HubNotificationCenterTests: XCTestCase {
         XCTAssertEqual(HubNotificationCenter.groupKey(item), "dynamo")
         XCTAssertEqual(HubNotificationCenter.groupTitle(item), "Dynamo")
     }
+
+    func testReplacementIsOffUntilOptIn() {
+        XCTAssertFalse(
+            HubNotificationCenter.Replacement.isOptedIn(stored: nil, peekOnlyWasSet: false, peekOnly: false)
+        )
+        XCTAssertTrue(
+            HubNotificationCenter.Replacement.isOptedIn(stored: nil, peekOnlyWasSet: true, peekOnly: true)
+        )
+        XCTAssertFalse(
+            HubNotificationCenter.Replacement.isOptedIn(stored: false, peekOnlyWasSet: true, peekOnly: true)
+        )
+        XCTAssertTrue(
+            HubNotificationCenter.Replacement.isOptedIn(stored: true, peekOnlyWasSet: false, peekOnly: false)
+        )
+    }
+
+    func testReplacementStatusLine() {
+        XCTAssertEqual(
+            HubNotificationCenter.Replacement.statusLine(optedIn: false, accessDenied: false, routerEnabled: true),
+            "Dynamo Peeks only · Mac banners unchanged"
+        )
+        XCTAssertEqual(
+            HubNotificationCenter.Replacement.statusLine(optedIn: true, accessDenied: false, routerEnabled: true),
+            "On · Hub is the inbox, Peek is the banner"
+        )
+        XCTAssertEqual(
+            HubNotificationCenter.Replacement.statusLine(optedIn: true, accessDenied: true, routerEnabled: true),
+            "On · grant Disk Access to ingest this Mac"
+        )
+    }
 }
 
 final class CalendarPeekPolicyTests: XCTestCase {

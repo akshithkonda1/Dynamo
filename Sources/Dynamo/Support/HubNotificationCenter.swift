@@ -104,4 +104,20 @@ enum HubNotificationCenter {
             NSWorkspace.shared.open(url)
         }
     }
+
+    /// Sticky opt-in: Hub + Peek stand in for Notification Center as far as macOS allows.
+    enum Replacement {
+        /// First launch: off (real opt-in). If the user already chose Peek-only, stay on.
+        static func isOptedIn(stored: Bool?, peekOnlyWasSet: Bool, peekOnly: Bool) -> Bool {
+            if let stored { return stored }
+            return peekOnlyWasSet && peekOnly
+        }
+
+        static func statusLine(optedIn: Bool, accessDenied: Bool, routerEnabled: Bool) -> String {
+            if !routerEnabled { return "Delivery paused" }
+            if !optedIn { return "Dynamo Peeks only · Mac banners unchanged" }
+            if accessDenied { return "On · grant Disk Access to ingest this Mac" }
+            return "On · Hub is the inbox, Peek is the banner"
+        }
+    }
 }

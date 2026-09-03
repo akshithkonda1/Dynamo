@@ -108,7 +108,9 @@ private struct ExpandedPeekHubView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             controlCard
-            if router.peekOnlyDelivery {
+            if !router.replacesNotificationCenter {
+                optInCard
+            } else if mirror.accessDenied || !router.bannerHintDismissed {
                 replacementSetupCard
             }
             filterStrip
@@ -195,40 +197,36 @@ private struct ExpandedPeekHubView: View {
         }
     }
 
-    /// One plain-English line so the control strip isn’t cryptic.
     private var statusPlainEnglish: String {
-        if !router.isEnabled { return "Delivery paused" }
-        if router.peekOnlyDelivery {
-            return mirror.accessDenied ? "Peek-only · grant Disk Access for Mac alerts" : "Notification Center · Dynamo + this Mac"
-        }
-        return "Notification Center · routing into Hub"
+        HubNotificationCenter.Replacement.statusLine(
+            optedIn: router.replacesNotificationCenter,
+            accessDenied: mirror.accessDenied,
+            routerEnabled: router.isEnabled
+        )
     }
 
     private var controlCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Quick controls")
+            Text("Notification Center")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .textCase(.uppercase)
                 .tracking(0.5)
             HStack(spacing: 5) {
                 hubToggle(
+                    title: "Replace",
+                    help: "Opt in: Hub becomes the inbox and Peek becomes the banner for this Mac",
+                    systemImage: "bell.badge.fill",
+                    isOn: Binding(
+                        get: { router.replacesNotificationCenter },
+                        set: { router.replacesNotificationCenter = $0 }
+                    )
+                )
+                hubToggle(
                     title: "On",
                     help: "Master switch — when off, Dynamo won’t deliver Peeks",
                     systemImage: "power",
                     isOn: Binding(get: { router.isEnabled }, set: { router.isEnabled = $0 })
-                )
-                hubToggle(
-                    title: "Notch only",
-                    help: "Prefer Peeks in the notch instead of corner banners",
-                    systemImage: "menubar.rectangle",
-                    isOn: Binding(get: { router.peekOnlyDelivery }, set: { router.peekOnlyDelivery = $0 })
-                )
-                hubToggle(
-                    title: "Messages",
-                    help: "Route Messages / FaceTime into Dynamo (needs Full Disk Access)",
-                    systemImage: mirror.accessDenied ? "exclamationmark.shield" : "message.fill",
-                    isOn: Binding(get: { router.routeSystemApps }, set: { router.routeSystemApps = $0 })
                 )
                 hubToggle(
                     title: "Tap feel",
@@ -281,34 +279,72 @@ private struct ExpandedPeekHubView: View {
         .help(help)
     }
 
-    private var replacementSetupCard: some View {
+    private var optInCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Replace Mac banners")
+            Text("Use Hub as Notification Center")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(NotchTheme.textQuaternary)
                 .textCase(.uppercase)
                 .tracking(0.5)
-            Text("Peek is the banner. Hub is the inbox. Apple cannot hide other apps’ corner alerts — keep Allow Notifications on, set Alert style to None.")
+            Text("One opt-in turns on Mac ingest, Peek banners, and this inbox. Leftover corner alerts still need Alert style None — Apple won’t let Dynamo hide them.")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(NotchTheme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+            Button {
+                withAnimation(NotchTheme.snappy) { router.replacesNotificationCenter = true }
+            } label: {
+                NotchChipLabel(title: "Replace Notification Center", systemImage: "checkmark.circle.fill", active: true)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(NotchTheme.chipFill.opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(NotchTheme.neonCyan.opacity(0.18), lineWidth: 0.5)
+                )
+        )
+    }
+
+    private var replacementSetupCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(mirror.accessDenied ? "Finish access" : "Leftover banners")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+            Text(
+                mirror.accessDenied
+                    ? "Hub is on. Grant Full Disk Access so Messages and the rest of this Mac land here."
+                    : "Hub is already the inbox. To quiet leftover Mac banners, keep Allow Notifications on and set Alert style to None."
+            )
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(NotchTheme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 5) {
-                Button {
-                    HubNotificationCenter.openFullDiskAccess()
-                } label: {
-                    NotchChipLabel(
-                        title: mirror.accessDenied ? "Full Disk Access" : "Disk access",
-                        systemImage: "lock.shield",
-                        active: mirror.accessDenied
-                    )
+                if mirror.accessDenied {
+                    Button {
+                        HubNotificationCenter.openFullDiskAccess()
+                    } label: {
+                        NotchChipLabel(title: "Full Disk Access", systemImage: "lock.shield", active: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
+                    } label: {
+                        NotchChipLabel(title: "Alert style None", systemImage: "bell.slash", active: true)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        router.dismissBannerHint()
+                    } label: {
+                        NotchChipLabel(title: "Done", systemImage: "checkmark", active: false)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                Button {
-                    DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
-                } label: {
-                    NotchChipLabel(title: "Alert style None", systemImage: "bell.slash", active: true)
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(9)
@@ -393,7 +429,7 @@ private struct ExpandedPeekHubView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Full Disk Access lets Dynamo route Messages into the Hub")
-            } else if router.peekOnlyDelivery {
+            } else if router.replacesNotificationCenter, mirror.accessDenied {
                 Button {
                     DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
                 } label: {
@@ -417,7 +453,9 @@ private struct ExpandedPeekHubView: View {
         switch filter {
         case .all:
             return hub.history.isEmpty
-                ? "Dynamo Peeks and this Mac’s notifications land here, grouped by app. Tap to replay, swipe the menu to dismiss or open."
+                ? (router.replacesNotificationCenter
+                    ? "Hub is Notification Center for this Mac. New alerts Peek; tap a row to replay."
+                    : "Turn on Replace to use Hub as this Mac’s inbox. Dynamo Peeks still land here.")
                 : "Try another filter, or clear filters with All."
         case .unread:
             return "New Peeks show a blue dot. Tap Mark all read when you’re done."
@@ -554,9 +592,15 @@ private struct ExpandedPeekHubView: View {
 
 private struct NotificationsSettingsView: View {
     @ObservedObject private var hub = PeekNotificationCenter.shared
+    @ObservedObject private var router = DynamoNotificationRouter.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Replace Notification Center", isOn: $router.replacesNotificationCenter)
+            Text("One opt-in: ingest this Mac, Peek as the banner, Hub as the inbox. Leftover Mac banners need Alert style None.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Toggle("Haptics on Peek", isOn: $hub.hapticsEnabled)
             Toggle("Sound on critical Peeks", isOn: $hub.criticalSoundEnabled)
             Text("Battery 10% / critically low / fully charged always play a sound.")

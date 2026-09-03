@@ -14,11 +14,12 @@ All notable changes to Dynamo are documented here.
 - True Focus prep/end keys trim FIFO instead of a random `Set.suffix`
 
 ### Hub as Notification Center
-- Hub + Peek can **replace** Mac Notification Center: seed recent NC rows into the inbox; new alerts Peek
-- Inbox **groups by app**; Open app / Dismiss; setup card for Full Disk Access + Alert style None
-- Mac ingest stores **bundle id + app name** so groups survive relaunch
+- **One opt-in** (“Replace Notification Center”) turns on Mac ingest, Peek-only delivery, and Hub as the inbox
+- First opt-in opens Full Disk Access if needed, then Notifications (Alert style None) once
+- After that, leftover-banner hint is dismissible; Apple still cannot hide other apps’ corner banners
+- Hub + Peek can **replace** Mac Notification Center to that degree: seed recent NC rows; new alerts Peek
+- Inbox **groups by app**; Open app / Dismiss; persist bundle id + app name
 - Default hub history cap **100**
-- Honest limit: Apple cannot hide other apps’ corner banners — user sets Alert style to None
 
 ### Calendar
 - Default lookahead **30 days**; compact **30-day grid** beside the event list (tap a day to filter / New)

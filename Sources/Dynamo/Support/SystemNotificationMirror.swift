@@ -69,7 +69,7 @@ final class SystemNotificationMirror: ObservableObject {
 
     private init() {
         if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
-            isEnabled = true
+            isEnabled = false
         } else {
             isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         }

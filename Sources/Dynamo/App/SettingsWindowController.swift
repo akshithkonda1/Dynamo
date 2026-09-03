@@ -496,22 +496,28 @@ struct SettingsView: View {
         SettingsSection(title: "Notifications & Peek") {
             Text("Notifications through Peek (not banners)")
                 .font(.subheadline.weight(.semibold))
-            Text("Dynamo delivers alerts as notch Peeks — the way you want them — not as typical top-right system banners. Calendar, battery, media, Focus, and Messages/FaceTime (when routed) all use Peek.")
+            Text("Turn on Replace Notification Center once. Hub becomes the inbox and Peek becomes the banner for Dynamo and this Mac. Apple still cannot hide leftover corner banners — keep Allow Notifications on and set Alert style to None.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Toggle("Deliver through Peek only", isOn: Binding(
-                get: { DynamoNotificationRouter.shared.peekOnlyDelivery },
-                set: { DynamoNotificationRouter.shared.peekOnlyDelivery = $0 }
+            Toggle("Replace Notification Center", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.replacesNotificationCenter },
+                set: { DynamoNotificationRouter.shared.replacesNotificationCenter = $0 }
             ))
             Toggle("Dynamo is the router", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.isEnabled },
                 set: { DynamoNotificationRouter.shared.isEnabled = $0 }
             ))
+            Toggle("Deliver through Peek only", isOn: Binding(
+                get: { DynamoNotificationRouter.shared.peekOnlyDelivery },
+                set: { DynamoNotificationRouter.shared.peekOnlyDelivery = $0 }
+            ))
+            .disabled(DynamoNotificationRouter.shared.replacesNotificationCenter)
             Toggle("Route system apps into Peek (Messages, FaceTime…)", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeSystemApps },
                 set: { DynamoNotificationRouter.shared.routeSystemApps = $0 }
             ))
+            .disabled(DynamoNotificationRouter.shared.replacesNotificationCenter)
             Toggle("Route widgets", isOn: Binding(
                 get: { DynamoNotificationRouter.shared.routeWidgets },
                 set: { DynamoNotificationRouter.shared.routeWidgets = $0 }

@@ -22,7 +22,7 @@ Registered in `AppDelegate.bootstrap()`:
 | Widget | What it does |
 |--------|----------------|
 | **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ + **Tone AI** genre tuning), cover-art equalizer |
-| **Hub** | **Notification Center** — Dynamo Peeks + this Mac’s notifications; unread, filters, replay |
+| **Hub** | **Notification Center** (opt-in) — Dynamo Peeks + this Mac; unread, filters, replay |
 | **Calendar** | Upcoming events (EventKit **full** read/write), **30-day grid**, in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W + Apple **Notes** R/W (Automation) · local checklist |
 | **Clipboard** | Recent text, **images**, **Finder files**; pin with **color tags**; paste as plain |
@@ -108,8 +108,8 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 |------|----------|
 | **Dynamo’s own alerts** | Always via **Peek only** — Dynamo does **not** post macOS corner banners for calendar, battery, media, Focus, Hub, API, etc. |
 | **System apps (optional)** | Ingested from Notification Center → **router** → Peek + Hub (Messages, FaceTime, Mail, Slack, …) |
-| **Replace Notification Center** | Peek = banner, Hub = inbox. Seed last ~40 Mac alerts; live alerts Peek. |
-| **Peek-only mode** (default) | Longer dwell for messages/calls; hub is the presentation surface |
+| **Replace Notification Center** | **Opt-in.** One switch: ingest this Mac, Peek = banner, Hub = inbox. |
+| **Peek-only** (with Replace) | Longer dwell for messages/calls; leftover Mac banners need Alert style None |
 | **Hub tray tab** | Inbox, unread count, mark read, clear, tap to **replay** Peek |
 | **Message chrome** | Contact photo from **Contacts**; island wash/ring/lip match the photo colors |
 
@@ -123,17 +123,14 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 
 ### Replace the Mac notification system (Hub + Peek)
 
-Apple does **not** allow third-party apps to hide other apps’ system banners. Dynamo still replaces Notification Center **for you** when:
+**One opt-in.** Hub → **Replace**, or Preferences → **Replace Notification Center**. That turns on Mac ingest, Peek-only delivery, and Hub as the inbox. The first time, Dynamo opens Full Disk Access if needed, then Notifications so you can set Alert style to None.
 
-1. Preferences → **Deliver through Peek only** + **Route system apps into Peek**
-2. Grant **Full Disk Access** (read the Notification Center store) and **Contacts** (message Peek photos)
-3. System Settings → **Notifications** → for each app (Messages, FaceTime, Mail, Slack, …):
-   - Keep **Allow Notifications** **on** (Dynamo can only ingest what macOS still delivers)
-   - Set **Alert style → None** (no top-right banner)
+Apple does **not** allow third-party apps to hide other apps’ system banners. After opt-in, leftover corner banners still need:
 
-Then **Peek is the banner** and **Hub is the inbox** (grouped by app, Open / Dismiss / Replay). Hub seeds recent Mac notifications without flooding the notch; new ones Peek live.
+- **Allow Notifications** on (so Dynamo can ingest deliveries)
+- **Alert style → None** per app
 
-Preferences includes **Open Notifications settings** / **Open Focus** helpers.
+Then **Peek is the banner** and **Hub is the inbox**. Hub seeds recent Mac notifications without flooding the notch; new ones Peek live.
 
 ---
 
