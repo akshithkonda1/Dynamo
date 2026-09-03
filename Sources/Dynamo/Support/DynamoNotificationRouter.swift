@@ -167,25 +167,23 @@ final class DynamoNotificationRouter: ObservableObject {
             routeExternal = UserDefaults.standard.bool(forKey: Self.externalRouteKey)
         }
         let peekOnlyWasSet = UserDefaults.standard.object(forKey: Self.peekOnlyKey) != nil
-        if peekOnlyWasSet {
-            peekOnlyDelivery = UserDefaults.standard.bool(forKey: Self.peekOnlyKey)
-        } else {
-            peekOnlyDelivery = false
-        }
+        let peekOnlyValue = peekOnlyWasSet ? UserDefaults.standard.bool(forKey: Self.peekOnlyKey) : false
         let storedReplace = UserDefaults.standard.object(forKey: Self.replaceKey) as? Bool
-        replacesNotificationCenter = HubNotificationCenter.Replacement.isOptedIn(
+        let replaceValue = HubNotificationCenter.Replacement.isOptedIn(
             stored: storedReplace,
             peekOnlyWasSet: peekOnlyWasSet,
-            peekOnly: peekOnlyDelivery
+            peekOnly: peekOnlyValue
         )
+        peekOnlyDelivery = peekOnlyValue
+        replacesNotificationCenter = replaceValue
         if UserDefaults.standard.object(forKey: Self.systemRouteKey) == nil {
-            routeSystemApps = replacesNotificationCenter
+            routeSystemApps = replaceValue
         } else {
             routeSystemApps = UserDefaults.standard.bool(forKey: Self.systemRouteKey)
         }
         bannerHintDismissed = UserDefaults.standard.bool(forKey: Self.bannerHintKey)
         isBootstrapping = false
-        if replacesNotificationCenter {
+        if replaceValue {
             engageReplacement(offerSetup: false)
         }
     }
