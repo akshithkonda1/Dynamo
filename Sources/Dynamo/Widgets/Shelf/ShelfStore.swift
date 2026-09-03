@@ -189,6 +189,12 @@ final class ShelfStore: ObservableObject {
         service.perform(withItems: [item.url])
     }
 
+    /// Menu / URL helper — newest stashed item (index 0).
+    func airDropNewest() {
+        guard let first = items.first else { return }
+        airDrop(first)
+    }
+
     // MARK: - Stash
 
     private func stashCopy(of source: URL) -> ShelfItem? {

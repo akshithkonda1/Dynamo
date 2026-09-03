@@ -2,6 +2,21 @@
 
 All notable changes to Dynamo are documented here.
 
+## [Unreleased]
+
+### Clipboard
+- Copy sneak peeks actually fire (history ingest now notifies the Hub/Peek path)
+- Finder **file** copies appear in history (open / copy / pin / reveal)
+- Pin **color tags** (click the dot to cycle)
+- **Paste as plain** when the pasteboard still has RTF/HTML
+
+### Command surface
+- Menu: Focus Clipboard, Focus Hub, **AirDrop Last Shelf Item**
+- Hotkeys: ⌃⌥B clipboard · ⌃⌥H Hub
+- URLs: `dynamo://clipboard` · `dynamo://hub` · `dynamo://airdrop`
+
+---
+
 ## [1.1.1] — 2026-08-15
 
 **Symphony Amplify + polish release.**

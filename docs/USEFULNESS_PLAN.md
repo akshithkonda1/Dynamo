@@ -19,7 +19,7 @@ Daily driver: `~/Documents/Dynamo/dist/Dynamo.app` · Branch: `feat/phases-a-e-p
 |----|---------|--------|
 | A1 | **Shelf stash copies** into App Support | Done |
 | A2 | Hotkey polish + conflict summary | Done |
-| A3 | **Clipboard images** (screenshots) | Done |
+| A3 | **Clipboard images** (screenshots) + **files** + pin **color tags** + paste as plain | Done |
 | A4 | **Meeting Mode ambient dim** for music | Done |
 | A5 | **Today** chip → Calendar | Done |
 
@@ -53,6 +53,8 @@ Daily driver: `~/Documents/Dynamo/dist/Dynamo.app` · Branch: `feat/phases-a-e-p
 | M | Mute |
 | S | Shelf |
 | C | Calendar |
+| B | Clipboard |
+| H | Hub |
 
 ## URLs
 
@@ -62,6 +64,9 @@ dynamo://mute
 dynamo://play
 dynamo://shelf
 dynamo://calendar
+dynamo://clipboard
+dynamo://hub
+dynamo://airdrop
 dynamo://peek?title=Hello&subtitle=World
 ```
 

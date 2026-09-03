@@ -90,7 +90,8 @@ Use this after a local build to confirm the app is usable day-to-day.
 
 - [ ] Drop files onto notch or Shelf; **Add** picker works
 - [ ] File size shown; drag-out / AirDrop / Reveal
-- [ ] Clipboard: pin, delete history row, clear
+- [ ] Clipboard: pin, color tag, delete history row, clear, **Paste as plain** when copying rich text
+- [ ] Clipboard: copy a Finder file → history row → Open / copy / pin
 - [ ] Checklist: progress `done/total`, always-visible add field
 
 ---

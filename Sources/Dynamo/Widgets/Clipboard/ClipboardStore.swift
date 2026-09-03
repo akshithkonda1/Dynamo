@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Watches the general pasteboard for text + images; pins persist under App Support.
+/// Watches the general pasteboard for text, images, and file URLs; pins persist under App Support.
 @MainActor
 final class ClipboardStore: ObservableObject {
     static var historyLimit: Int {
@@ -82,6 +82,9 @@ final class ClipboardStore: ObservableObject {
             pb.clearContents()
             pb.writeObjects([image])
             lastChangeCount = pb.changeCount
+        case .file:
+            guard let path = item.filePath else { return }
+            copyFileURL(URL(fileURLWithPath: path))
         }
     }
 
@@ -95,7 +98,27 @@ final class ClipboardStore: ObservableObject {
             pb.clearContents()
             pb.writeObjects([image])
             lastChangeCount = pb.changeCount
+        case .file:
+            guard let path = snippet.filePath else { return }
+            copyFileURL(URL(fileURLWithPath: path))
         }
+    }
+
+    func copyFileURL(_ url: URL) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([url as NSURL])
+        lastChangeCount = pb.changeCount
+    }
+
+    func revealFile(path: String?) {
+        guard let path, FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    func openFile(path: String?) {
+        guard let path, FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
     func pinCurrentOrText(_ text: String, title: String? = nil) {
@@ -128,7 +151,26 @@ final class ClipboardStore: ObservableObject {
                 at: 0
             )
             persist()
+        case .file:
+            guard let path = item.filePath else { return }
+            snippets.insert(
+                PinnedSnippet(
+                    title: item.text.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : item.text,
+                    kind: .file,
+                    text: item.text,
+                    filePath: path
+                ),
+                at: 0
+            )
+            persist()
         }
+    }
+
+    func cycleSnippetTag(id: UUID) {
+        guard let i = snippets.firstIndex(where: { $0.id == id }) else { return }
+        snippets[i].tag = snippets[i].tag.next
+        snippets[i].updatedAt = Date()
+        persist()
     }
 
     func updateSnippet(_ snippet: PinnedSnippet) {
@@ -213,25 +255,58 @@ final class ClipboardStore: ObservableObject {
         guard count != lastChangeCount else { return }
         lastChangeCount = count
 
+        // Finder file copies — prefer file URLs over treating POSIX paths as text.
+        let fileURLs = readFileURLs(from: pb)
+        if !fileURLs.isEmpty {
+            var newest: ClipboardHistoryItem?
+            for url in fileURLs.reversed() {
+                let item = ClipboardHistoryItem(
+                    kind: .file,
+                    text: url.lastPathComponent,
+                    filePath: url.path
+                )
+                if ClipboardHistoryPolicy.isDuplicate(history.first, of: item) { continue }
+                history.insert(item, at: 0)
+                newest = item
+            }
+            if let newest {
+                trimHistory()
+                persist()
+                onNewItem?(newest)
+            }
+            return
+        }
+
         if let text = pb.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
-            if history.first?.kind == .text, history.first?.text == text { return }
-            history.insert(ClipboardHistoryItem(kind: .text, text: text), at: 0)
+            let item = ClipboardHistoryItem(kind: .text, text: text)
+            if ClipboardHistoryPolicy.isDuplicate(history.first, of: item) { return }
+            history.insert(item, at: 0)
             trimHistory()
             persist()
+            onNewItem?(item)
             return
         }
 
         // Image (screenshot, copy from Preview, etc.)
         if let image = readImage(from: pb), let fileName = saveImage(image) {
-            history.insert(
-                ClipboardHistoryItem(kind: .image, text: "", imageFileName: fileName),
-                at: 0
-            )
+            let item = ClipboardHistoryItem(kind: .image, text: "", imageFileName: fileName)
+            history.insert(item, at: 0)
             trimHistory()
             persist()
+            onNewItem?(item)
         }
+    }
+
+    private func readFileURLs(from pb: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL] else {
+            return []
+        }
+        return urls.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private func readImage(from pb: NSPasteboard) -> NSImage? {
@@ -264,14 +339,13 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func trimHistory() {
-        while history.count > Self.historyLimit {
-            if let last = history.last {
-                if let name = last.imageFileName {
-                    try? FileManager.default.removeItem(at: imageURL(for: name))
-                }
-                history.removeLast()
+        let result = ClipboardHistoryPolicy.trim(history, limit: Self.historyLimit)
+        for item in result.dropped {
+            if let name = item.imageFileName {
+                try? FileManager.default.removeItem(at: imageURL(for: name))
             }
         }
+        history = result.kept
     }
 
     // MARK: - Persistence

@@ -44,14 +44,14 @@ Toggle in Settings / menu. Critical peeks still show.
 | ⌃⌥C | Focus Calendar |
 
 ### F3 — Drop Stack polish
-- Stash **copies** into Application Support (true pocket, not aliases only)
-- Drag-out as file promise
-- Optional “AirDrop last item” from menu bar
+- Stash **copies** into Application Support (true pocket, not aliases only) — **done**
+- Drag-out as file promise — **done** (`onDrag` file URL)
+- Optional “AirDrop last item” from menu bar — **done**
 
 ### F4 — Smart Clipboard
-- Image + file URL history (not just text)
-- Pin with color tags
-- “Paste as plain” / snippet expansion (opt-in)
+- Image + file URL history (not just text) — **done**
+- Pin with color tags — **done**
+- “Paste as plain” (opt-in control when RTF/HTML is on the pasteboard) — **done**
 
 ### F5 — Media superpowers
 - Scrub remaining-time ring on ambient art

@@ -25,7 +25,7 @@ Registered in `AppDelegate.bootstrap()`:
 | **Hub** | **Notification inbox** — unread, mark read, clear, **replay** as Peek; ambient unread badge |
 | **Calendar** | Upcoming events (EventKit full access), in-notch **create event**, open Calendar.app |
 | **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist · Notes tab |
-| **Clipboard** | Recent snippets |
+| **Clipboard** | Recent text, **images**, **Finder files**; pin with **color tags**; paste as plain |
 | **Clocks** | **World Clock** — major cities · **Here first** · GPS “Here” label · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
 | **Battery** | Charge, health, drain, vitals grid; **Low / Auto / High** power modes (`pmset`); ambient fill glyph |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
@@ -264,8 +264,10 @@ Signing → paid team if you enable WeatherKit.
 | ⌃⌥M | Mute |
 | ⌃⌥S | Focus Shelf |
 | ⌃⌥C | Focus Calendar |
+| ⌃⌥B | Focus Clipboard |
+| ⌃⌥H | Focus Hub |
 
-**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `notify?title=…` · `peek?title=…`
+**URL scheme:** `dynamo://show` · `mute` · `play` · `shelf` · `calendar` · `clipboard` · `hub` · `airdrop` · `notify?title=…` · `peek?title=…`
 
 ---
 
@@ -332,6 +334,8 @@ Quick checks:
 9. **Hub** tab lists Peeks; **Deliver through Peek only** on  
 10. `open 'dynamo://notify?title=Test&subtitle=Hub&urgency=high'` → notch Peek + Hub inbox  
 11. Message Peek (with Contacts): photo + color-matched chrome  
+12. Copy text → Peek “Copied”; copy a Finder file → Clipboard history row; pin + color tag  
+13. `open 'dynamo://clipboard'` / `dynamo://hub` expand those tabs; menu **AirDrop Last Shelf Item** when Shelf is non-empty  
 
 ---
 

@@ -26,7 +26,7 @@ Also: `python3 Tools/DynamoEQ/dynamo_eq.py selftest`
 | `WidgetRegistryTests.swift` | Register / enable / reorder / config sanitize / sneak-peek fan-out |
 | `NotchGeometryTests.swift` | Expanded width/height bounds, peek/HUD sizes |
 | `AmplifyProfileTests.swift` | Profile resolve + device infer + embedded EQ curves |
-| `WorldClockSortTests.swift` | Sort modes, city coords, distance / random stability |
+| `ClipboardAndURLTests.swift` | History trim / search / pin tags / `dynamo://` hosts |
 
 ```bash
 export DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer   # if needed
