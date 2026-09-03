@@ -84,59 +84,18 @@ private struct AmbientPeekHubView: View {
 
 // MARK: - Expanded hub
 
-private enum HubFilter: String, CaseIterable, Identifiable {
-    case all, unread, battery, messages, calendar, media, system
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: return "All"
-        case .unread: return "Unread"
-        case .battery: return "Battery"
-        case .messages: return "Messages"
-        case .calendar: return "Calendar"
-        case .media: return "Media"
-        case .system: return "System"
-        }
-    }
-
-    func matches(_ item: PeekNotificationCenter.PeekHistoryItem) -> Bool {
-        switch self {
-        case .all: return true
-        case .unread: return item.isUnread
-        case .battery: return item.category.localizedCaseInsensitiveContains("battery")
-        case .messages:
-            let c = item.category.lowercased()
-            let d = item.detail.lowercased()
-            return c.contains("text") || c.contains("call") || c.contains("mail")
-                || d.hasPrefix("text") || d.hasPrefix("call") || d.hasPrefix("mail")
-        case .calendar:
-            return item.category.localizedCaseInsensitiveContains("calendar")
-                || item.category.localizedCaseInsensitiveContains("reminder")
-        case .media:
-            return item.category.localizedCaseInsensitiveContains("media")
-                || item.systemImage.contains("music")
-        case .system:
-            return item.category.localizedCaseInsensitiveContains("system")
-                || item.category.localizedCaseInsensitiveContains("health")
-                || item.category == "general"
-        }
-    }
-}
-
 private struct ExpandedPeekHubView: View {
     @ObservedObject var hub: PeekNotificationCenter
     @ObservedObject var router: DynamoNotificationRouter
     @ObservedObject var mirror: SystemNotificationMirror
-    @State private var filter: HubFilter = .all
+    @State private var filter: HubInboxFilter = .all
 
     private var filteredHistory: [PeekNotificationCenter.PeekHistoryItem] {
         hub.history.filter { filter.matches($0) }
     }
 
-    private var filterCounts: [HubFilter: Int] {
-        Dictionary(uniqueKeysWithValues: HubFilter.allCases.map { f in
+    private var filterCounts: [HubInboxFilter: Int] {
+        Dictionary(uniqueKeysWithValues: HubInboxFilter.allCases.map { f in
             (f, hub.history.filter { f.matches($0) }.count)
         })
     }
@@ -290,7 +249,7 @@ private struct ExpandedPeekHubView: View {
     private var filterStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 5) {
-                ForEach(HubFilter.allCases) { f in
+                ForEach(HubInboxFilter.allCases) { f in
                     let count = filterCounts[f] ?? 0
                     let label = (f == .all || count == 0) ? f.title : "\(f.title) \(count)"
                     Button {

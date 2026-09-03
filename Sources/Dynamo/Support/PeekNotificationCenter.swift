@@ -73,7 +73,7 @@ final class PeekNotificationCenter: ObservableObject {
         let enqueuedAt: Date
     }
 
-    struct PeekHistoryItem: Identifiable, Equatable {
+        struct PeekHistoryItem: Identifiable, Equatable, Codable {
         let id: String
         let category: String
         let title: String
@@ -106,6 +106,19 @@ final class PeekNotificationCenter: ObservableObject {
         } else {
             historyRetention = min(200, max(20, UserDefaults.standard.integer(forKey: Self.historyCapKey)))
         }
+        loadPersistedHistory()
+    }
+
+    private static let historyFile = "peek-hub.json"
+
+    private func loadPersistedHistory() {
+        guard let items = AppSupportStore.load([PeekHistoryItem].self, from: Self.historyFile) else { return }
+        history = items
+        unreadCount = history.filter(\.isUnread).count
+    }
+
+    private func persistHistory() {
+        AppSupportStore.save(history, to: Self.historyFile)
     }
 
     private func trimHistoryIfNeeded() {
@@ -116,6 +129,7 @@ final class PeekNotificationCenter: ObservableObject {
         }
         history = Array(history.prefix(maxHistory))
         unreadCount = history.filter(\.isUnread).count
+        persistHistory()
     }
 
     // MARK: - Attach
@@ -226,12 +240,14 @@ final class PeekNotificationCenter: ObservableObject {
             history[i].isUnread = false
         }
         recomputeUnread()
+        persistHistory()
     }
 
     func markRead(id: String) {
         if let idx = history.firstIndex(where: { $0.id == id }) {
             history[idx].isUnread = false
             recomputeUnread()
+            persistHistory()
         }
     }
 
@@ -240,11 +256,22 @@ final class PeekNotificationCenter: ObservableObject {
         lastDelivered = nil
         replayStore.removeAll()
         recomputeUnread()
+        persistHistory()
     }
 
     /// Re-present a hub item as a Peek (does not re-queue).
     func replay(id: String) {
-        guard let peek = replayStore[id] else { return }
+        let peek = replayStore[id] ?? history.first(where: { $0.id == id }).map {
+            NotchSneakPeek(
+                systemImage: $0.systemImage,
+                title: $0.title,
+                subtitle: $0.subtitle,
+                urgency: $0.urgency,
+                detail: $0.detail,
+                category: $0.category
+            )
+        }
+        guard let peek else { return }
         markRead(id: id)
         isPresenting = true
         presenter?.showDirect(peek)
@@ -328,6 +355,7 @@ final class PeekNotificationCenter: ObservableObject {
             lastDelivered = h
         }
         recomputeUnread()
+        persistHistory()
     }
 
     private func recomputeUnread() {

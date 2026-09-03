@@ -162,16 +162,11 @@ final class NotesProvider: ObservableObject {
             isAvailable = false
             return false
         }
-        if out.hasPrefix("ERR") {
-            let raw = out.replacingOccurrences(of: "ERR\t", with: "").replacingOccurrences(of: "ERR|||", with: "")
-            lastError = Self.friendlyError(from: raw)
-            isAvailable = false
-            return false
+        if applyNotesResult(out, failureFallback: "Could not create note") {
+            refresh()
+            return true
         }
-        lastError = nil
-        isAvailable = true
-        refresh()
-        return true
+        return false
     }
 
     @discardableResult
@@ -194,16 +189,13 @@ final class NotesProvider: ObservableObject {
             isAvailable = false
             return false
         }
-        if out.hasPrefix("ERR|||") {
-            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
-            isAvailable = false
-            return false
+        if applyNotesResult(out, failureFallback: "Could not delete note") {
+            items.removeAll { $0.id == id }
+            objectWillChange.send()
+            onChangeWire?()
+            return true
         }
-        items.removeAll { $0.id == id }
-        lastError = nil
-        objectWillChange.send()
-        onChangeWire?()
-        return true
+        return false
     }
 
     func open(id: String) {
@@ -247,17 +239,34 @@ final class NotesProvider: ObservableObject {
             end try
         end timeout
         """
-        if let out = Self.runAppleScript(script), out.hasPrefix("ERR|||") {
-            lastError = Self.friendlyError(from: String(out.dropFirst(6)))
-            isAvailable = false
+        if let out = Self.runAppleScript(script) {
+            _ = applyNotesResult(out, failureFallback: "Could not reach Notes")
         } else {
-            isAvailable = true
-            lastError = nil
+            lastError = Self.friendlyError(from: "Could not reach Notes")
+            isAvailable = false
         }
-        isAvailable = true
-        lastError = nil
-        lastStatus = "Connected"
+        if lastError == nil {
+            lastStatus = "Connected"
+        }
         refresh()
+    }
+
+    @discardableResult
+    private func applyNotesResult(_ raw: String?, failureFallback: String) -> Bool {
+        switch NotesScriptResult.parse(raw) {
+        case .ok:
+            lastError = nil
+            isAvailable = true
+            return true
+        case .error(let message):
+            lastError = Self.friendlyError(from: message)
+            isAvailable = false
+            return false
+        case .unavailable:
+            lastError = Self.friendlyError(from: failureFallback)
+            isAvailable = false
+            return false
+        }
     }
 
     /// Turns a raw AppleScript/AppleEvent error into an actionable sentence

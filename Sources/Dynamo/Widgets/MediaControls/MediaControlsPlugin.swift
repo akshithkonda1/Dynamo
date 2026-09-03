@@ -122,7 +122,8 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
             urgency: .normal,
             artworkData: info.artworkData,
             detail: info.playlistName ?? "",
-            style: .media
+            style: .media,
+            category: "media"
         ))
     }
 

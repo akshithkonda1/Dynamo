@@ -52,7 +52,6 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
     }
 
     private var notifiedReminderStages: [String: Set<String>] = [:]
-    private let leadTime: TimeInterval = 15 * 60
 
     var expandedContentHeight: CGFloat { 268 }
 
@@ -78,7 +77,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
             }
         }
         reminders.start()
-        if reminders.authState == .notDetermined {
+        if reminders.authState == .notDetermined || reminders.authState == .writeOnly {
             Task { await reminders.requestAccess() }
         } else if reminders.authState == .authorized {
             reminders.refresh()
@@ -281,24 +280,23 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                 guard !seen.contains(stage) else { continue }
                 seen.insert(stage)
                 notifiedReminderStages[reminder.id] = seen
-                onSneakPeek?(NotchSneakPeek(
+            onSneakPeek?(NotchSneakPeek(
                     systemImage: "checklist",
                     title: reminder.title,
                     subtitle: reminder.isOverdue ? "Overdue · all day" : "Due today",
                     urgency: reminder.isOverdue ? .critical : .high,
-                    detail: reminder.listName.isEmpty ? "Reminders" : reminder.listName
+                    detail: reminder.listName.isEmpty ? "Reminders" : reminder.listName,
+                    category: "reminder"
                 ))
                 continue
             }
 
             let interval = due.timeIntervalSinceNow
-            guard interval <= leadTime, interval > -12 * 60 * 60 else { continue }
+            guard interval > -12 * 60 * 60 else { continue }
             if interval < -60, !peekOnOverdue { continue }
 
-            let stage: String
-            if interval <= 45 { stage = "now" }
-            else if interval <= 5 * 60 + 20 { stage = "t5" }
-            else { stage = "t15" }
+            let stage = CalendarPeekPolicy.stage(intervalUntilStart: interval, leadMinutes: 15)
+            guard let stage else { continue }
 
             var seen = notifiedReminderStages[reminder.id] ?? []
             guard !seen.contains(stage) else { continue }
@@ -312,7 +310,8 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                 title: reminder.title,
                 subtitle: reminderDueLabel(interval: interval),
                 urgency: urgency,
-                detail: reminder.listName.isEmpty ? "Reminders" : reminder.listName
+                detail: reminder.listName.isEmpty ? "Reminders" : reminder.listName,
+                category: "reminder"
             ))
         }
     }
@@ -541,6 +540,20 @@ private struct ExpandedChecklistView: View {
                 icon: "lock.fill",
                 title: "Access turned off",
                 body: "Enable Full Access for Dynamo in System Settings.",
+                primary: "Open Settings",
+                primaryAction: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                secondary: "Retry",
+                secondaryAction: { plugin.requestRemindersAccess() }
+            )
+        case .writeOnly:
+            accessCard(
+                icon: "pencil.slash",
+                title: "Full access needed",
+                body: "Write-only can’t list your reminders. Grant Full Access so Dynamo can show and complete them.",
                 primary: "Open Settings",
                 primaryAction: {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
@@ -1038,6 +1051,8 @@ private struct ExpandedChecklistView: View {
             if plugin.draftTarget == .reminders, reminders.authState != .authorized {
                 Text(reminders.authState == .denied
                      ? "Reminders access is off — tap Allow Access or Open Settings above."
+                     : reminders.authState == .writeOnly
+                     ? "Full Reminders access is required to list items."
                      : "Allow Reminders access to save here.")
                     .font(NotchTheme.micro)
                     .foregroundStyle(NotchTheme.caution.opacity(0.9))

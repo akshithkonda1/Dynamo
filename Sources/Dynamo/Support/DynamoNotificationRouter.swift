@@ -168,7 +168,7 @@ final class DynamoNotificationRouter: ObservableObject {
         registryCancellable = registry.sneakPeekPublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] peek in
-                self?.route(peek, source: .widget, category: "widget")
+                self?.route(peek, source: .widget)
             }
 
         // Keep system ingest toggle aligned with router policy.
@@ -238,7 +238,7 @@ final class DynamoNotificationRouter: ObservableObject {
             return false
         }
 
-        let cat = category ?? defaultCategory(for: source, peek: peek)
+        let cat = HubPeekPolicy.resolveCategory(peek: peek, source: source, explicit: category)
         let hub = self.hub ?? PeekNotificationCenter.shared
 
         // Peek-only: never fall back to system banners; present only via hub.
@@ -366,18 +366,6 @@ final class DynamoNotificationRouter: ObservableObject {
     }
 
     private func defaultCategory(for source: Source, peek: NotchSneakPeek) -> String {
-        let d = peek.detail.lowercased()
-        if d.hasPrefix("text") { return "text" }
-        if d.hasPrefix("call") { return "call" }
-        if d.hasPrefix("mail") { return "mail" }
-        switch source {
-        case .widget: return "widget"
-        case .focus: return "focus"
-        case .system: return "system"
-        case .call: return "call"
-        case .api: return "api"
-        case .external: return "external"
-        case .test: return "test"
-        }
+        HubPeekPolicy.resolveCategory(peek: peek, source: source)
     }
 }

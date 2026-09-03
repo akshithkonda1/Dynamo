@@ -331,7 +331,7 @@ Quick checks:
 6. Checklist → add reminder  
 7. Battery power chips + vitals  
 8. Focus → Meeting → Leave  
-9. **Hub** tab lists Peeks; **Deliver through Peek only** on  
+9. **Hub** tab lists Peeks; Calendar filter shows calendar alerts; inbox survives relaunch  
 10. `open 'dynamo://notify?title=Test&subtitle=Hub&urgency=high'` → notch Peek + Hub inbox  
 11. Message Peek (with Contacts): photo + color-matched chrome  
 12. Copy text → Peek “Copied”; copy a Finder file → Clipboard history row; pin + color tag  

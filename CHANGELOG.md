@@ -4,6 +4,15 @@ All notable changes to Dynamo are documented here.
 
 ## [Unreleased]
 
+### Hub & peeks
+- Widget peeks are categorized (Calendar, reminders, media, sports, …) so Hub filters match real alerts
+- Hub inbox **persists** across relaunch; replay still works without in-memory art
+- Calendar peek stages scale with lead minutes; empty copy uses the lookahead setting
+- Notes Automation errors (`ERR|…`) no longer look like success
+- Sports live scores merge later updates (and ESPN `dates=` uses US Eastern)
+- Reminders write-only is no longer treated as full access
+- True Focus prep/end keys trim FIFO instead of a random `Set.suffix`
+
 ### Clipboard
 - Copy sneak peeks actually fire (history ingest now notifies the Hub/Peek path)
 - Finder **file** copies appear in history (open / copy / pin / reveal)

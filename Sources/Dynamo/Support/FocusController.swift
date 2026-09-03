@@ -319,7 +319,8 @@ final class FocusController: ObservableObject {
             title: "Meeting Mode on",
             subtitle: calendarMeetingTitle() ?? activeCallApp ?? "Companion ready",
             urgency: .high,
-            detail: "Focus · Smart enter"
+            detail: "Focus · Smart enter",
+            category: "focus"
         ))
     }
 
@@ -338,7 +339,8 @@ final class FocusController: ObservableObject {
             title: "Enter Meeting Mode?",
             subtitle: cal.map { "\($0) · \(app)" } ?? "\(app) open · notes & quiet island",
             urgency: .high,
-            detail: "Focus · Meeting companion"
+            detail: "Focus · Meeting companion",
+            category: "focus"
         ))
     }
 
@@ -357,7 +359,8 @@ final class FocusController: ObservableObject {
             title: "Leave Meeting Mode?",
             subtitle: "Call ended · restore volume",
             urgency: .high,
-            detail: "Focus · Smart leave"
+            detail: "Focus · Smart leave",
+            category: "focus"
         ))
     }
 

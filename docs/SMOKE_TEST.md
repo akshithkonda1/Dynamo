@@ -90,7 +90,10 @@ Use this after a local build to confirm the app is usable day-to-day.
 
 - [ ] Drop files onto notch or Shelf; **Add** picker works
 - [ ] File size shown; drag-out / AirDrop / Reveal
-- [ ] Clipboard: pin, color tag, delete history row, clear, **Paste as plain** when copying rich text
+- [ ] Hub: Calendar filter shows calendar peeks; inbox survives quit/relaunch
+- [ ] Notes: denied Automation shows an error (not “Connected”)
+- [ ] Calendar empty caption matches lookahead days; 30‑min lead peeks at 30 / 15 / 5 / now
+- [ ] Followed live game: score updates in Sports (not frozen first score)
 - [ ] Clipboard: copy a Finder file → history row → Open / copy / pin
 - [ ] Checklist: progress `done/total`, always-visible add field
 

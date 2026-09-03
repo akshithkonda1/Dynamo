@@ -53,7 +53,6 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     private let provider: CalendarProvider
     /// Stages already announced per event id (e.g. "t15", "t5", "now").
     private var notifiedEventStages: [String: Set<String>] = [:]
-    private var leadTime: TimeInterval { TimeInterval(peekLeadMinutes) * 60 }
     private var isConfiguring = true
 
     init(provider: CalendarProvider? = nil) {
@@ -259,9 +258,8 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         for event in events {
             guard !event.isAllDay else { continue }
             let interval = event.start.timeIntervalSinceNow
-            guard interval <= leadTime, interval > -90 else { continue }
-
-            let stage = peekStage(for: interval)
+            let stage = CalendarPeekPolicy.stage(intervalUntilStart: interval, leadMinutes: peekLeadMinutes)
+            guard let stage else { continue }
             var seen = notifiedEventStages[event.id] ?? []
             guard !seen.contains(stage) else { continue }
             seen.insert(stage)
@@ -276,15 +274,10 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
                 title: event.title,
                 subtitle: eventTimeLabel(event: event, interval: interval, stage: stage),
                 urgency: urgency,
-                detail: detailParts.joined(separator: " · ")
+                detail: detailParts.joined(separator: " · "),
+                category: "calendar"
             ))
         }
-    }
-
-    private func peekStage(for interval: TimeInterval) -> String {
-        if interval <= 45 { return "now" }
-        if interval <= 5 * 60 + 20 { return "t5" }
-        return "t15"
     }
 
     private func eventTimeLabel(event: CalendarEventItem, interval: TimeInterval, stage: String) -> String {
@@ -491,7 +484,7 @@ private struct ExpandedCalendarView: View {
                     NotchEmptyState(
                         systemImage: "sun.max.fill",
                         title: "Wide open calendar",
-                        caption: "Nothing in the next 3 weeks — tap New when you’re ready.",
+                        caption: "Nothing in the next \(plugin.lookaheadDays) days — tap New when you’re ready.",
                         prominent: false
                     )
                 } else {

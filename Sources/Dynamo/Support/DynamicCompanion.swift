@@ -34,7 +34,8 @@ final class DynamicCompanion {
                 title: title,
                 subtitle: mins < 60 ? "Up next in \(mins)m" : "Up next today",
                 urgency: .normal,
-                detail: next.calendarName
+                detail: next.calendarName,
+                category: "focus"
             ))
             FocusController.shared.noteDynamicPeek(title)
             return
@@ -47,7 +48,8 @@ final class DynamicCompanion {
                 title: overdue.title,
                 subtitle: "Overdue reminder",
                 urgency: .high,
-                detail: overdue.listName
+                detail: overdue.listName,
+                category: "reminder"
             ))
             FocusController.shared.noteDynamicPeek(overdue.title)
         }
@@ -63,7 +65,8 @@ final class DynamicCompanion {
             "com.microsoft.VSCode",
             "com.googlecode.iterm2",
             "com.apple.Terminal",
-            "com.github.atom" // legacy
+            "com.github.atom",
+            "com.todesktop.230313mnlbxy7k9" // Cursor
         ]
         guard coding.contains(bid) else { return }
         sessionNudgedChecklist = true
@@ -72,7 +75,8 @@ final class DynamicCompanion {
             title: "Checklist ready",
             subtitle: "Capture a task while you code",
             urgency: .low,
-            detail: "Dynamic"
+            detail: "Dynamic",
+            category: "focus"
         ))
         FocusController.shared.noteDynamicPeek("Checklist ready")
     }

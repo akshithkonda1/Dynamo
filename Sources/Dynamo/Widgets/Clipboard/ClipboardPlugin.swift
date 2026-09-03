@@ -28,21 +28,24 @@ final class ClipboardPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
                     systemImage: "doc.on.clipboard",
                     title: "Copied",
                     subtitle: preview,
-                    urgency: .low
+                    urgency: .low,
+                    category: "clipboard"
                 )
             case .image:
                 peek = NotchSneakPeek(
                     systemImage: "photo.on.rectangle",
                     title: "Copied",
                     subtitle: "Image",
-                    urgency: .low
+                    urgency: .low,
+                    category: "clipboard"
                 )
             case .file:
                 peek = NotchSneakPeek(
                     systemImage: "doc",
                     title: "Copied",
                     subtitle: item.text.isEmpty ? "File" : item.text,
-                    urgency: .low
+                    urgency: .low,
+                    category: "clipboard"
                 )
             }
             guard !FocusController.shared.shouldSuppress(peek: peek) else { return }

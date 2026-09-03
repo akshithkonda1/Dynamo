@@ -24,7 +24,7 @@ Visual polish ships continuously. This plan sequences **new capabilities** by us
 | No top transport strip (media stays in Media tab) | Done |
 | Refined glass + clock under tray | Done |
 | **Meeting Mode** (suppress peeks during Now events) | **Done** |
-| **Global hotkeys** ⌃⌥D/P/M/S/C | **Done** |
+| **Global hotkeys** ⌃⌥D/P/M/S/C/F/B/H | **Done** |
 | Usefulness plan | `Docs/USEFULNESS_PLAN.md` |
 
 ---
