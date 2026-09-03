@@ -132,6 +132,7 @@ final class NotesProvider: ObservableObject {
             objectWillChange.send()
             onChangeWire?()
         }
+    }
 
     @discardableResult
     func create(title: String, body: String? = nil) -> Bool {
@@ -146,8 +147,10 @@ final class NotesProvider: ObservableObject {
 
         let titleEsc = t.appleScriptEscaped
         let extra = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let htmlBody = "<div>\(t.htmlEscaped)</div>"
-            + (extra.isEmpty ? "" : "<div>\(extra.htmlEscaped)</div>")
+        var htmlBody = "<div>\(t.htmlEscaped)</div>"
+        if !extra.isEmpty {
+            htmlBody += "<div>\(extra.htmlEscaped)</div>"
+        }
         let htmlEsc = htmlBody.appleScriptEscaped
         let script = """
         with timeout of 12 seconds
@@ -185,8 +188,10 @@ final class NotesProvider: ObservableObject {
         let esc = id.appleScriptEscaped
         let titleEsc = t.appleScriptEscaped
         let extra = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let htmlBody = "<div>\(t.htmlEscaped)</div>"
-            + (extra.isEmpty ? "" : "<div>\(extra.htmlEscaped)</div>")
+        var htmlBody = "<div>\(t.htmlEscaped)</div>"
+        if !extra.isEmpty {
+            htmlBody += "<div>\(extra.htmlEscaped)</div>"
+        }
         let htmlEsc = htmlBody.appleScriptEscaped
         let script = """
         with timeout of 12 seconds
