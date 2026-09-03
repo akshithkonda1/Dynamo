@@ -226,6 +226,11 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
         objectWillChange.send()
     }
 
+    func updateNote(_ item: NoteItem, title: String, body: String?) {
+        _ = notes.update(id: item.id, title: title, body: body)
+        objectWillChange.send()
+    }
+
     func deleteNote(_ item: NoteItem) {
         _ = notes.delete(id: item.id)
         objectWillChange.send()
@@ -338,6 +343,9 @@ private struct ExpandedChecklistView: View {
     @ObservedObject private var reminders: RemindersProvider
     @ObservedObject private var permissions = PermissionsStore.shared
     @State private var hoveringID: String?
+    @State private var editingNoteID: String?
+    @State private var editTitle: String = ""
+    @State private var editBody: String = ""
 
     init(plugin: ChecklistPlugin) {
         self.plugin = plugin
@@ -873,23 +881,50 @@ private struct ExpandedChecklistView: View {
                 .frame(width: 22, height: 22)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(NotchTheme.body.weight(.medium))
-                    .foregroundStyle(NotchTheme.textPrimary)
-                    .lineLimit(1)
-                if !item.bodyPreview.isEmpty {
-                    Text(item.bodyPreview)
+                if editingNoteID == item.id {
+                    TextField("Title", text: $editTitle)
+                        .textFieldStyle(.roundedBorder)
+                        .font(NotchTheme.body)
+                        .onSubmit { saveNoteEdit(item) }
+                    TextField("Body", text: $editBody)
+                        .textFieldStyle(.roundedBorder)
                         .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .lineLimit(1)
+                        .onSubmit { saveNoteEdit(item) }
+                    HStack {
+                        Button("Save") { saveNoteEdit(item) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.mini)
+                        Button("Cancel") { editingNoteID = nil }
+                            .buttonStyle(.plain)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textTertiary)
+                    }
                 } else {
-                    Text("Notes · \(item.folderName)")
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textQuaternary)
+                    Text(item.title)
+                        .font(NotchTheme.body.weight(.medium))
+                        .foregroundStyle(NotchTheme.textPrimary)
                         .lineLimit(1)
+                    if !item.bodyPreview.isEmpty {
+                        Text(item.bodyPreview)
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Notes · \(item.folderName)")
+                            .font(NotchTheme.micro)
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                            .lineLimit(1)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard editingNoteID != item.id else { return }
+                editTitle = item.title
+                editBody = item.bodyPreview
+                editingNoteID = item.id
+            }
 
             Button {
                 plugin.deleteNote(item)
@@ -919,12 +954,22 @@ private struct ExpandedChecklistView: View {
         )
         .contentShape(Rectangle())
         .onHover { hoveringID = $0 ? rowID : (hoveringID == rowID ? nil : hoveringID) }
-        .onTapGesture { plugin.openNote(item) }
+        .onTapGesture(count: 2) { plugin.openNote(item) }
         .contextMenu {
             Button("Open in Notes") { plugin.openNote(item) }
+            Button("Edit") {
+                editTitle = item.title
+                editBody = item.bodyPreview
+                editingNoteID = item.id
+            }
             Divider()
             Button("Delete", role: .destructive) { plugin.deleteNote(item) }
         }
+    }
+
+    private func saveNoteEdit(_ item: NoteItem) {
+        plugin.updateNote(item, title: editTitle, body: editBody)
+        editingNoteID = nil
     }
 
     @ViewBuilder

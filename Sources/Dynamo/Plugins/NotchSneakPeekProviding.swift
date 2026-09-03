@@ -40,6 +40,9 @@ struct NotchSneakPeek: Equatable {
     var style: NotchSneakPeekStyle = .standard
     /// Hub / router category hint (e.g. `calendar`, `media`). Empty = infer.
     var category: String = ""
+    /// Posting app for Mac notifications (empty for Dynamo-owned peeks).
+    var sourceBundleID: String = ""
+    var appName: String = ""
 
     /// Back-compat for call sites that still think in binary emphasis.
     var emphasis: NotchSneakPeekEmphasis {
@@ -55,6 +58,8 @@ struct NotchSneakPeek: Equatable {
         detail: String = "",
         style: NotchSneakPeekStyle = .standard,
         category: String = "",
+        sourceBundleID: String = "",
+        appName: String = "",
         emphasis: NotchSneakPeekEmphasis? = nil
     ) {
         self.systemImage = systemImage
@@ -69,6 +74,8 @@ struct NotchSneakPeek: Equatable {
         self.detail = detail
         self.style = style
         self.category = category
+        self.sourceBundleID = sourceBundleID
+        self.appName = appName
     }
 }
 

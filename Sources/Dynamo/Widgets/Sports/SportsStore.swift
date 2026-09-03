@@ -110,7 +110,7 @@ final class SportsStore: ObservableObject {
             || currentEvents.contains(where: { $0.status == .live })
             || liveAllEvents.contains(where: { $0.status == .live })
         let idle = TimeInterval(refreshIntervalSeconds)
-        return anyLive ? min(18, idle) : idle
+        return anyLive ? min(8, idle) : idle
     }
 
     func stop() {

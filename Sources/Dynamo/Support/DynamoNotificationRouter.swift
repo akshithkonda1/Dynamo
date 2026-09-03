@@ -227,7 +227,8 @@ final class DynamoNotificationRouter: ObservableObject {
         source: Source,
         category: String? = nil,
         id: String? = nil,
-        coalesce: Bool = true
+        coalesce: Bool = true,
+        present: Bool = true
     ) -> Bool {
         guard isEnabled else {
             lastStatus = "Router off — alert dropped"
@@ -252,7 +253,8 @@ final class DynamoNotificationRouter: ObservableObject {
             delivery,
             id: id ?? "\(source.rawValue)|\(cat)|\(delivery.title)|\(delivery.subtitle)",
             category: cat,
-            coalesce: coalesce
+            coalesce: coalesce,
+            present: present
         )
 
         routedCount &+= 1
@@ -287,14 +289,9 @@ final class DynamoNotificationRouter: ObservableObject {
     // MARK: - Peek-only setup (system banners)
 
     /// Apps users typically want delivered as Peeks instead of corner banners.
-    static let peekOnlyTargetApps: [(name: String, bundleID: String)] = [
-        ("Messages", "com.apple.MobileSMS"),
-        ("FaceTime", "com.apple.FaceTime"),
-        ("Mail", "com.apple.mail"),
-        ("Phone / Continuity", "com.apple.InCallService"),
-        ("Slack", "com.tinyspeck.slackmacgap"),
-        ("Discord", "com.hnc.Discord")
-    ]
+    static var peekOnlyTargetApps: [(name: String, bundleID: String)] {
+        HubNotificationCenter.bannerSilenceApps
+    }
 
     /// Open System Settings → Notifications so the user can set alert style to **None**.
     /// Apple does not allow third-party apps to hide other apps’ banners for you.
@@ -333,7 +330,10 @@ final class DynamoNotificationRouter: ObservableObject {
         category: String? = nil,
         id: String? = nil,
         artworkData: Data? = nil,
-        coalesce: Bool = true
+        coalesce: Bool = true,
+        present: Bool = true,
+        sourceBundleID: String = "",
+        appName: String = ""
     ) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -344,12 +344,16 @@ final class DynamoNotificationRouter: ObservableObject {
                 subtitle: subtitle,
                 urgency: urgency,
                 artworkData: artworkData,
-                detail: detail
+                detail: detail,
+                category: category ?? "",
+                sourceBundleID: sourceBundleID,
+                appName: appName
             ),
             source: source,
             category: category,
             id: id,
-            coalesce: coalesce
+            coalesce: coalesce,
+            present: present
         )
     }
 

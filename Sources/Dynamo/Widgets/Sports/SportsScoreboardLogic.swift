@@ -73,6 +73,25 @@ enum SportsScoreboardLogic {
         )
     }
 
+    static func liveStatusText(
+        detail: String,
+        displayClock: String?,
+        period: Int?,
+        isLive: Bool
+    ) -> String {
+        guard isLive else { return detail }
+        var parts: [String] = []
+        if !detail.isEmpty { parts.append(detail) }
+        if let clock = displayClock?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !clock.isEmpty,
+           !detail.contains(clock) {
+            parts.append(clock)
+        } else if let period, detail.isEmpty {
+            parts.append("P\(period)")
+        }
+        return parts.isEmpty ? "Live" : parts.joined(separator: " · ")
+    }
+
     static func statusRank(_ s: SportsEventStatus) -> Int {
         switch s {
         case .live: return 0

@@ -22,14 +22,14 @@ Registered in `AppDelegate.bootstrap()`:
 | Widget | What it does |
 |--------|----------------|
 | **Media** | Now playing, transport, scrub, playlists, output device, **Amplify** (local multi-band EQ + **Tone AI** genre tuning), cover-art equalizer |
-| **Hub** | **Notification inbox** — unread, mark read, clear, **replay** as Peek; ambient unread badge |
-| **Calendar** | Upcoming events (EventKit full access), in-notch **create event**, open Calendar.app |
-| **Checklist** | Apple **Reminders** R/W (create / complete / due presets) + local checklist · Notes tab |
+| **Hub** | **Notification Center** — Dynamo Peeks + this Mac’s notifications; unread, filters, replay |
+| **Calendar** | Upcoming events (EventKit **full** read/write), **30-day grid**, in-notch **create event**, open Calendar.app |
+| **Checklist** | Apple **Reminders** R/W + Apple **Notes** R/W (Automation) · local checklist |
 | **Clipboard** | Recent text, **images**, **Finder files**; pin with **color tags**; paste as plain |
 | **Clocks** | **World Clock** — major cities · **Here first** · GPS “Here” label · Apple IANA time zones · **distance / reverse / random sort** · DST · converter · call window |
 | **Battery** | Charge, health, drain, vitals grid; **Low / Auto / High** power modes (`pmset`); ambient fill glyph |
 | **Focus** | Normal · Dynamic · True Focus · **Meeting** companion (notes, talk tips, duck volume) |
-| **Sports** | Multi-league scores via free ESPN public CDN (no API key) |
+| **Sports** | Multi-league **live** scores via **free** ESPN public scoreboard (no API key) |
 | **System Health** | Local Mac health score + deep links to System Settings / updates |
 | **Shelf** | Drop files on the notch; open / reveal / AirDrop |
 | **Webcam** | Live mirror (incl. Continuity Camera); camera only while the tab is open |
@@ -54,7 +54,7 @@ Registered in `AppDelegate.bootstrap()`:
 |------|--------|
 | **Notifications → Peek** | **Deliver through Peek only** (default). Dynamo routes all alerts into the notch — not a dual system-banner mirror. |
 | **Router** | `DynamoNotificationRouter` owns policy; per-source toggles (widgets / Focus / system / external). |
-| **Hub tab** | Inbox with unread, mark read, clear, **replay**; ambient unread badge when collapsed. |
+| **Hub tab** | Inbox grouped by app; unread, mark read, dismiss, **replay**, Open app; replace-banners setup card. |
 | **Message Peeks** | Contact photo (Contacts) + **chrome tinted to the photo palette**; circular avatar. |
 | **Tone AI (Amplify)** | On-device genre/tone classifier (Python + Swift). Pop vs classical vs electronic, etc. **No APIs.** No audio stored on device. |
 | **Amplify fidelity** | Reference profile, linked true-peak (~−1 dBTP), live adaptive, Atmos/Spatial path auto, headroom, dry loudness match, device cal |
@@ -108,6 +108,7 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 |------|----------|
 | **Dynamo’s own alerts** | Always via **Peek only** — Dynamo does **not** post macOS corner banners for calendar, battery, media, Focus, Hub, API, etc. |
 | **System apps (optional)** | Ingested from Notification Center → **router** → Peek + Hub (Messages, FaceTime, Mail, Slack, …) |
+| **Replace Notification Center** | Peek = banner, Hub = inbox. Seed last ~40 Mac alerts; live alerts Peek. |
 | **Peek-only mode** (default) | Longer dwell for messages/calls; hub is the presentation surface |
 | **Hub tray tab** | Inbox, unread count, mark read, clear, tap to **replay** Peek |
 | **Message chrome** | Contact photo from **Contacts**; island wash/ring/lip match the photo colors |
@@ -120,18 +121,19 @@ Free, offline, no WeatherKit. **Location is requested on launch** (When In Use):
 | URL | `dynamo://notify?title=Hello&subtitle=World&urgency=high` |
 | Distributed | `com.akshithkonda.Dynamo.notify` |
 
-### Stop the usual corner banners (Messages / FaceTime / …)
+### Replace the Mac notification system (Hub + Peek)
 
-Apple does **not** allow third-party apps to hide other apps’ system banners. For **Peek-only** with texts/calls:
+Apple does **not** allow third-party apps to hide other apps’ system banners. Dynamo still replaces Notification Center **for you** when:
 
-1. Preferences → **Deliver through Peek only** + **Route system apps into Peek**  
-2. Grant **Full Disk Access** (so Dynamo can read the Notification Center store)  
-3. Grant **Contacts** (contact photo + color on message Peeks)  
-4. System Settings → **Notifications** → for **Messages**, **FaceTime**, **Mail** (etc.):
-   - Keep **Allow Notifications** **on** (so Dynamo can still see deliveries)  
-   - Set **Alert style → None** (kills the typical top-right banner)
+1. Preferences → **Deliver through Peek only** + **Route system apps into Peek**
+2. Grant **Full Disk Access** (read the Notification Center store) and **Contacts** (message Peek photos)
+3. System Settings → **Notifications** → for each app (Messages, FaceTime, Mail, Slack, …):
+   - Keep **Allow Notifications** **on** (Dynamo can only ingest what macOS still delivers)
+   - Set **Alert style → None** (no top-right banner)
 
-Preferences includes **Open Notifications settings** / **Open Focus** helpers for this.
+Then **Peek is the banner** and **Hub is the inbox** (grouped by app, Open / Dismiss / Replay). Hub seeds recent Mac notifications without flooding the notch; new ones Peek live.
+
+Preferences includes **Open Notifications settings** / **Open Focus** helpers.
 
 ---
 
@@ -383,7 +385,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - **Power modes** may open Battery Settings if `pmset` is blocked  
 - **Sports** uses an undocumented free ESPN feed  
 - **System-app routing** needs Full Disk Access; best-effort against the Notification Center store  
-- **macOS banners for other apps** cannot be killed by Dynamo — set Alert style to **None** (or use Focus) for Peek-only visuals  
+- **macOS banners for other apps** cannot be killed by Dynamo — set Alert style to **None** (keep Allow Notifications on) so Hub + Peek can stand in for Notification Center  
 - Automated UI tests remain thin relative to surface area  
 
 ---

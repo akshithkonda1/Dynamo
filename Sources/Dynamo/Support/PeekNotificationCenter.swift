@@ -23,7 +23,7 @@ final class PeekNotificationCenter: ObservableObject {
     private static let soundKey = "dynamo.peek.sound"
     private static let historyCapKey = "dynamo.peek.historyRetention"
     private static let maxQueue = 14
-    private static let defaultMaxHistory = 60
+    private static let defaultMaxHistory = 100
 
     /// When true (default), every alert goes through the Peek hub.
     @Published var isPrimaryDelivery: Bool {
@@ -73,7 +73,7 @@ final class PeekNotificationCenter: ObservableObject {
         let enqueuedAt: Date
     }
 
-        struct PeekHistoryItem: Identifiable, Equatable, Codable {
+    struct PeekHistoryItem: Identifiable, Equatable, Codable {
         let id: String
         let category: String
         let title: String
@@ -83,6 +83,54 @@ final class PeekNotificationCenter: ObservableObject {
         let urgency: NotchSneakPeekUrgency
         let deliveredAt: Date
         var isUnread: Bool
+        var sourceBundleID: String
+        var appName: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, category, title, subtitle, detail, systemImage, urgency, deliveredAt, isUnread
+            case sourceBundleID, appName
+        }
+
+        init(
+            id: String,
+            category: String,
+            title: String,
+            subtitle: String,
+            detail: String,
+            systemImage: String,
+            urgency: NotchSneakPeekUrgency,
+            deliveredAt: Date,
+            isUnread: Bool,
+            sourceBundleID: String = "",
+            appName: String = ""
+        ) {
+            self.id = id
+            self.category = category
+            self.title = title
+            self.subtitle = subtitle
+            self.detail = detail
+            self.systemImage = systemImage
+            self.urgency = urgency
+            self.deliveredAt = deliveredAt
+            self.isUnread = isUnread
+            self.sourceBundleID = sourceBundleID
+            self.appName = appName
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            category = try c.decode(String.self, forKey: .category)
+            title = try c.decode(String.self, forKey: .title)
+            subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+            detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+            systemImage = try c.decodeIfPresent(String.self, forKey: .systemImage) ?? "bell.fill"
+            urgency = try c.decodeIfPresent(NotchSneakPeekUrgency.self, forKey: .urgency) ?? .normal
+            deliveredAt = try c.decodeIfPresent(Date.self, forKey: .deliveredAt) ?? Date()
+            isUnread = try c.decodeIfPresent(Bool.self, forKey: .isUnread) ?? true
+            sourceBundleID = try c.decodeIfPresent(String.self, forKey: .sourceBundleID) ?? ""
+            appName = try c.decodeIfPresent(String.self, forKey: .appName) ?? ""
+        }
     }
 
     private init() {
@@ -163,11 +211,11 @@ final class PeekNotificationCenter: ObservableObject {
         _ peek: NotchSneakPeek,
         id: String? = nil,
         category: String = "general",
-        coalesce: Bool = true
+        coalesce: Bool = true,
+        present: Bool = true
     ) {
         guard isPrimaryDelivery else {
-            // Fallback: still show peek, but skip queue policy (legacy path).
-            presenter?.showDirect(peek)
+            if present { presenter?.showDirect(peek) }
             return
         }
 
@@ -175,20 +223,25 @@ final class PeekNotificationCenter: ObservableObject {
         if coalesce {
             // Replace existing queued item with same id (latest wins).
             if let idx = queue.firstIndex(where: { $0.id == key }) {
-                queue[idx] = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
-                pendingCount = queue.count
+                if present {
+                    queue[idx] = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
+                    pendingCount = queue.count
+                }
                 return
             }
         }
 
-        if FocusController.shared.shouldSuppress(peek: peek) {
-            // Still land in the hub inbox so nothing is lost silently.
-            let item = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
+        let item = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
+
+        if !present {
             recordHistory(item, presented: false)
             return
         }
 
-        let item = QueuedPeek(id: key, category: category, peek: peek, enqueuedAt: Date())
+        if FocusController.shared.shouldSuppress(peek: peek) {
+            recordHistory(item, presented: false)
+            return
+        }
 
         // Media + critical preempt so skips / “starting now” never feel delayed.
         let preempt = peek.style == .media || peek.urgency >= .critical
@@ -259,6 +312,16 @@ final class PeekNotificationCenter: ObservableObject {
         persistHistory()
     }
 
+    func remove(id: String) {
+        history.removeAll { $0.id == id }
+        replayStore.removeValue(forKey: id)
+        if lastDelivered?.id == id {
+            lastDelivered = history.first
+        }
+        recomputeUnread()
+        persistHistory()
+    }
+
     /// Re-present a hub item as a Peek (does not re-queue).
     func replay(id: String) {
         let peek = replayStore[id] ?? history.first(where: { $0.id == id }).map {
@@ -268,7 +331,9 @@ final class PeekNotificationCenter: ObservableObject {
                 subtitle: $0.subtitle,
                 urgency: $0.urgency,
                 detail: $0.detail,
-                category: $0.category
+                category: $0.category,
+                sourceBundleID: $0.sourceBundleID,
+                appName: $0.appName
             )
         }
         guard let peek else { return }
@@ -337,7 +402,9 @@ final class PeekNotificationCenter: ObservableObject {
             systemImage: item.peek.systemImage,
             urgency: item.peek.urgency,
             deliveredAt: Date(),
-            isUnread: true
+            isUnread: true,
+            sourceBundleID: item.peek.sourceBundleID,
+            appName: item.peek.appName
         )
         history.insert(h, at: 0)
         if history.count > maxHistory {

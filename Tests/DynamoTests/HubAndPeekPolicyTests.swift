@@ -58,6 +58,71 @@ final class HubPeekPolicyTests: XCTestCase {
     }
 }
 
+final class HubNotificationCenterTests: XCTestCase {
+
+    func testGroupsMacAppsByBundleThenDynamoByCategory() {
+        let messages = PeekNotificationCenter.PeekHistoryItem(
+            id: "m1",
+            category: "text",
+            title: "Alex",
+            subtitle: "hey",
+            detail: "Text · Messages",
+            systemImage: "message.fill",
+            urgency: .critical,
+            deliveredAt: Date(),
+            isUnread: true,
+            sourceBundleID: "com.apple.MobileSMS",
+            appName: "Messages"
+        )
+        let mail = PeekNotificationCenter.PeekHistoryItem(
+            id: "mail1",
+            category: "mail",
+            title: "Invoice",
+            subtitle: "Due",
+            detail: "Mail",
+            systemImage: "envelope.fill",
+            urgency: .high,
+            deliveredAt: Date(),
+            isUnread: false,
+            sourceBundleID: "com.apple.mail",
+            appName: "Mail"
+        )
+        let cal = PeekNotificationCenter.PeekHistoryItem(
+            id: "c1",
+            category: "calendar",
+            title: "Standup",
+            subtitle: "now",
+            detail: "Work",
+            systemImage: "calendar",
+            urgency: .high,
+            deliveredAt: Date(),
+            isUnread: true
+        )
+        let groups = HubNotificationCenter.grouped([messages, mail, cal])
+        XCTAssertEqual(groups.map(\.id), ["com.apple.MobileSMS", "com.apple.mail", "dynamo.calendar"])
+        XCTAssertEqual(groups[0].title, "Messages")
+        XCTAssertEqual(groups[0].unread, 1)
+        XCTAssertEqual(groups[2].title, "Calendar")
+        XCTAssertEqual(groups[2].bundleID, "")
+    }
+
+    func testGroupKeyFallsBackToDynamo() {
+        let item = PeekNotificationCenter.PeekHistoryItem(
+            id: "x",
+            category: "",
+            title: "Ping",
+            subtitle: "",
+            detail: "",
+            systemImage: "bell.fill",
+            urgency: .normal,
+            deliveredAt: Date(),
+            isUnread: false
+        )
+        XCTAssertEqual(HubNotificationCenter.groupKey(item), "dynamo")
+        XCTAssertEqual(HubNotificationCenter.groupTitle(item), "Dynamo")
+    }
+}
+
 final class CalendarPeekPolicyTests: XCTestCase {
 
     func testDefaultLeadFiresTLeadThenT5ThenNow() {
@@ -178,5 +243,45 @@ final class FocusAgendaRememberTests: XCTestCase {
         _ = FocusAgendaEngine.remember("c", in: &keys, cap: 3, keep: 2)
         XCTAssertTrue(FocusAgendaEngine.remember("d", in: &keys, cap: 3, keep: 2))
         XCTAssertEqual(keys, ["c", "d"])
+    }
+}
+
+final class CalendarMonthStripTests: XCTestCase {
+
+    func testThirtyDaysFromMonday() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let start = cal.date(from: DateComponents(year: 2026, month: 9, day: 3))!
+        let days = CalendarMonthStrip.days(from: start, count: 30, calendar: cal)
+        XCTAssertEqual(days.count, 30)
+        XCTAssertEqual(cal.component(.day, from: days[0]), 3)
+        XCTAssertEqual(cal.component(.day, from: days[29]), 2)
+        XCTAssertEqual(cal.component(.month, from: days[29]), 10)
+    }
+}
+
+final class SportsLiveStatusTests: XCTestCase {
+
+    func testLiveClockAppended() {
+        let text = SportsScoreboardLogic.liveStatusText(
+            detail: "3rd Quarter",
+            displayClock: "4:12",
+            period: 3,
+            isLive: true
+        )
+        XCTAssertTrue(text.contains("4:12"))
+        XCTAssertTrue(text.contains("3rd"))
+    }
+
+    func testNonLiveKeepsDetailOnly() {
+        XCTAssertEqual(
+            SportsScoreboardLogic.liveStatusText(
+                detail: "7:00 PM",
+                displayClock: "12:00",
+                period: 1,
+                isLive: false
+            ),
+            "7:00 PM"
+        )
     }
 }

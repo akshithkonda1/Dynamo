@@ -57,7 +57,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
 
     init(provider: CalendarProvider? = nil) {
         if UserDefaults.standard.object(forKey: Self.lookaheadKey) == nil {
-            lookaheadDays = 14
+            lookaheadDays = 30
         } else {
             lookaheadDays = min(30, max(1, UserDefaults.standard.integer(forKey: Self.lookaheadKey)))
         }
@@ -207,6 +207,18 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     @Published var eventDraft = CalendarEventComposer.Draft()
     @Published var createError: String?
     @Published var createSuccess: String?
+    /// Day selected in the 30-day strip (start-of-day). Nil = all upcoming.
+    @Published var selectedDay: Date? = Calendar.current.startOfDay(for: Date())
+
+    func selectDay(_ day: Date) {
+        let start = Calendar.current.startOfDay(for: day)
+        if selectedDay == start {
+            selectedDay = nil
+        } else {
+            selectedDay = start
+            eventDraft.start = start.addingTimeInterval(9 * 3600)
+        }
+    }
 
     @discardableResult
     func createEventFromDraft() -> Bool {
@@ -243,9 +255,7 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         if showComposer { return 250 }
         switch authState {
         case .authorized:
-            if events.isEmpty { return 118 }
-            let rows = min(events.count, 5)
-            return min(280, 120 + CGFloat(rows) * 42)
+            return 312
         case .writeOnly, .denied, .notDetermined:
             return 148
         }
@@ -480,19 +490,12 @@ private struct ExpandedCalendarView: View {
                     }
                 }
             case .authorized:
-                if plugin.events.isEmpty {
-                    NotchEmptyState(
-                        systemImage: "sun.max.fill",
-                        title: "Wide open calendar",
-                        caption: "Nothing in the next \(plugin.lookaheadDays) days — tap New when you’re ready.",
-                        prominent: false
-                    )
-                } else {
-                    GeometryReader { geo in
-                        let columns = geo.size.width >= 560 ? 2 : 1
-                        calendarEventList(columns: columns)
-                    }
+                HStack(alignment: .top, spacing: 10) {
+                    monthStrip
+                        .frame(width: 176)
+                    eventColumn
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -645,9 +648,79 @@ private struct ExpandedCalendarView: View {
         let events: [CalendarEventItem]
     }
 
+    @ViewBuilder
+    private var eventColumn: some View {
+        if displayedEvents.isEmpty {
+            NotchEmptyState(
+                systemImage: "sun.max.fill",
+                title: plugin.selectedDay == nil ? "Wide open calendar" : "Nothing this day",
+                caption: plugin.selectedDay == nil
+                    ? "Nothing in the next \(plugin.lookaheadDays) days — tap New when you’re ready."
+                    : "Tap another day, or New to add an event.",
+                prominent: false
+            )
+        } else {
+            calendarEventList(columns: 1)
+        }
+    }
+
+    private var monthStrip: some View {
+        let days = CalendarMonthStrip.days(count: max(plugin.lookaheadDays, CalendarMonthStrip.defaultDays))
+        let cal = Calendar.current
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("\(max(plugin.lookaheadDays, 30)) days")
+                .font(NotchTheme.micro.weight(.semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 6),
+                spacing: 3
+            ) {
+                ForEach(days, id: \.self) { day in
+                    let count = CalendarMonthStrip.eventCount(on: day, events: plugin.events)
+                    let selected = plugin.selectedDay.map { cal.isDate($0, inSameDayAs: day) } ?? false
+                    let isToday = cal.isDateInToday(day)
+                    Button {
+                        plugin.selectDay(day)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text("\(cal.component(.day, from: day))")
+                                .font(.system(size: 10, weight: selected || isToday ? .bold : .medium, design: .rounded))
+                                .foregroundStyle(selected ? NotchTheme.textPrimary : NotchTheme.textSecondary)
+                            Circle()
+                                .fill(count > 0 ? NotchTheme.calmGlow : Color.clear)
+                                .frame(width: 3, height: 3)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selected ? NotchTheme.chipFillActive : (isToday ? NotchTheme.chipFill : Color.clear))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(day.formatted(date: .abbreviated, time: .omitted))
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                .fill(NotchTheme.cardFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+                        .strokeBorder(NotchTheme.hairline, lineWidth: 1)
+                )
+        )
+    }
+
+    private var displayedEvents: [CalendarEventItem] {
+        guard let day = plugin.selectedDay else { return plugin.events }
+        return plugin.events.filter { Calendar.current.isDate($0.start, inSameDayAs: day) }
+    }
+
     private var groupedDays: [DayGroup] {
         let cal = Calendar.current
-        let grouped = Dictionary(grouping: plugin.events) { event -> Date in
+        let grouped = Dictionary(grouping: displayedEvents) { event -> Date in
             cal.startOfDay(for: event.start)
         }
         return grouped.keys.sorted().map { day in

@@ -542,11 +542,11 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Stop the usual corner banners")
                         .font(.caption.weight(.semibold))
-                    Text("Apple does not let Dynamo turn off Messages/FaceTime banners for you. Keep “Allow Notifications” ON (so Dynamo can still see them), but set Alert style to None for each app:")
+                    Text("Apple does not let Dynamo hide other apps’ banners. Hub + Peek replace Notification Center when you ingest the store (Full Disk Access), keep Allow Notifications on, and set Alert style to None. Peek is the banner; Hub is the inbox.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Messages · FaceTime · Mail · Slack… → Notifications → Alert style → None")
+                    Text("Messages · FaceTime · Mail · Slack · Discord · Zoom… → Notifications → Alert style → None. Keep Allow Notifications on.")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {

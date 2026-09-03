@@ -1,11 +1,12 @@
 import Foundation
 
-/// Public ESPN CDN scoreboard (no API key). Multi-day + multi-path fan-out.
+/// Free public ESPN site API (no key, no paid endpoints). Live scoreboard payloads.
 actor ESPNScoreboardClient {
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 12
         c.timeoutIntervalForResource = 28
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.httpAdditionalHeaders = [
             "User-Agent": "Dynamo/1.0 (macOS; scoreboard)",
             "Accept": "application/json"
@@ -83,7 +84,10 @@ actor ESPNScoreboardClient {
         guard let url = components?.url else { return [] }
 
         do {
-            let (data, response) = try await session.data(from: url)
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 12
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return []
             }
@@ -118,6 +122,15 @@ actor ESPNScoreboardClient {
             else if state == "in" { status = .live }
             else if state == "pre" { status = .scheduled }
             else { status = .other }
+            let displayClock = statusObj?["displayClock"] as? String
+            let period = (statusObj?["period"] as? Int)
+                ?? (statusObj?["period"] as? NSNumber)?.intValue
+            let liveLine = SportsScoreboardLogic.liveStatusText(
+                detail: detail,
+                displayClock: displayClock,
+                period: period,
+                isLive: status == .live
+            )
 
             var homeName = "Home"
             var awayName = "Away"
@@ -206,7 +219,7 @@ actor ESPNScoreboardClient {
                 awayAbbrev: awayAbbrev,
                 homeLogoURL: homeLogo,
                 awayLogoURL: awayLogo,
-                statusText: detail,
+                statusText: liveLine,
                 startDate: start,
                 linkURL: link,
                 headlineScore: headline,

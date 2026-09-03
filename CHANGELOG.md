@@ -13,6 +13,25 @@ All notable changes to Dynamo are documented here.
 - Reminders write-only is no longer treated as full access
 - True Focus prep/end keys trim FIFO instead of a random `Set.suffix`
 
+### Hub as Notification Center
+- Hub + Peek can **replace** Mac Notification Center: seed recent NC rows into the inbox; new alerts Peek
+- Inbox **groups by app**; Open app / Dismiss; setup card for Full Disk Access + Alert style None
+- Mac ingest stores **bundle id + app name** so groups survive relaunch
+- Default hub history cap **100**
+- Honest limit: Apple cannot hide other apps’ corner banners — user sets Alert style to None
+
+### Calendar
+- Default lookahead **30 days**; compact **30-day grid** beside the event list (tap a day to filter / New)
+
+### Notes
+- Read **and write** (create, **edit**, delete) in the Dynamo Notes folder; Automation errors stay honest
+
+### Sports
+- ESPN **public** site API only (no key); live games poll ~8s with clock/period; cache bypassed
+
+### Reminders
+- Full EventKit read/write (create, complete, edit title, delete); write-only is not treated as authorized
+
 ### Clipboard
 - Copy sneak peeks actually fire (history ingest now notifies the Hub/Peek path)
 - Finder **file** copies appear in history (open / copy / pin / reveal)

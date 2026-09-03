@@ -94,6 +94,10 @@ private struct ExpandedPeekHubView: View {
         hub.history.filter { filter.matches($0) }
     }
 
+    private var groupedHistory: [HubNotificationCenter.AppGroup] {
+        HubNotificationCenter.grouped(Array(filteredHistory.prefix(40)))
+    }
+
     private var filterCounts: [HubInboxFilter: Int] {
         Dictionary(uniqueKeysWithValues: HubInboxFilter.allCases.map { f in
             (f, hub.history.filter { f.matches($0) }.count)
@@ -104,6 +108,9 @@ private struct ExpandedPeekHubView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             controlCard
+            if router.peekOnlyDelivery {
+                replacementSetupCard
+            }
             filterStrip
 
             if filteredHistory.isEmpty {
@@ -116,13 +123,41 @@ private struct ExpandedPeekHubView: View {
                 .frame(maxHeight: .infinity)
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 5) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
                         if hub.pendingCount > 0, filter == .all || filter == .unread {
                             pendingBanner
                         }
-                        ForEach(Array(filteredHistory.prefix(30).enumerated()), id: \.element.id) { index, item in
-                            hubRow(item)
-                                .notchAppear(delay: Double(min(index, 8)) * 0.025, rise: 4)
+                        ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(group.title)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                        .textCase(.uppercase)
+                                        .tracking(0.4)
+                                    if group.unread > 0 {
+                                        Text("\(group.unread)")
+                                            .font(.system(size: 9, weight: .bold).monospacedDigit())
+                                            .foregroundStyle(NotchTheme.caution)
+                                    }
+                                    Spacer(minLength: 0)
+                                    if !group.bundleID.isEmpty {
+                                        Button("Open") {
+                                            HubNotificationCenter.openApp(bundleID: group.bundleID)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.neonCyan.opacity(0.85))
+                                    }
+                                }
+                                ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                                    hubRow(item)
+                                        .notchAppear(
+                                            delay: Double(min(gIndex * 4 + index, 10)) * 0.02,
+                                            rise: 4
+                                        )
+                                }
+                            }
                         }
                     }
                 }
@@ -164,9 +199,9 @@ private struct ExpandedPeekHubView: View {
     private var statusPlainEnglish: String {
         if !router.isEnabled { return "Delivery paused" }
         if router.peekOnlyDelivery {
-            return mirror.accessDenied ? "Peek-only · grant Disk Access for Messages" : "Peek-only · notch alerts"
+            return mirror.accessDenied ? "Peek-only · grant Disk Access for Mac alerts" : "Notification Center · Dynamo + this Mac"
         }
-        return "Routing into Peek + hub inbox"
+        return "Notification Center · routing into Hub"
     }
 
     private var controlCard: some View {
@@ -244,6 +279,47 @@ private struct ExpandedPeekHubView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+
+    private var replacementSetupCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Replace Mac banners")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(NotchTheme.textQuaternary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+            Text("Peek is the banner. Hub is the inbox. Apple cannot hide other apps’ corner alerts — keep Allow Notifications on, set Alert style to None.")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(NotchTheme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 5) {
+                Button {
+                    HubNotificationCenter.openFullDiskAccess()
+                } label: {
+                    NotchChipLabel(
+                        title: mirror.accessDenied ? "Full Disk Access" : "Disk access",
+                        systemImage: "lock.shield",
+                        active: mirror.accessDenied
+                    )
+                }
+                .buttonStyle(.plain)
+                Button {
+                    DynamoNotificationRouter.shared.openNotificationSettingsForPeekOnly()
+                } label: {
+                    NotchChipLabel(title: "Alert style None", systemImage: "bell.slash", active: true)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(NotchTheme.chipFill.opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(NotchTheme.neonCyan.opacity(0.12), lineWidth: 0.5)
+                )
+        )
     }
 
     private var filterStrip: some View {
@@ -341,7 +417,7 @@ private struct ExpandedPeekHubView: View {
         switch filter {
         case .all:
             return hub.history.isEmpty
-                ? "When Calendar, Battery, Messages, and more Peek, they’ll land here. Tap a row to replay."
+                ? "Dynamo Peeks and this Mac’s notifications land here, grouped by app. Tap to replay, swipe the menu to dismiss or open."
                 : "Try another filter, or clear filters with All."
         case .unread:
             return "New Peeks show a blue dot. Tap Mark all read when you’re done."
@@ -391,6 +467,12 @@ private struct ExpandedPeekHubView: View {
                         Text(friendlyCategory(item.category))
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(NotchTheme.textQuaternary)
+                        if !item.appName.isEmpty {
+                            Text(item.appName)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(NotchTheme.textQuaternary)
+                                .lineLimit(1)
+                        }
                         Spacer(minLength: 0)
                         Text(timeLabel(item.deliveredAt))
                             .font(.system(size: 9, weight: .medium).monospacedDigit())
@@ -421,6 +503,12 @@ private struct ExpandedPeekHubView: View {
         .contextMenu {
             Button("Replay Peek") { hub.replay(id: item.id) }
             Button("Mark read") { hub.markRead(id: item.id) }
+            if !item.sourceBundleID.isEmpty {
+                Button("Open \(item.appName.isEmpty ? "app" : item.appName)") {
+                    HubNotificationCenter.openApp(bundleID: item.sourceBundleID)
+                }
+            }
+            Button("Dismiss", role: .destructive) { hub.remove(id: item.id) }
         }
     }
 
