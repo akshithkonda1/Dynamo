@@ -250,14 +250,14 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         AnyView(CalendarSettingsView(plugin: self))
     }
 
-    /// Compact when empty / no read access; taller only when listing events.
+    /// Compact card when empty / no read access; same ~200pt panel when listing.
     var expandedContentHeight: CGFloat {
-        if showComposer { return 250 }
+        if showComposer { return 160 }
         switch authState {
         case .authorized:
-            return 312
+            return NotchTheme.expandedContentBase
         case .writeOnly, .denied, .notDetermined:
-            return 148
+            return 120
         }
     }
 
@@ -357,7 +357,7 @@ private struct ExpandedCalendarView: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 NotchSectionHeader("Calendar")
                 Spacer(minLength: 0)
@@ -490,9 +490,9 @@ private struct ExpandedCalendarView: View {
                     }
                 }
             case .authorized:
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
                     monthStrip
-                        .frame(width: 176)
+                        .frame(width: 148)
                     eventColumn
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -660,7 +660,7 @@ private struct ExpandedCalendarView: View {
                 prominent: false
             )
         } else {
-            calendarEventList(columns: 1)
+            calendarEventList(columns: 2)
         }
     }
 

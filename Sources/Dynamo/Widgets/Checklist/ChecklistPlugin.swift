@@ -53,7 +53,7 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
 
     private var notifiedReminderStages: [String: Set<String>] = [:]
 
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
 
     func start() {
         store.start()
@@ -372,10 +372,10 @@ private struct ExpandedChecklistView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
 
             segmentBar
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 4) {

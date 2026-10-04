@@ -7,12 +7,12 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
     let displayName = "Focus"
     let systemImage = "scope"
 
-    /// Meeting companion needs more vertical room; other modes stay compact.
+    /// Meeting companion gets a slightly taller card; other modes share the compact card.
     var expandedContentHeight: CGFloat {
         switch FocusController.shared.baseMode {
-        case .meeting: return 320
-        case .trueFocus: return 280
-        default: return 260
+        case .meeting: return 160
+        case .trueFocus: return NotchTheme.expandedContentBase
+        default: return NotchTheme.expandedContentBase
         }
     }
 

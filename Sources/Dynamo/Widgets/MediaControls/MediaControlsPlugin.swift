@@ -11,7 +11,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
 
     private static let motionArtworkKey = "dynamo.media.motionArtwork"
 
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
 
     @Published private(set) var info: NowPlayingInfo = .empty
     @Published private(set) var playlists: [String] = []
@@ -377,17 +377,17 @@ private struct ExpandedMediaView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let artSize: CGFloat = geo.size.width >= 620 ? 128 : (geo.size.width >= 520 ? 116 : 104)
-            // Dynamic transport chrome — scales with island width.
-            let playD: CGFloat = geo.size.width >= 600 ? 52 : (geo.size.width >= 520 ? 48 : 44)
-            let sideD: CGFloat = geo.size.width >= 600 ? 40 : 36
-            let auxD: CGFloat = geo.size.width >= 600 ? 34 : 32
+            let artSize: CGFloat = geo.size.width >= 560 ? 80 : 68
+            // Compact transport — fits the hanging content card.
+            let playD: CGFloat = geo.size.width >= 560 ? 42 : 38
+            let sideD: CGFloat = 32
+            let auxD: CGFloat = 28
             HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
                 artwork(size: artSize)
                     .padding(.top, 2)
                     .notchAppear()
 
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 5) {
                     header
                     if hasTrack {
                         MarqueeText(
@@ -427,7 +427,7 @@ private struct ExpandedMediaView: View {
 
                     // Transport sits under scrubber (not bottom of column).
                     transportRow(playDiameter: playD, sideDiameter: sideD, auxDiameter: auxD)
-                        .padding(.top, 6)
+                        .padding(.top, 2)
 
                     systemVolumeSection
 

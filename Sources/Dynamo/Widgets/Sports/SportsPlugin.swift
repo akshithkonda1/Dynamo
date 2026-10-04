@@ -7,7 +7,7 @@ final class SportsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvi
     let displayName = "Sports"
     let systemImage = "sportscourt.fill"
 
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
     var onSneakPeek: ((NotchSneakPeek) -> Void)?
 
     private let store = SportsStore.shared

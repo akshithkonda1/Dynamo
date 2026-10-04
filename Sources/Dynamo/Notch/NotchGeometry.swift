@@ -59,36 +59,57 @@ enum NotchGeometry {
 
     // MARK: - Aspect-adaptive expanded panel
 
-    /// Expanded island width from screen size + aspect ratio.
-    /// Wider for readable lists / dual columns, but empty tabs stay short in height
-    /// (plugins own compact `expandedContentHeight` when empty).
+    /// Nil-screen fallback — ~38% of a 1470pt laptop (~555pt).
+    static let expandedWidthFallback: CGFloat = 560
+    /// Floor covers 13″ laptops.
+    static let expandedWidthFloor: CGFloat = 480
+    /// Cap keeps large externals from growing a banner.
+    static let expandedWidthCap: CGFloat = 680
+    /// Chrome + content must stay a compact hanging card (NotchDock density).
+    static let expandedPanelHeightCap: CGFloat = 230
+
+    /// Compact hanging panel: ~38% of a typical MacBook width (~555pt on a
+    /// 1470pt display) and short — a tidy card under the camera, not a wide
+    /// wing bar and not a tall tray.
     static func expandedWidth(for screen: NSScreen?) -> CGFloat {
-        guard let screen else { return 640 }
-        let w = screen.frame.width
-        let h = max(screen.frame.height, 1)
-        let aspect = w / h
-        let fraction: CGFloat
-        if aspect >= 2.0 {          // ultrawide
-            fraction = 0.28
-        } else if aspect >= 1.7 {   // 16:9–16:10 laptop
-            fraction = 0.38
-        } else if aspect >= 1.45 {  // 3:2
-            fraction = 0.42
-        } else {                    // nearer square / portrait external
-            fraction = 0.48
-        }
-        let raw = w * fraction
-        // Wide enough for dual-column lists; ~1650pt cap on large displays.
-        return min(1650, max(520, raw.rounded()))
+        guard let screen else { return expandedWidthFallback }
+        return expandedWidth(screenWidth: screen.frame.width, screenHeight: screen.frame.height)
     }
 
-    /// Scale widget content height modestly with display height.
-    /// Empty/short tabs stay compact via per-plugin base heights.
+    /// Testable width from display points (no `NSScreen` required).
+    static func expandedWidth(screenWidth w: CGFloat, screenHeight h: CGFloat) -> CGFloat {
+        let aspect = w / max(h, 1)
+        let fraction: CGFloat
+        if aspect >= 2.0 {          // ultrawide — keep the card compact
+            fraction = 0.22
+        } else if aspect >= 1.6 {   // 16:10 and 16:9
+            fraction = 0.38
+        } else if aspect >= 1.45 {  // 3:2 MacBook
+            fraction = 0.38
+        } else {                    // nearer square / portrait external
+            fraction = 0.42
+        }
+        let raw = w * fraction
+        return min(expandedWidthCap, max(expandedWidthFloor, raw.rounded()))
+    }
+
+    /// Keep the content card short. Never grow taller than the plugin’s
+    /// compact base — extra display size is unused, not extra height.
     static func expandedContentHeight(base: CGFloat, for screen: NSScreen?) -> CGFloat {
         guard let screen else { return base }
-        let h = screen.frame.height
-        let scale = min(1.18, max(0.94, h / 900))
+        return expandedContentHeight(base: base, screenHeight: screen.frame.height)
+    }
+
+    /// Testable content height from display points (no `NSScreen` required).
+    static func expandedContentHeight(base: CGFloat, screenHeight h: CGFloat) -> CGFloat {
+        let scale = min(1.0, max(0.90, h / 980))
         return (base * scale).rounded()
+    }
+
+    /// Full expanded panel height: widget card + tray chrome.
+    static func expandedPanelHeight(contentBase: CGFloat, screenHeight: CGFloat) -> CGFloat {
+        expandedContentHeight(base: contentBase, screenHeight: screenHeight)
+            + NotchTheme.expandedChromeHeight
     }
 
     /// Peek silhouette grows modestly from the physical cutout — Dynamic Island
@@ -99,8 +120,8 @@ enum NotchGeometry {
         // ~1.85× cutout + small padding → readable without looking banner-wide.
         let width = min(440, max(metrics.width * 1.85 + 32, 276)).rounded()
         let top = peekContentTopInset(for: screen)
-        // Content row ~52pt (icon 36 + padding) + soft bottom lip.
-        let height = max(78, (top + 54).rounded())
+        // Content row ~48pt (icon 32 + padding) + soft bottom lip.
+        let height = max(72, (top + 48).rounded())
         return NSSize(width: width, height: height)
     }
 
@@ -124,8 +145,8 @@ enum NotchGeometry {
         let metrics = currentMetrics(for: screen)
         let w = min(340, max(metrics.width * 1.55 + 24, 240)).rounded()
         let top = peekContentTopInset(for: screen)
-        // Camera band + meter row (~26pt) + bottom lip.
-        let h = max(52, (top + 28).rounded())
+        // Camera band + meter row (~24pt) + bottom lip.
+        let h = max(50, (top + 26).rounded())
         return NSSize(width: w, height: h)
     }
 }

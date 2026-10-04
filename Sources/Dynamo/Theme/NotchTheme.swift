@@ -23,19 +23,21 @@ enum NotchTheme {
     static let spaceXL: CGFloat = 20
 
     /// Horizontal inset for expanded content + ambient rows (keep all widgets aligned).
-    /// Slightly roomier than the collapsed ambient inset so wide island content breathes.
+    /// Generous enough to match the compact hanging card, not a padded sheet.
     static let contentInset: CGFloat = 16
     /// Horizontal inset for collapsed ambient (clock / media / weather).
     static let ambientInset: CGFloat = 12
 
     // MARK: Expanded chrome (must match NotchContentView measurements)
-    /// Tray row: top 10 + chip ~34 + bottom 6 (labeled active tabs)
-    static let chromeTray: CGFloat = 50
-    /// Clock pill under tray: ~24 + bottom 8
-    static let chromeClock: CGFloat = 30
-    /// Hairline + bottom spacing
-    static let chromeDivider: CGFloat = 10
-    /// Bottom padding under widget content — tight so the lip feels flush.
+    /// Shared compact content-card height. Tray + this ≈ 200pt on a typical MacBook.
+    static let expandedContentBase: CGFloat = 144
+    /// Tab icons sit in the menu-bar / camera band (one row).
+    static let chromeTray: CGFloat = 38
+    /// Clock lives on the tray row so chrome stays one band. Kept at 0.
+    static let chromeClock: CGFloat = 0
+    /// Hairline under the camera band
+    static let chromeDivider: CGFloat = 6
+    /// Bottom padding under the content card — room for the large corner radii.
     static let chromeContentBottom: CGFloat = 12
     /// Total height added above a widget’s `expandedContentHeight`
     static var expandedChromeHeight: CGFloat {
@@ -44,8 +46,9 @@ enum NotchTheme {
 
     // MARK: Radii — Continuous curves (AppKit-friendly) with Dynamo jewel tightness
     static let radiusCollapsed: CGFloat = 12
-    static let radiusExpanded: CGFloat = 26
-    static let radiusCard: CGFloat = 12
+    /// Large bottom corners so the hanging panel reads as a rounded pill.
+    static let radiusExpanded: CGFloat = 28
+    static let radiusCard: CGFloat = 14
     static let radiusIcon: CGFloat = 8
     static let radiusPill: CGFloat = 10
 

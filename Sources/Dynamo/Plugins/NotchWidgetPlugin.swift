@@ -21,9 +21,9 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 
     /// Preferred height of the expanded panel while this widget is active.
     /// Width is constant across every widget (so the tray icon row never
-    /// jumps horizontally on tab switch). Prefer the shared peer height
-    /// (`268`) so Media / Calendar / Battery / Shelf / Webcam stay aligned;
-    /// only go shorter when content is reliably compact (e.g. Weather).
+    /// jumps horizontally on tab switch). Prefer the shared slim bar height
+    /// (`NotchTheme.expandedContentBase`) and reflow extra info sideways;
+    /// only go taller when a widget truly needs a second row.
     var expandedContentHeight: CGFloat { get }
 
     /// Called once when the plugin is registered. Use for timers, observers, etc.
@@ -35,7 +35,7 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 
 extension NotchWidgetPlugin {
     /// Default content height (panel adds `NotchTheme.expandedChromeHeight` for tray/clock).
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
     func start() {}
     func stop() {}
 }
