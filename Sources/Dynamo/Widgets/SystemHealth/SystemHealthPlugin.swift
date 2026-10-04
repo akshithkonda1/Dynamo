@@ -13,7 +13,7 @@ final class SystemHealthPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbien
     private static let weeklyPeekKey = "dynamo.health.weeklyPeek"
     private static let cautionPeeksKey = "dynamo.health.cautionPeeks"
 
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
 
     @Published private(set) var report: MacHealthReport = .empty
     @Published private(set) var updates: SoftwareUpdateSnapshot = .empty
@@ -337,91 +337,85 @@ private struct ExpandedSystemHealthView: View {
                 refreshButton
             }
 
-            // Score
-            NotchCard(compact: true) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(max(0, report.score))")
-                            .font(NotchTheme.heroDigit.monospacedDigit())
-                            .foregroundStyle(scoreColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(report.summary)
-                                .font(NotchTheme.body)
-                                .foregroundStyle(NotchTheme.textSecondary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(checkedLabel)
-                                .font(NotchTheme.micro)
-                                .foregroundStyle(NotchTheme.textQuaternary)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(NotchTheme.chipFill)
-                            Capsule()
-                                .fill(scoreColor.opacity(0.9))
-                                .frame(
-                                    width: max(
-                                        6,
-                                        geo.size.width * CGFloat(min(100, max(0, report.score))) / 100
-                                    )
-                                )
-                        }
-                    }
-                    .frame(height: 5)
-                }
-            }
-            .notchAppear(delay: 0.03)
-
-            // Updates
-            Button {
-                plugin.openUpdatesOrRestart()
-            } label: {
+            HStack(alignment: .top, spacing: 8) {
                 NotchCard(compact: true) {
-                    HStack(spacing: 8) {
-                        Image(systemName: updatesIcon)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(updatesTint)
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(updatesTitle)
-                                .font(NotchTheme.body.weight(.medium))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                                .lineLimit(1)
-                            if let sub = updatesSubtitle {
-                                Text(sub)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(max(0, report.score))")
+                                .font(NotchTheme.heroDigit.monospacedDigit())
+                                .foregroundStyle(scoreColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(report.summary)
+                                    .font(NotchTheme.body)
+                                    .foregroundStyle(NotchTheme.textSecondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(checkedLabel)
                                     .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textTertiary)
-                                    .lineLimit(1)
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(NotchTheme.chipFill)
+                                Capsule()
+                                    .fill(scoreColor.opacity(0.9))
+                                    .frame(
+                                        width: max(
+                                            6,
+                                            geo.size.width * CGFloat(min(100, max(0, report.score))) / 100
+                                        )
+                                    )
                             }
                         }
-                        Spacer(minLength: 0)
-                        if busy {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(NotchTheme.textQuaternary)
+                        .frame(height: 5)
+                    }
+                }
+                .notchAppear(delay: 0.03)
+
+                Button {
+                    plugin.openUpdatesOrRestart()
+                } label: {
+                    NotchCard(compact: true) {
+                        HStack(spacing: 8) {
+                            Image(systemName: updatesIcon)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(updatesTint)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(updatesTitle)
+                                    .font(NotchTheme.body.weight(.medium))
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                    .lineLimit(1)
+                                if let sub = updatesSubtitle {
+                                    Text(sub)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            if busy {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(NotchTheme.textQuaternary)
+                            }
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .help("Open Software Update")
+                .notchAppear(delay: 0.06)
             }
-            .buttonStyle(.plain)
-            .help("Open Software Update")
-            .notchAppear(delay: 0.06)
 
-            // Vitals grid (2×2)
             if !metrics.isEmpty {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 8),
-                        GridItem(.flexible(), spacing: 8)
-                    ],
-                    spacing: 8
-                ) {
+                HStack(spacing: 6) {
                     ForEach(Array(metrics.enumerated()), id: \.element.id) { index, finding in
                         metricCell(finding)
+                            .frame(maxWidth: .infinity)
                             .notchAppear(delay: 0.09 + Double(min(index, 5)) * 0.03)
                     }
                 }

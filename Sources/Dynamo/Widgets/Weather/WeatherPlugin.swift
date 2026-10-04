@@ -9,7 +9,7 @@ final class WeatherPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPr
     let displayName = "Weather"
     let systemImage = "cloud.sun"
 
-    var expandedContentHeight: CGFloat { 268 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
 
     @Published private(set) var snapshot: WeatherSnapshot?
     @Published private(set) var alerts: [WeatherAlertItem] = []
@@ -251,15 +251,21 @@ private struct ExpandedWeatherView: View {
                 prominent: true
             )
         } else if let snapshot = plugin.snapshot {
-            currentConditions(snapshot)
-                .notchAppear(delay: 0.03)
-            if !snapshot.hourly.isEmpty {
-                hourlyStrip(snapshot.hourly)
-                    .notchAppear(delay: 0.07)
-            }
-            if !snapshot.daily.isEmpty {
-                dailyStrip(snapshot.daily)
-                    .notchAppear(delay: 0.1)
+            HStack(alignment: .top, spacing: 8) {
+                currentConditions(snapshot)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .notchAppear(delay: 0.03)
+                VStack(alignment: .leading, spacing: 6) {
+                    if !snapshot.hourly.isEmpty {
+                        hourlyStrip(snapshot.hourly)
+                            .notchAppear(delay: 0.07)
+                    }
+                    if !snapshot.daily.isEmpty {
+                        dailyStrip(snapshot.daily)
+                            .notchAppear(delay: 0.1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             if !plugin.alerts.isEmpty {
                 alertList

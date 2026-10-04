@@ -37,7 +37,7 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
     let id = "world-clock"
     let displayName = "Clocks"
     let systemImage = "globe"
-    var expandedContentHeight: CGFloat { 280 }
+    var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
 
     @Published var selectedIDs: [String] {
         didSet {
@@ -782,16 +782,19 @@ private struct ExpandedWorldClockView: View {
             }
 
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
                         ForEach(Array(plugin.activeEntries.enumerated()), id: \.element.id) { index, entry in
                             cityCard(entry, at: context.date, isHero: index == 0)
+                                .frame(width: 260, alignment: .topLeading)
                                 .notchAppear(delay: Double(min(index, 5)) * 0.035)
                         }
                         converterCard(at: context.date)
+                            .frame(width: 240, alignment: .topLeading)
                             .notchAppear(delay: 0.12)
                         if showMeasureConvert || units.showConversionTable {
                             measureConvertCard
+                                .frame(width: 260, alignment: .topLeading)
                                 .notchAppear(delay: 0.14)
                         }
                     }

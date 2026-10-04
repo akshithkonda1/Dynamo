@@ -102,7 +102,7 @@ final class BatteryPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProv
     }
 
     /// Multi-section Battery tray (scrolls when needed).
-    var expandedContentHeight: CGFloat { 360 }
+    var expandedContentHeight: CGFloat { 160 }
 
     // MARK: - Snapshot pipeline
 
@@ -499,42 +499,47 @@ private struct ExpandedBatteryView: View {
                     prominent: true
                 )
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
                         heroCard
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                             .notchAppear()
-
-                        vitalsStrip
-                            .notchAppear(delay: 0.04)
-
                         sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
                             capacitySection
                         }
-                        .notchAppear(delay: 0.07)
-
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .notchAppear(delay: 0.04)
                         sectionCard(title: "Power source", systemImage: "powerplug.fill") {
                             adapterSection
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .notchAppear(delay: 0.06)
+                    }
+
+                    vitalsStrip
+                        .notchAppear(delay: 0.08)
+
+                    HStack(alignment: .top, spacing: 8) {
+                        sectionCard(title: "Power mode", systemImage: "leaf.fill") {
+                            powerModeControls
+                        }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                         .notchAppear(delay: 0.1)
 
                         if plugin.showHistorySparkline {
                             sectionCard(title: "Recent charge", systemImage: "chart.xyaxis.line") {
                                 historySection
                             }
-                            .notchAppear(delay: 0.13)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .notchAppear(delay: 0.12)
                         }
-
-                        sectionCard(title: "Power mode", systemImage: "leaf.fill") {
-                            powerModeControls
-                        }
-                        .notchAppear(delay: 0.16)
 
                         if plugin.showTips {
                             tipsSection
-                                .notchAppear(delay: 0.18)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .notchAppear(delay: 0.14)
                         }
                     }
-                    .padding(.bottom, 4)
                 }
             }
         }
@@ -607,7 +612,7 @@ private struct ExpandedBatteryView: View {
         systemImage: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 Image(systemName: systemImage)
                     .font(.system(size: 9, weight: .bold))
@@ -621,7 +626,7 @@ private struct ExpandedBatteryView: View {
             }
             content()
         }
-        .padding(10)
+        .padding(8)
         .background(
             RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
                 .fill(NotchTheme.chipFill.opacity(0.45))
@@ -636,35 +641,35 @@ private struct ExpandedBatteryView: View {
 
     private var heroCard: some View {
         let info = timeInfo
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 chargeRing
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("\(snapshot.percent)%")
-                        .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(barColor)
                         .contentTransition(.numericText())
                         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: snapshot.percent)
 
                     Text(info.title.uppercased())
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: 8.5, weight: .bold, design: .rounded))
                         .foregroundStyle(NotchTheme.textQuaternary)
                         .tracking(0.6)
 
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(info.value)
-                            .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                             .foregroundStyle(NotchTheme.textPrimary)
                             .contentTransition(.numericText())
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                         if let rate = rateLabel {
                             Text(rate)
-                                .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                                .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
                                 .foregroundStyle(info.tint)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
                                 .background(Capsule().fill(info.tint.opacity(0.14)))
                         }
                     }
@@ -681,7 +686,7 @@ private struct ExpandedBatteryView: View {
 
             chargeMeter
         }
-        .padding(11)
+        .padding(8)
         .background { heroBackground }
         .clipShape(RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous))
     }
@@ -692,12 +697,12 @@ private struct ExpandedBatteryView: View {
                 Capsule()
                     .fill(Color.white.opacity(i % 6 == 0 ? 0.18 : 0.06))
                     .frame(width: 1.2, height: i % 6 == 0 ? 4.5 : 2.5)
-                    .offset(y: -26)
+                    .offset(y: -19)
                     .rotationEffect(.degrees(Double(i) / 24 * 360))
             }
             Circle()
-                .stroke(NotchTheme.chipFill, lineWidth: 3.5)
-                .frame(width: 54, height: 54)
+                .stroke(NotchTheme.chipFill, lineWidth: 3)
+                .frame(width: 40, height: 40)
             Circle()
                 .trim(from: 0, to: CGFloat(min(100, max(0, snapshot.percent))) / 100)
                 .stroke(
@@ -710,9 +715,9 @@ private struct ExpandedBatteryView: View {
                         ],
                         center: .center
                     ),
-                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
-                .frame(width: 54, height: 54)
+                .frame(width: 40, height: 40)
                 .rotationEffect(.degrees(-90))
                 .animation(.spring(response: 0.55, dampingFraction: 0.8), value: snapshot.percent)
             Circle()
@@ -721,17 +726,17 @@ private struct ExpandedBatteryView: View {
                         colors: [barColor.opacity(0.16), Color.clear],
                         center: .center,
                         startRadius: 1,
-                        endRadius: 24
+                        endRadius: 18
                     )
                 )
-                .frame(width: 44, height: 44)
+                .frame(width: 32, height: 32)
             Image(systemName: heroCenterSymbol)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(barColor)
                 .scaleEffect(snapshot.isCharging && chargePulse ? 1.12 : 1.0)
                 .symbolRenderingMode(.hierarchical)
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 42, height: 42)
         .accessibilityHidden(true)
     }
 
@@ -1070,7 +1075,7 @@ private struct ExpandedBatteryView: View {
                         }
                     }
                     BatterySparkline(values: sparklinePoints, tint: barColor)
-                        .frame(height: 36)
+                        .frame(height: 22)
                 }
             } else {
                 Text("Keep Dynamo open a bit longer to build a local charge history.")

@@ -53,8 +53,8 @@ struct SystemHUDView: View {
                     .foregroundStyle(NotchTheme.textPrimary)
                     .frame(width: 40, alignment: .trailing)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

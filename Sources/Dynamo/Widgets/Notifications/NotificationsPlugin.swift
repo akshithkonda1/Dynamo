@@ -14,7 +14,7 @@ final class NotificationsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
     @ObservedObject private var router = DynamoNotificationRouter.shared
     @ObservedObject private var mirror = SystemNotificationMirror.shared
 
-    var expandedContentHeight: CGFloat { 320 }
+    var expandedContentHeight: CGFloat { 148 }
 
     func start() {}
     func stop() {}
@@ -105,7 +105,7 @@ private struct ExpandedPeekHubView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             header
             controlCard
             if !router.replacesNotificationCenter {

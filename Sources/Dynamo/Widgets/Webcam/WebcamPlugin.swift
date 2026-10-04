@@ -10,9 +10,9 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
 
     var expandedContentHeight: CGFloat {
         switch previewSize {
-        case .compact: return 248
-        case .regular: return 280
-        case .large: return 320
+        case .compact: return 132
+        case .regular: return NotchTheme.expandedContentBase
+        case .large: return 160
         }
     }
 
@@ -47,9 +47,9 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
         }
         var maxTile: CGFloat {
             switch self {
-            case .compact: return 132
-            case .regular: return 168
-            case .large: return 210
+            case .compact: return 96
+            case .regular: return 112
+            case .large: return 132
             }
         }
     }

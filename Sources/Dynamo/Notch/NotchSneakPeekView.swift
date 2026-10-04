@@ -162,7 +162,7 @@ struct NotchSneakPeekView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+                .padding(.bottom, 6)
             }
 
             // Hairline accent on the bottom lip — photo color when available.

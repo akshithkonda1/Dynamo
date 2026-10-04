@@ -117,20 +117,32 @@ struct NotchContentView: View {
 
     private var expandedBody: some View {
         VStack(spacing: 0) {
-            // Tray — primary widgets left; Focus / Sports / utilities + Settings right.
-            HStack(spacing: 3) {
-                ForEach(leadingTrayPlugins, id: \.id) { plugin in
-                    trayButton(for: plugin)
+            // Tab row sits in the menu-bar / camera band. Dynamo ships more
+            // plugins than a NotchDock-style strip can show at once, so each
+            // cheek scrolls — every widget stays one flick away, no overflow menu.
+            HStack(spacing: 6) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(leadingTrayPlugins, id: \.id) { plugin in
+                            trayButton(for: plugin)
+                        }
+                    }
                 }
-                Spacer(minLength: 8)
-                // Soft cluster divider: “daily widgets | focus & tools”
-                Capsule()
-                    .fill(NotchTheme.hairline.opacity(0.55))
-                    .frame(width: 1, height: 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Color.clear
+                    .frame(minWidth: 72, idealWidth: 96, maxWidth: 120)
                     .accessibilityHidden(true)
-                ForEach(trailingTrayPlugins, id: \.id) { plugin in
-                    trayButton(for: plugin)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(trailingTrayPlugins, id: \.id) { plugin in
+                            trayButton(for: plugin)
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
                 TrayIconButton(
                     systemImage: "gearshape.fill",
                     displayName: "Preferences",
@@ -138,19 +150,10 @@ struct NotchContentView: View {
                 ) {
                     NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
                 }
-            }
-            .padding(.horizontal, NotchTheme.contentInset)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
-            .frame(height: NotchTheme.chromeTray)
-
-            // Live clock only — icons are self-explanatory (no selected-tab name).
-            HStack(spacing: 10) {
-                Spacer(minLength: 0)
                 liveClockPill
             }
             .padding(.horizontal, NotchTheme.contentInset)
-            .frame(height: NotchTheme.chromeClock)
+            .frame(height: NotchTheme.chromeTray)
 
             // Hairline (fixed chrome slot)
             VStack(spacing: 0) {
@@ -208,8 +211,8 @@ struct NotchContentView: View {
                         .font(NotchTheme.micro.weight(.medium))
                         .foregroundStyle(NotchTheme.textTertiary)
                 }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
                 .background(
                     Capsule(style: .continuous)
                         .fill(NotchTheme.chipFill)
@@ -225,18 +228,12 @@ struct NotchContentView: View {
         .help("Open Clock")
     }
 
-    /// Right-side tray cluster (before Settings): Focus, Sports, Health, Shelf, Webcam.
-    private static let trailingTrayIDs = ["focus", "sports", "system-health", "shelf", "webcam"]
-
     private var leadingTrayPlugins: [any NotchWidgetPlugin] {
-        let trailing = Set(Self.trailingTrayIDs)
-        return registry.plugins.filter { !trailing.contains($0.id) }
+        NotchTabRow.leading(from: registry.plugins)
     }
 
     private var trailingTrayPlugins: [any NotchWidgetPlugin] {
-        Self.trailingTrayIDs.compactMap { id in
-            registry.plugins.first { $0.id == id }
-        }
+        NotchTabRow.trailing(from: registry.plugins)
     }
 
     @ViewBuilder
@@ -290,7 +287,7 @@ private struct TrayIconButton: View {
                         .transition(.scale.combined(with: .opacity))
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 26, height: 26)
             .background(
                 Capsule(style: .continuous)
                     .fill(fillColor)
