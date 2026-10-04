@@ -31,20 +31,27 @@ final class NotchTabRowTests: XCTestCase {
         return registry
     }
 
+    /// Hard-coded contract of what AppDelegate must register. Not derived
+    /// from `ProductionWidgetKind` / `NotchTabRow` so a dropped widget fails.
+    private let requiredProductionIDs = [
+        "media", "peek-hub", "calendar", "clipboard", "checklist",
+        "world-clock", "battery", "focus", "sports", "system-health",
+        "shelf", "webcam"
+    ]
+
     func testProductionRegistryPluginsAreAllReachable() {
         let bundle = ProductionTestFixtures.bundle()
-        let catalog = ProductionWidgetKind.allCases.map(\.rawValue)
-        XCTAssertEqual(bundle.ids, catalog)
-        XCTAssertEqual(NotchTabRow.productionRegisteredIDs, catalog)
-        XCTAssertFalse(catalog.contains("weather"), "Weather stays out of the production tray")
+        let liveIDs = Set(bundle.plugins.map { $0.id })
+        XCTAssertEqual(liveIDs, Set(requiredProductionIDs), "Factory no longer matches the production tray contract")
+        XCTAssertFalse(liveIDs.contains("weather"), "Weather stays out of the production tray")
 
-        let reachable = NotchTabRow.reachableIDs(from: bundle.plugins)
+        let reachable = Set(NotchTabRow.reachableIDs(from: bundle.plugins))
         XCTAssertEqual(
-            Set(reachable),
-            Set(bundle.ids),
+            reachable,
+            Set(requiredProductionIDs),
             "Tab row dropped a production plugin — every factory-registered widget must stay in the top band"
         )
-        for id in catalog {
+        for id in requiredProductionIDs {
             XCTAssertTrue(reachable.contains(id), "\(id) is not in the tab row")
         }
     }
@@ -53,7 +60,7 @@ final class NotchTabRowTests: XCTestCase {
         // Compact ~555pt panel cannot show 13+ icons at once. Cheeks scroll;
         // membership must still include every visible plugin — including
         // Weather (ships but is not in the production tray) and extras.
-        var ids = NotchTabRow.productionRegisteredIDs
+        var ids = requiredProductionIDs
         ids.append(contentsOf: ["weather", "extra-a", "extra-b", "extra-c"])
         let registry = register(ids)
 
@@ -75,7 +82,7 @@ final class NotchTabRowTests: XCTestCase {
     }
 
     func testTabRowNeverDropsAVisiblePlugin() {
-        let registry = register(NotchTabRow.productionRegisteredIDs)
+        let registry = register(requiredProductionIDs)
         let leading = NotchTabRow.leading(from: registry.plugins).map { $0.id }
         let trailing = NotchTabRow.trailing(from: registry.plugins).map { $0.id }
 

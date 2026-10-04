@@ -61,7 +61,7 @@ jobs:
     steps:
       - name: Checkout
         if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -123,7 +123,7 @@ jobs:
     steps:
       - name: Checkout
         if: needs.decide.outputs.compile == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show Swift version
         if: needs.decide.outputs.compile == 'true'
@@ -134,7 +134,8 @@ jobs:
         run: |
           # Finder xattrs on resource forks break ad-hoc codesign on some runners.
           xattr -cr . 2>/dev/null || true
-          swift build -v
+          # Fail on warnings Swift 6 treats as errors (isolated key paths, etc.).
+          swift build -v -Xswiftc -warnings-as-errors
 
       - name: Test
         if: needs.decide.outputs.compile == 'true'

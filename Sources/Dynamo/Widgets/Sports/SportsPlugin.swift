@@ -112,10 +112,11 @@ private struct ExpandedSportsView: View {
             header
             categoryRow
             leagueChips
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 5) {
+            NotchHScroll(leftHelp: "Earlier games", rightHelp: "Later games") {
+                HStack(alignment: .top, spacing: 10) {
                     if store.currentEvents.isEmpty {
                         empty
+                            .frame(minWidth: 240, alignment: .topLeading)
                     } else if store.browseMode == .liveAll {
                         section(title: "Live now", events: store.liveEvents, accent: NotchTheme.positive)
                     } else {
@@ -215,7 +216,7 @@ private struct ExpandedSportsView: View {
     }
 
     private var leagueChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        NotchHScroll(leftHelp: "Earlier leagues", rightHelp: "Later leagues") {
             HStack(spacing: 5) {
                 // All Live aggregate
                 chip(
@@ -263,15 +264,22 @@ private struct ExpandedSportsView: View {
     }
 
     @ViewBuilder
-    private func section(title: String, events: [SportsEvent], accent: Color) -> some View {
+    private func section(title: String, events: [SportsEvent], accent _: Color) -> some View {
         if !events.isEmpty {
-            Text(title)
-                .font(NotchTheme.micro.weight(.semibold))
-                .foregroundStyle(NotchTheme.textQuaternary)
-                .padding(.top, 2)
             ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
-                eventRow(event)
-                    .notchAppear(delay: Double(min(index, 8)) * 0.028)
+                VStack(alignment: .leading, spacing: 4) {
+                    if index == 0 {
+                        Text(title)
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                    } else {
+                        Text(" ")
+                            .font(NotchTheme.micro.weight(.semibold))
+                    }
+                    eventRow(event)
+                        .notchAppear(delay: Double(min(index, 8)) * 0.028)
+                }
+                .frame(width: 260, alignment: .topLeading)
             }
         }
     }

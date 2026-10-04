@@ -382,69 +382,72 @@ private struct ExpandedMediaView: View {
             let playD: CGFloat = geo.size.width >= 560 ? 42 : 38
             let sideD: CGFloat = 32
             let auxD: CGFloat = 28
-            ScrollView(.vertical, showsIndicators: false) {
-                HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
-                    artwork(size: artSize)
-                        .padding(.top, 2)
-                        .notchAppear()
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        header
-                        if hasTrack {
-                            MarqueeText(
-                                text: plugin.info.title,
-                                font: .system(size: geo.size.width >= 560 ? 17 : 16, weight: .semibold),
-                                foreground: NotchTheme.textPrimary,
-                                speed: 32
-                            )
-                            .frame(height: 22)
-                            .onTapGesture { plugin.openConnectedApp() }
-                            MarqueeText(
-                                text: subtitle,
-                                font: NotchTheme.caption,
-                                foreground: NotchTheme.textSecondary,
-                                speed: 28
-                            )
-                            .frame(height: 16)
-                            .padding(.bottom, 1)
-                            timelineBar
-                        } else {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Ready when you are")
-                                    .font(NotchTheme.body.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textPrimary)
-                                Text("Queue something in Music or Spotify — skip & volume still work.")
-                                    .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textTertiary)
-                                Button {
-                                    plugin.openConnectedApp()
-                                } label: {
-                                    NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.vertical, 4)
-                        }
-
-                        // Transport sits under scrubber (not bottom of column).
-                        transportRow(playDiameter: playD, sideDiameter: sideD, auxDiameter: auxD)
+            NotchHScroll(leftHelp: "Earlier media", rightHelp: "Later media") {
+                HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
+                        artwork(size: artSize)
                             .padding(.top, 2)
+                            .notchAppear()
 
-                        systemVolumeSection
+                        VStack(alignment: .leading, spacing: 5) {
+                            header
+                            if hasTrack {
+                                MarqueeText(
+                                    text: plugin.info.title,
+                                    font: .system(size: geo.size.width >= 560 ? 17 : 16, weight: .semibold),
+                                    foreground: NotchTheme.textPrimary,
+                                    speed: 32
+                                )
+                                .frame(height: 22)
+                                .onTapGesture { plugin.openConnectedApp() }
+                                MarqueeText(
+                                    text: subtitle,
+                                    font: NotchTheme.caption,
+                                    foreground: NotchTheme.textSecondary,
+                                    speed: 28
+                                )
+                                .frame(height: 16)
+                                .padding(.bottom, 1)
+                                timelineBar
+                            } else {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Ready when you are")
+                                        .font(NotchTheme.body.weight(.semibold))
+                                        .foregroundStyle(NotchTheme.textPrimary)
+                                    Text("Queue something in Music or Spotify — skip & volume still work.")
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                    Button {
+                                        plugin.openConnectedApp()
+                                    } label: {
+                                        NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 4)
+                            }
 
+                            transportRow(playDiameter: playD, sideDiameter: sideD, auxDiameter: auxD)
+                                .padding(.top, 2)
+                        }
+                        .notchAppear(delay: 0.04)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+
+                    systemVolumeSection
+                        .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+
+                    VStack(alignment: .leading, spacing: 8) {
                         if hasTrack {
                             playlistRow
                         }
-
-                        // Queue stays visible when volume is open — the card scrolls.
                         if hasTrack, !plugin.info.upcomingTracks.isEmpty {
                             QueuePeekView(tracks: plugin.info.upcomingTracks)
                         }
                     }
-                    .notchAppear(delay: 0.04)
-                    Spacer(minLength: 0)
+                    .frame(width: max(geo.size.width, 1), alignment: .topLeading)
                 }
-                .frame(minWidth: geo.size.width, alignment: .topLeading)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

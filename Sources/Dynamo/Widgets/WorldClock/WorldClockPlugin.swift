@@ -782,7 +782,7 @@ private struct ExpandedWorldClockView: View {
             }
 
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                ScrollView(.horizontal, showsIndicators: false) {
+                NotchHScroll(leftHelp: "Earlier cities", rightHelp: "Later cities") {
                     HStack(alignment: .top, spacing: 8) {
                         ForEach(Array(plugin.activeEntries.enumerated()), id: \.element.id) { index, entry in
                             cityCard(entry, at: context.date, isHero: index == 0)

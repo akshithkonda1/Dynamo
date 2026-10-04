@@ -112,10 +112,11 @@ private struct ExpandedShelfView: View {
                     .onTapGesture { plugin.pickFiles() }
                     .notchAppear(delay: 0.04)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
+                NotchHScroll(leftHelp: "Earlier files", rightHelp: "Later files") {
+                    HStack(alignment: .top, spacing: 6) {
                         ForEach(Array(store.items.enumerated()), id: \.element.id) { index, item in
                             row(item)
+                                .frame(width: 220, alignment: .topLeading)
                                 .notchAppear(delay: Double(min(index, 8)) * 0.028)
                         }
                     }

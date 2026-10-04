@@ -516,33 +516,35 @@ private struct ExpandedCalendarView: View {
 
     @ViewBuilder
     private func calendarEventList(columns: Int) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+        NotchHScroll(leftHelp: "Earlier days", rightHelp: "Later days") {
+            HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
                 ForEach(Array(groupedDays.enumerated()), id: \.element.dayStart) { groupIndex, group in
-                    Text(dayLabel(group.dayStart))
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .padding(.top, 2)
-                        .notchAppear(delay: Double(min(groupIndex, 4)) * 0.04)
-                    if columns == 2 {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.flexible(), spacing: 8),
-                                GridItem(.flexible(), spacing: 8)
-                            ],
-                            spacing: 6
-                        ) {
-                            ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(dayLabel(group.dayStart))
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                            .notchAppear(delay: Double(min(groupIndex, 4)) * 0.04)
+                        if columns == 2 {
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(.flexible(), spacing: 8),
+                                    GridItem(.flexible(), spacing: 8)
+                                ],
+                                spacing: 6
+                            ) {
+                                ForEach(Array(group.events.prefix(4).enumerated()), id: \.element.id) { index, event in
+                                    eventRow(event)
+                                        .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
+                                }
+                            }
+                        } else {
+                            ForEach(Array(group.events.prefix(4).enumerated()), id: \.element.id) { index, event in
                                 eventRow(event)
                                     .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
                             }
                         }
-                    } else {
-                        ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
-                            eventRow(event)
-                                .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
-                        }
                     }
+                    .frame(width: 240, alignment: .topLeading)
                 }
             }
         }

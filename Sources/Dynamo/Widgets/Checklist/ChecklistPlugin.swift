@@ -377,8 +377,8 @@ private struct ExpandedChecklistView: View {
             segmentBar
                 .padding(.bottom, 6)
 
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 4) {
+            NotchHScroll(leftHelp: "Earlier items", rightHelp: "Later items") {
+                HStack(alignment: .top, spacing: 8) {
                     contentForSelectedTab
                 }
                 .padding(.bottom, 4)
@@ -584,6 +584,7 @@ private struct ExpandedChecklistView: View {
             } else {
                 ForEach(Array(reminders.items.enumerated()), id: \.element.id) { index, item in
                     reminderRow(item)
+                        .frame(width: 240, alignment: .topLeading)
                         .notchAppear(delay: Double(min(index, 8)) * 0.028)
                 }
             }
@@ -667,6 +668,7 @@ private struct ExpandedChecklistView: View {
             }
             ForEach(Array(notes.items.enumerated()), id: \.element.id) { index, item in
                 noteRow(item)
+                    .frame(width: 240, alignment: .topLeading)
                     .notchAppear(delay: Double(min(index, 8)) * 0.028)
             }
         }

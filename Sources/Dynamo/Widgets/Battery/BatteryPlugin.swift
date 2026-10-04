@@ -488,7 +488,7 @@ private struct ExpandedBatteryView: View {
     private var hardwareHealth: Int? { snapshot.hardwareHealthPercent }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
+        GeometryReader { geo in
             VStack(alignment: .leading, spacing: 8) {
                 header
 
@@ -500,46 +500,51 @@ private struct ExpandedBatteryView: View {
                         prominent: true
                     )
                 } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 8) {
-                            heroCard
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .notchAppear()
-                            sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
-                                capacitySection
+                    NotchHScroll(leftHelp: "Earlier battery", rightHelp: "Later battery") {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    heroCard
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .notchAppear()
+                                    sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
+                                        capacitySection
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .notchAppear(delay: 0.04)
+                                    sectionCard(title: "Power source", systemImage: "powerplug.fill") {
+                                        adapterSection
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .notchAppear(delay: 0.06)
+                                }
+                                vitalsStrip
+                                    .notchAppear(delay: 0.08)
                             }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .notchAppear(delay: 0.04)
-                            sectionCard(title: "Power source", systemImage: "powerplug.fill") {
-                                adapterSection
-                            }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .notchAppear(delay: 0.06)
-                        }
+                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
 
-                        vitalsStrip
-                            .notchAppear(delay: 0.08)
-
-                        HStack(alignment: .top, spacing: 8) {
-                            sectionCard(title: "Power mode", systemImage: "leaf.fill") {
-                                powerModeControls
-                            }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .notchAppear(delay: 0.1)
-
-                            if plugin.showHistorySparkline {
-                                sectionCard(title: "Recent charge", systemImage: "chart.xyaxis.line") {
-                                    historySection
+                            HStack(alignment: .top, spacing: 8) {
+                                sectionCard(title: "Power mode", systemImage: "leaf.fill") {
+                                    powerModeControls
                                 }
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .notchAppear(delay: 0.12)
-                            }
+                                .notchAppear(delay: 0.1)
 
-                            if plugin.showTips {
-                                tipsSection
+                                if plugin.showHistorySparkline {
+                                    sectionCard(title: "Recent charge", systemImage: "chart.xyaxis.line") {
+                                        historySection
+                                    }
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                                    .notchAppear(delay: 0.14)
+                                    .notchAppear(delay: 0.12)
+                                }
+
+                                if plugin.showTips {
+                                    tipsSection
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .notchAppear(delay: 0.14)
+                                }
                             }
+                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
                         }
                     }
                 }

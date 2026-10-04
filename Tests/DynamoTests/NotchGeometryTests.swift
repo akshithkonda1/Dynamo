@@ -120,13 +120,29 @@ final class NotchGeometryTests: XCTestCase {
         var sawFocus = false
         var sawWebcam = false
 
+        let allowedHeights: [String: Set<CGFloat>] = [
+            "media": [144],
+            "peek-hub": [148],
+            "calendar": [120, 144, 160],
+            "clipboard": [144],
+            "checklist": [144],
+            "world-clock": [144],
+            "battery": [160],
+            "focus": [144, 160],
+            "sports": [144],
+            "system-health": [144],
+            "shelf": [144],
+            "webcam": [132, 144, 160]
+        ]
+
         for plugin in bundle.plugins {
             let live = plugin.expandedContentHeight
-            XCTAssertTrue(
-                plugin.expandedContentHeightVariants.contains(live),
-                "\(plugin.id) live height \(live) is not in its variants"
-            )
-            for base in plugin.expandedContentHeightVariants {
+            guard let allowed = allowedHeights[plugin.id] else {
+                XCTFail("\(plugin.id) missing from the height contract")
+                continue
+            }
+            XCTAssertTrue(allowed.contains(live), "\(plugin.id) live height \(live) is not in \(allowed)")
+            for base in allowed {
                 for (width, height) in laptopDisplays + externalDisplays {
                     let panel = NotchGeometry.expandedPanelHeight(contentBase: base, screenHeight: height)
                     XCTAssertLessThanOrEqual(
@@ -184,17 +200,22 @@ final class NotchGeometryTests: XCTestCase {
     private func assertCalendarLiveHeights() {
         let stub = StubCalendarProvider(authorizationState: .authorized)
         let calendar = CalendarPlugin(provider: stub)
-        let auths: [CalendarAuthState] = [.authorized, .writeOnly, .denied, .notDetermined]
-        for auth in auths {
+        let expected: [(CalendarAuthState, Bool, CGFloat)] = [
+            (.authorized, false, 144),
+            (.authorized, true, 160),
+            (.writeOnly, false, 120),
+            (.writeOnly, true, 160),
+            (.denied, false, 120),
+            (.denied, true, 160),
+            (.notDetermined, false, 120),
+            (.notDetermined, true, 160)
+        ]
+        for (auth, composer, height) in expected {
             stub.authorizationState = auth
             calendar.refresh()
-            for composer in [false, true] {
-                calendar.showComposer = composer
-                let live = calendar.expandedContentHeight
-                let expected = CalendarPlugin.expandedContentHeight(showComposer: composer, authState: auth)
-                XCTAssertEqual(live, expected, "calendar \(auth) composer=\(composer)")
-                XCTAssertTrue(calendar.expandedContentHeightVariants.contains(live))
-            }
+            calendar.showComposer = composer
+            XCTAssertEqual(calendar.expandedContentHeight, height, "calendar \(auth) composer=\(composer)")
+            XCTAssertLessThanOrEqual(height + NotchTheme.expandedChromeHeight, NotchGeometry.expandedPanelHeightCap)
         }
     }
 
@@ -202,11 +223,16 @@ final class NotchGeometryTests: XCTestCase {
         let focus = FocusPlugin()
         let previous = FocusController.shared.baseMode
         defer { FocusController.shared.baseMode = previous }
-        for mode in FocusBaseMode.allCases {
+        let expected: [FocusBaseMode: CGFloat] = [
+            .normal: 144,
+            .dynamic: 144,
+            .trueFocus: 144,
+            .meeting: 160
+        ]
+        for (mode, height) in expected {
             FocusController.shared.baseMode = mode
-            let live = focus.expandedContentHeight
-            XCTAssertEqual(live, FocusPlugin.expandedContentHeight(mode: mode), "focus \(mode)")
-            XCTAssertTrue(focus.expandedContentHeightVariants.contains(live))
+            XCTAssertEqual(focus.expandedContentHeight, height, "focus \(mode)")
+            XCTAssertLessThanOrEqual(height + NotchTheme.expandedChromeHeight, NotchGeometry.expandedPanelHeightCap)
         }
     }
 
@@ -214,11 +240,15 @@ final class NotchGeometryTests: XCTestCase {
         let webcam = WebcamPlugin()
         let previous = webcam.previewSize
         defer { webcam.previewSize = previous }
-        for size in WebcamPlugin.PreviewSize.allCases {
+        let expected: [WebcamPlugin.PreviewSize: CGFloat] = [
+            .compact: 132,
+            .regular: 144,
+            .large: 160
+        ]
+        for (size, height) in expected {
             webcam.previewSize = size
-            let live = webcam.expandedContentHeight
-            XCTAssertEqual(live, WebcamPlugin.expandedContentHeight(previewSize: size), "webcam \(size)")
-            XCTAssertTrue(webcam.expandedContentHeightVariants.contains(live))
+            XCTAssertEqual(webcam.expandedContentHeight, height, "webcam \(size)")
+            XCTAssertLessThanOrEqual(height + NotchTheme.expandedChromeHeight, NotchGeometry.expandedPanelHeightCap)
         }
     }
 }

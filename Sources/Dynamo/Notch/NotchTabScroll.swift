@@ -1,23 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// Horizontal tab cheek that a **plain mouse wheel** can scroll.
+/// Horizontal strip with a thin native scroller, edge chevrons, and a
+/// **plain mouse wheel** that maps onto the sideways axis.
 ///
-/// AppKit’s `NSScrollView` ignores vertical-wheel deltas on a horizontal-only
-/// scroller. We remap those deltas and expose edge chevrons so Webcam / World
-/// Clock stay reachable without a trackpad.
-struct NotchTabCheek<Content: View>: View {
+/// Used for tab cheeks and for widget cards whose extra content lives
+/// left/right inside the compact ~200pt panel (no vertical card scroll).
+struct NotchHScroll<Content: View>: View {
+    var leftHelp: String = "Show earlier"
+    var rightHelp: String = "Show later"
     @StateObject private var bridge = TabScrollBridge()
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         HStack(spacing: 2) {
-            tabChevron(systemImage: "chevron.left", help: "Show earlier tabs") {
+            tabChevron(systemImage: "chevron.left", help: leftHelp) {
                 bridge.scroll?.page(direction: -1)
             }
             NotchTabScrollViewRepresentable(content: content(), bridge: bridge)
-                .frame(maxWidth: .infinity)
-            tabChevron(systemImage: "chevron.right", help: "Show later tabs") {
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            tabChevron(systemImage: "chevron.right", help: rightHelp) {
                 bridge.scroll?.page(direction: 1)
             }
         }
@@ -37,15 +39,41 @@ struct NotchTabCheek<Content: View>: View {
     }
 }
 
+/// Tab-row cheek — same scroller, tray-specific help text.
+struct NotchTabCheek<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        NotchHScroll(leftHelp: "Show earlier tabs", rightHelp: "Show later tabs") {
+            content()
+        }
+    }
+}
+
 final class TabScrollBridge: ObservableObject {
     weak var scroll: NotchTabScrollView?
 }
 
 /// Pure mapping used by `NotchTabScrollView` and XCTest (no windowing).
 enum NotchTabScroll {
-    /// Prefer the axis with the larger |delta|. Vertical wheel → horizontal.
-    static func horizontalDelta(deltaX: CGFloat, deltaY: CGFloat) -> CGFloat {
-        abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
+    /// Convert a wheel event into a **horizontal** delta.
+    ///
+    /// A plain mouse wheel on macOS only sends vertical line deltas
+    /// (`hasPreciseScrollingDeltas == false`, `deltaX ≈ 0`). Those become
+    /// horizontal so the strip moves without holding Shift.
+    ///
+    /// Trackpad / Magic Mouse already report precise `deltaX` / `deltaY`.
+    /// Sideways swipes keep `deltaX`. Vertical swipes are **not** hijacked
+    /// (`0`) so a two-finger vertical gesture does not steal the strip.
+    static func horizontalDelta(
+        deltaY: CGFloat,
+        deltaX: CGFloat,
+        hasPreciseScrollingDeltas: Bool
+    ) -> CGFloat {
+        if !hasPreciseScrollingDeltas, abs(deltaX) < 0.01 {
+            return deltaY
+        }
+        return deltaX
     }
 }
 
@@ -53,13 +81,15 @@ final class NotchTabScrollView: NSScrollView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         drawsBackground = false
-        hasHorizontalScroller = false
+        hasHorizontalScroller = true
         hasVerticalScroller = false
         horizontalScrollElasticity = .allowed
         verticalScrollElasticity = .none
         autohidesScrollers = true
+        scrollerStyle = .overlay
         borderType = .noBorder
         scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        horizontalScroller?.controlSize = .mini
     }
 
     @available(*, unavailable)
@@ -69,9 +99,11 @@ final class NotchTabScrollView: NSScrollView {
 
     override func scrollWheel(with event: NSEvent) {
         let mapped = NotchTabScroll.horizontalDelta(
+            deltaY: event.scrollingDeltaY,
             deltaX: event.scrollingDeltaX,
-            deltaY: event.scrollingDeltaY
+            hasPreciseScrollingDeltas: event.hasPreciseScrollingDeltas
         )
+        guard mapped != 0 else { return }
         let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 8
         var origin = contentView.bounds.origin
         origin.x -= mapped * scale
@@ -123,6 +155,7 @@ private struct NotchTabScrollViewRepresentable<Content: View>: NSViewRepresentab
 
     func updateNSView(_ scroll: NotchTabScrollView, context: Context) {
         context.coordinator.hosting?.rootView = content
+        scroll.horizontalScroller?.controlSize = .mini
         scroll.layoutDocument()
         bridge.scroll = scroll
     }
