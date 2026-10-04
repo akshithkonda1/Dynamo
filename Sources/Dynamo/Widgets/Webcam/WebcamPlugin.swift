@@ -8,12 +8,20 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     let displayName = "Webcam"
     let systemImage = "web.camera"
 
-    var expandedContentHeight: CGFloat {
+    static func expandedContentHeight(previewSize: PreviewSize) -> CGFloat {
         switch previewSize {
         case .compact: return 132
         case .regular: return NotchTheme.expandedContentBase
         case .large: return 160
         }
+    }
+
+    var expandedContentHeight: CGFloat {
+        Self.expandedContentHeight(previewSize: previewSize)
+    }
+
+    var expandedContentHeightVariants: [CGFloat] {
+        PreviewSize.allCases.map { Self.expandedContentHeight(previewSize: $0) }
     }
 
     enum MirrorShape: String, CaseIterable, Identifiable {
@@ -158,8 +166,29 @@ private struct ExpandedWebcamView: View {
                 .aspectRatio(aspect, contentMode: .fit)
                 .notchAppear()
 
-            ScrollView(.vertical, showsIndicators: false) {
-                controlsColumn
+            NotchHScroll(leftHelp: "Earlier webcam", rightHelp: "Later webcam") {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        deviceMenu
+                        if currentDeviceIsContinuity {
+                            Text("Continuity Camera")
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.neonCyan.opacity(0.75))
+                        }
+                        qualityCard
+                        centerStageRow
+                        transformRow
+                    }
+                    .frame(minWidth: 220, alignment: .topLeading)
+                    VStack(alignment: .leading, spacing: 7) {
+                        shapeRow
+                        sizeAndFitRow
+                        zoomRow
+                        liveStatusRow
+                        actionRow
+                    }
+                    .frame(minWidth: 220, alignment: .topLeading)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .notchAppear(delay: 0.05)
@@ -180,27 +209,6 @@ private struct ExpandedWebcamView: View {
             if plugin.autoStartOnOpen, newValue == .authorized {
                 controller.start()
             }
-        }
-    }
-
-    private var controlsColumn: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            deviceMenu
-
-            if currentDeviceIsContinuity {
-                Text("Continuity Camera")
-                    .font(NotchTheme.micro.weight(.semibold))
-                    .foregroundStyle(NotchTheme.neonCyan.opacity(0.75))
-            }
-
-            qualityCard
-            centerStageRow
-            transformRow
-            shapeRow
-            sizeAndFitRow
-            zoomRow
-            liveStatusRow
-            actionRow
         }
     }
 

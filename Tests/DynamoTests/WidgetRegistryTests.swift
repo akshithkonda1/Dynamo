@@ -62,7 +62,7 @@ final class WidgetRegistryTests: XCTestCase {
     func testRegisterMakesPluginVisibleAndActive() {
         let registry = WidgetRegistry()
         registry.register(MockPlugin(id: "a"))
-        XCTAssertEqual(registry.plugins.map(\.id), ["a"])
+        XCTAssertEqual(registry.plugins.map { $0.id }, ["a"])
         XCTAssertEqual(registry.activePluginID, "a")
     }
 
@@ -72,11 +72,11 @@ final class WidgetRegistryTests: XCTestCase {
         registry.register(MockPlugin(id: "b"))
 
         registry.setEnabled("a", isEnabled: false)
-        XCTAssertEqual(registry.plugins.map(\.id), ["b"])
+        XCTAssertEqual(registry.plugins.map { $0.id }, ["b"])
         XCTAssertFalse(registry.isEnabled("a"))
 
         registry.setEnabled("a", isEnabled: true)
-        XCTAssertEqual(Set(registry.plugins.map(\.id)), ["a", "b"])
+        XCTAssertEqual(Set(registry.plugins.map { $0.id }), ["a", "b"])
         XCTAssertTrue(registry.isEnabled("a"))
     }
 
@@ -91,7 +91,7 @@ final class WidgetRegistryTests: XCTestCase {
         // Unknown "zzz" is dropped; the missing known id "b" is appended.
         XCTAssertEqual(registry.configurationSnapshot.order, ["c", "a", "b"])
         // Only enabled a & c are visible, in the sanitized order.
-        XCTAssertEqual(registry.plugins.map(\.id), ["c", "a"])
+        XCTAssertEqual(registry.plugins.map { $0.id }, ["c", "a"])
     }
 
     func testApplyConfigurationEmptyEnabledFallsBackToAll() {
@@ -101,7 +101,7 @@ final class WidgetRegistryTests: XCTestCase {
 
         registry.applyConfiguration(order: ["a", "b"], enabledIDs: [])
 
-        XCTAssertEqual(Set(registry.plugins.map(\.id)), ["a", "b"])
+        XCTAssertEqual(Set(registry.plugins.map { $0.id }), ["a", "b"])
     }
 
     func testReorderRespectsProvidedOrder() {
@@ -112,7 +112,7 @@ final class WidgetRegistryTests: XCTestCase {
 
         registry.reorder(ids: ["c", "b", "a"])
 
-        XCTAssertEqual(registry.plugins.map(\.id), ["c", "b", "a"])
+        XCTAssertEqual(registry.plugins.map { $0.id }, ["c", "b", "a"])
     }
 
     func testFirstPluginFindsByTypeIncludingDisabled() {

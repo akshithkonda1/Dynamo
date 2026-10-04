@@ -328,7 +328,7 @@ private struct ExpandedWeatherView: View {
     }
 
     private func hourlyStrip(_ hours: [WeatherHourItem]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        NotchHScroll(leftHelp: "Earlier hours", rightHelp: "Later hours") {
             HStack(spacing: 12) {
                 ForEach(hours) { hour in
                     VStack(spacing: 3) {
@@ -355,7 +355,7 @@ private struct ExpandedWeatherView: View {
     }
 
     private func dailyStrip(_ days: [WeatherDayItem]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        NotchHScroll(leftHelp: "Earlier days", rightHelp: "Later days") {
             HStack(spacing: 12) {
                 ForEach(days) { day in
                     VStack(spacing: 3) {

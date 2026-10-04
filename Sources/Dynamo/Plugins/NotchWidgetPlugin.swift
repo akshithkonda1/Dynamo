@@ -26,6 +26,12 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
     /// only go taller when a widget truly needs a second row.
     var expandedContentHeight: CGFloat { get }
 
+    /// Compact-card heights this widget can request across its states.
+    /// Default is the live height. Calendar / Focus / Webcam list every variant
+    /// so geometry tests can assert the hanging-card cap without mutating
+    /// shared controllers.
+    var expandedContentHeightVariants: [CGFloat] { get }
+
     /// Called once when the plugin is registered. Use for timers, observers, etc.
     func start()
 
@@ -36,6 +42,7 @@ protocol NotchWidgetPlugin: AnyObject, Identifiable {
 extension NotchWidgetPlugin {
     /// Default content height (panel adds `NotchTheme.expandedChromeHeight` for tray/clock).
     var expandedContentHeight: CGFloat { NotchTheme.expandedContentBase }
+    var expandedContentHeightVariants: [CGFloat] { [expandedContentHeight] }
     func start() {}
     func stop() {}
 }

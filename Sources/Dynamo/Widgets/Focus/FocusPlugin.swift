@@ -8,12 +8,19 @@ final class FocusPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientProvid
     let systemImage = "scope"
 
     /// Meeting companion gets a slightly taller card; other modes share the compact card.
-    var expandedContentHeight: CGFloat {
-        switch FocusController.shared.baseMode {
+    static func expandedContentHeight(mode: FocusBaseMode) -> CGFloat {
+        switch mode {
         case .meeting: return 160
-        case .trueFocus: return NotchTheme.expandedContentBase
-        default: return NotchTheme.expandedContentBase
+        case .trueFocus, .normal, .dynamic: return NotchTheme.expandedContentBase
         }
+    }
+
+    var expandedContentHeight: CGFloat {
+        Self.expandedContentHeight(mode: FocusController.shared.baseMode)
+    }
+
+    var expandedContentHeightVariants: [CGFloat] {
+        FocusBaseMode.allCases.map { Self.expandedContentHeight(mode: $0) }
     }
 
     var isAmbientActive: Bool {
@@ -115,7 +122,7 @@ private struct ExpandedFocusView: View {
                 header.padding(.bottom, 6)
                 modePicker.padding(.bottom, 6)
 
-                ScrollView(.vertical, showsIndicators: false) {
+                NotchHScroll(leftHelp: "Earlier focus", rightHelp: "Later focus") {
                     Group {
                         if focus.baseMode == .meeting {
                             meetingCompanion(wide: wide)

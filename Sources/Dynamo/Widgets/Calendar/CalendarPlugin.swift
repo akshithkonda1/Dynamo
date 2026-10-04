@@ -251,13 +251,24 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     }
 
     /// Compact card when empty / no read access; same ~200pt panel when listing.
-    var expandedContentHeight: CGFloat {
+    static func expandedContentHeight(showComposer: Bool, authState: CalendarAuthState) -> CGFloat {
         if showComposer { return 160 }
         switch authState {
         case .authorized:
             return NotchTheme.expandedContentBase
         case .writeOnly, .denied, .notDetermined:
             return 120
+        }
+    }
+
+    var expandedContentHeight: CGFloat {
+        Self.expandedContentHeight(showComposer: showComposer, authState: authState)
+    }
+
+    var expandedContentHeightVariants: [CGFloat] {
+        let auths: [CalendarAuthState] = [.authorized, .writeOnly, .denied, .notDetermined]
+        return [false, true].flatMap { composer in
+            auths.map { Self.expandedContentHeight(showComposer: composer, authState: $0) }
         }
     }
 
@@ -505,33 +516,35 @@ private struct ExpandedCalendarView: View {
 
     @ViewBuilder
     private func calendarEventList(columns: Int) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: NotchTheme.spaceSM) {
+        NotchHScroll(leftHelp: "Earlier days", rightHelp: "Later days") {
+            HStack(alignment: .top, spacing: NotchTheme.spaceSM) {
                 ForEach(Array(groupedDays.enumerated()), id: \.element.dayStart) { groupIndex, group in
-                    Text(dayLabel(group.dayStart))
-                        .font(NotchTheme.micro.weight(.semibold))
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .padding(.top, 2)
-                        .notchAppear(delay: Double(min(groupIndex, 4)) * 0.04)
-                    if columns == 2 {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.flexible(), spacing: 8),
-                                GridItem(.flexible(), spacing: 8)
-                            ],
-                            spacing: 6
-                        ) {
-                            ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(dayLabel(group.dayStart))
+                            .font(NotchTheme.micro.weight(.semibold))
+                            .foregroundStyle(NotchTheme.textQuaternary)
+                            .notchAppear(delay: Double(min(groupIndex, 4)) * 0.04)
+                        if columns == 2 {
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(.flexible(), spacing: 8),
+                                    GridItem(.flexible(), spacing: 8)
+                                ],
+                                spacing: 6
+                            ) {
+                                ForEach(Array(group.events.prefix(4).enumerated()), id: \.element.id) { index, event in
+                                    eventRow(event)
+                                        .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
+                                }
+                            }
+                        } else {
+                            ForEach(Array(group.events.prefix(4).enumerated()), id: \.element.id) { index, event in
                                 eventRow(event)
                                     .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
                             }
                         }
-                    } else {
-                        ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
-                            eventRow(event)
-                                .notchAppear(delay: 0.05 + Double(min(index, 6)) * 0.03)
-                        }
                     }
+                    .frame(width: 240, alignment: .topLeading)
                 }
             }
         }

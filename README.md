@@ -306,6 +306,21 @@ No credentials in repo — see script headers for secrets.
 
 ---
 
+## CI / merge gate
+
+Day-to-day PR CI is `.github/workflows/swift.yml` (not `release.yml` or `aws.yml`).
+
+| Check | What it does |
+|--------|----------------|
+| **Build & test** | `swift build` + `swift test` on `macos-latest` when Swift / package / this workflow change. Docs-only PRs still report green and skip the Mac compile. |
+| **Merge gate** | Required-ready check. Green only when Build & test passed on this head (or the PR touches no Swift), the PR is **not a draft**, has no **`hold`** label, and repository variable `MERGE_PAUSED` is not `true`. |
+
+Label and draft events re-evaluate the gate **without a new push** and **without a second Mac compile**. Macroscope is not part of this gate.
+
+**Hold one PR:** add the `hold` label (create it once under Issues → Labels: name `hold`, color `B60205`) or convert the PR to a draft. The gate stays red with `On hold: remove the hold label / mark ready`.
+
+**Pause every merge:** Settings → Secrets and variables → Actions → Variables → set `MERGE_PAUSED` to `true`. Resume by setting it to `false` or deleting the variable. The gate fails with `Merges paused`.
+
 ## Tests
 
 ```bash

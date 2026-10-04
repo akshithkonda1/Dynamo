@@ -31,19 +31,27 @@ final class NotchTabRowTests: XCTestCase {
         return registry
     }
 
-    func testProductionRegistryPluginsAreAllReachable() {
-        let registry = register(NotchTabRow.productionRegisteredIDs)
-        let visible = Set(registry.plugins.map(\.id))
-        let reachable = Set(NotchTabRow.reachableIDs(from: registry.plugins))
+    /// Hard-coded contract of what AppDelegate must register. Not derived
+    /// from `ProductionWidgetKind` / `NotchTabRow` so a dropped widget fails.
+    private let requiredProductionIDs = [
+        "media", "peek-hub", "calendar", "clipboard", "checklist",
+        "world-clock", "battery", "focus", "sports", "system-health",
+        "shelf", "webcam"
+    ]
 
-        XCTAssertEqual(visible.count, NotchTabRow.productionRegisteredIDs.count)
-        XCTAssertEqual(visible, Set(NotchTabRow.productionRegisteredIDs))
+    func testProductionRegistryPluginsAreAllReachable() {
+        let bundle = ProductionTestFixtures.bundle()
+        let liveIDs = Set(bundle.plugins.map { $0.id })
+        XCTAssertEqual(liveIDs, Set(requiredProductionIDs), "Factory no longer matches the production tray contract")
+        XCTAssertFalse(liveIDs.contains("weather"), "Weather stays out of the production tray")
+
+        let reachable = Set(NotchTabRow.reachableIDs(from: bundle.plugins))
         XCTAssertEqual(
             reachable,
-            visible,
-            "Tab row dropped a production plugin — every AppDelegate-registered widget must stay in the top band"
+            Set(requiredProductionIDs),
+            "Tab row dropped a production plugin — every factory-registered widget must stay in the top band"
         )
-        for id in NotchTabRow.productionRegisteredIDs {
+        for id in requiredProductionIDs {
             XCTAssertTrue(reachable.contains(id), "\(id) is not in the tab row")
         }
     }
@@ -52,11 +60,11 @@ final class NotchTabRowTests: XCTestCase {
         // Compact ~555pt panel cannot show 13+ icons at once. Cheeks scroll;
         // membership must still include every visible plugin — including
         // Weather (ships but is not in the production tray) and extras.
-        var ids = NotchTabRow.productionRegisteredIDs
+        var ids = requiredProductionIDs
         ids.append(contentsOf: ["weather", "extra-a", "extra-b", "extra-c"])
         let registry = register(ids)
 
-        let visible = registry.plugins.map(\.id)
+        let visible = registry.plugins.map { $0.id }
         let reachable = NotchTabRow.reachableIDs(from: registry.plugins)
 
         XCTAssertEqual(visible.count, ids.count)
@@ -74,12 +82,12 @@ final class NotchTabRowTests: XCTestCase {
     }
 
     func testTabRowNeverDropsAVisiblePlugin() {
-        let registry = register(NotchTabRow.productionRegisteredIDs)
-        let leading = NotchTabRow.leading(from: registry.plugins).map(\.id)
-        let trailing = NotchTabRow.trailing(from: registry.plugins).map(\.id)
+        let registry = register(requiredProductionIDs)
+        let leading = NotchTabRow.leading(from: registry.plugins).map { $0.id }
+        let trailing = NotchTabRow.trailing(from: registry.plugins).map { $0.id }
 
         XCTAssertEqual(Set(leading).intersection(trailing).count, 0)
-        XCTAssertEqual(Set(leading + trailing), Set(registry.plugins.map(\.id)))
+        XCTAssertEqual(Set(leading + trailing), Set(registry.plugins.map { $0.id }))
 
         for id in NotchTabRow.trailingIDs {
             XCTAssertTrue(trailing.contains(id), "trailing cluster missing \(id)")

@@ -15,7 +15,7 @@ struct QueuePeekView: View {
                 .tracking(0.5)
                 .padding(.horizontal, 2)
 
-            ScrollView(.horizontal, showsIndicators: false) {
+            NotchHScroll(leftHelp: "Earlier queue", rightHelp: "Later queue") {
                 HStack(spacing: 8) {
                     ForEach(tracks) { track in
                         QueueTrackCard(track: track)
@@ -23,6 +23,7 @@ struct QueuePeekView: View {
                 }
                 .padding(.horizontal, 2)
             }
+            .frame(height: 62)
         }
         .padding(.top, 2)
     }

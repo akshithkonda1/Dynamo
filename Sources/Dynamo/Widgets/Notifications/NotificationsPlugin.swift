@@ -105,67 +105,79 @@ private struct ExpandedPeekHubView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            header
-            controlCard
-            if !router.replacesNotificationCenter {
-                optInCard
-            } else if mirror.accessDenied || !router.bannerHintDismissed {
-                replacementSetupCard
-            }
-            filterStrip
-
-            if filteredHistory.isEmpty {
-                NotchEmptyState(
-                    systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
-                    title: emptyTitle,
-                    caption: emptyCaption,
-                    prominent: true
-                )
-                .frame(maxHeight: .infinity)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        if hub.pendingCount > 0, filter == .all || filter == .unread {
-                            pendingBanner
-                        }
-                        ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    Text(group.title)
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(NotchTheme.textTertiary)
-                                        .textCase(.uppercase)
-                                        .tracking(0.4)
-                                    if group.unread > 0 {
-                                        Text("\(group.unread)")
-                                            .font(.system(size: 9, weight: .bold).monospacedDigit())
-                                            .foregroundStyle(NotchTheme.caution)
+        GeometryReader { geo in
+            NotchHScroll(leftHelp: "Earlier hub", rightHelp: "Later hub") {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        header
+                        filterStrip
+                        if filteredHistory.isEmpty {
+                            NotchEmptyState(
+                                systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
+                                title: emptyTitle,
+                                caption: emptyCaption,
+                                prominent: true
+                            )
+                            .frame(minHeight: 48)
+                        } else {
+                            NotchHScroll(leftHelp: "Earlier notifications", rightHelp: "Later notifications") {
+                                HStack(alignment: .top, spacing: 8) {
+                                    if hub.pendingCount > 0, filter == .all || filter == .unread {
+                                        pendingBanner
+                                            .frame(width: 220, alignment: .topLeading)
                                     }
-                                    Spacer(minLength: 0)
-                                    if !group.bundleID.isEmpty {
-                                        Button("Open") {
-                                            HubNotificationCenter.openApp(bundleID: group.bundleID)
+                                    ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 6) {
+                                                Text(group.title)
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundStyle(NotchTheme.textTertiary)
+                                                    .textCase(.uppercase)
+                                                    .tracking(0.4)
+                                                if group.unread > 0 {
+                                                    Text("\(group.unread)")
+                                                        .font(.system(size: 9, weight: .bold).monospacedDigit())
+                                                        .foregroundStyle(NotchTheme.caution)
+                                                }
+                                                Spacer(minLength: 0)
+                                                if !group.bundleID.isEmpty {
+                                                    Button("Open") {
+                                                        HubNotificationCenter.openApp(bundleID: group.bundleID)
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .font(.system(size: 9, weight: .semibold))
+                                                    .foregroundStyle(NotchTheme.neonCyan.opacity(0.85))
+                                                }
+                                            }
+                                            ForEach(Array(group.items.prefix(3).enumerated()), id: \.element.id) { index, item in
+                                                hubRow(item)
+                                                    .notchAppear(
+                                                        delay: Double(min(gIndex * 4 + index, 10)) * 0.02,
+                                                        rise: 4
+                                                    )
+                                            }
                                         }
-                                        .buttonStyle(.plain)
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(NotchTheme.neonCyan.opacity(0.85))
+                                        .frame(width: 240, alignment: .topLeading)
                                     }
-                                }
-                                ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
-                                    hubRow(item)
-                                        .notchAppear(
-                                            delay: Double(min(gIndex * 4 + index, 10)) * 0.02,
-                                            rise: 4
-                                        )
                                 }
                             }
                         }
+                        actionRow
+                    }
+                    .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+
+                    controlCard
+                        .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+
+                    if !router.replacesNotificationCenter {
+                        optInCard
+                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+                    } else if mirror.accessDenied || !router.bannerHintDismissed {
+                        replacementSetupCard
+                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
                     }
                 }
             }
-
-            actionRow
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .notchAppear()
@@ -359,7 +371,7 @@ private struct ExpandedPeekHubView: View {
     }
 
     private var filterStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        NotchHScroll(leftHelp: "Earlier filters", rightHelp: "Later filters") {
             HStack(spacing: 5) {
                 ForEach(HubInboxFilter.allCases) { f in
                     let count = filterCounts[f] ?? 0
@@ -374,6 +386,7 @@ private struct ExpandedPeekHubView: View {
                 }
             }
         }
+        .frame(height: 28)
     }
 
     private var pendingBanner: some View {
