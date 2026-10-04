@@ -43,8 +43,11 @@ final class NotchWindowController: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     private var collapsedSize: NSSize {
-        let metrics = NotchGeometry.currentMetrics(for: preferredScreen())
-        return NSSize(width: metrics.width, height: metrics.height)
+        NotchGeometry.collapsedSize(
+            ambientEnabled: AmbientModeStore.shared.isEnabled,
+            isPlaying: MediaPeekPulse.shared.isPlaying,
+            screen: preferredScreen()
+        )
     }
     /// How many overlay holders want the taller peek silhouette.
     private var peekOverlayHolders = 0
@@ -138,6 +141,16 @@ final class NotchWindowController: ObservableObject {
                     }
                 }
                 .store(in: &cancellables)
+
+            AmbientModeStore.shared.$isEnabled
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.ambientCollapsedDidChange() }
+                .store(in: &cancellables)
+
+            MediaPeekPulse.shared.$isPlaying
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.ambientCollapsedDidChange() }
+                .store(in: &cancellables)
         } else if let hostingView {
             hostingView.rootView = NotchContentView(registry: registry, controller: self, hud: hud, sneakPeek: sneakPeek)
         }
@@ -164,6 +177,13 @@ final class NotchWindowController: ObservableObject {
             registry?.activePluginID = id
         }
         revealAndExpand()
+    }
+
+    /// Resize the closed island when Ambient mode or playback flips. Same
+    /// `collapsedSize(ambientEnabled:isPlaying:screen:)` decision as geometry tests.
+    private func ambientCollapsedDidChange() {
+        guard !isExpanded, activeOverlayCount == 0 else { return }
+        animateFrame(to: collapsedSize)
     }
 
     private func activeWidgetDidChange() {

@@ -7,6 +7,8 @@ struct NotchContentView: View {
     @ObservedObject var controller: NotchWindowController
     @ObservedObject var hud: SystemHUDController
     @ObservedObject var sneakPeek: NotchSneakPeekController
+    @ObservedObject private var ambientMode = AmbientModeStore.shared
+    @ObservedObject private var mediaPulse = MediaPeekPulse.shared
 
     private var isShowingPeek: Bool {
         sneakPeek.peek != nil && !controller.isExpanded && hud.state == nil
@@ -45,7 +47,7 @@ struct NotchContentView: View {
         .clipShape(NotchShape(cornerRadius: cornerRadius))
         // No stroke. No expanded silhouette shadow. Clean continuous bottom lip.
         .overlay {
-            if !controller.isExpanded && !isShowingOverlay {
+            if !controller.isExpanded && !isShowingOverlay && !showsAmbientPill {
                 AmbientBreathingRim(accent: ambientAccent)
                     .allowsHitTesting(false)
             }
@@ -66,6 +68,7 @@ struct NotchContentView: View {
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
         .animation(NotchTheme.snappy, value: hud.state != nil)
         .animation(NotchTheme.snappy, value: sneakPeek.peek?.title)
+        .animation(NotchTheme.snappy, value: showsAmbientPill)
     }
 
     private var ambientAccent: Color {
@@ -105,9 +108,17 @@ struct NotchContentView: View {
         return NotchTheme.materialCollapsed
     }
 
+    /// Same decision `NotchGeometry.collapsedSize` uses — pill only while Ambient
+    /// is on and media is playing.
+    private var showsAmbientPill: Bool {
+        AmbientMode.showsPill(ambientEnabled: ambientMode.isEnabled, isPlaying: mediaPulse.isPlaying)
+    }
+
     @ViewBuilder
     private var collapsedBody: some View {
-        if let ambient = registry.activeAmbientProvider() {
+        if showsAmbientPill {
+            AmbientPillView()
+        } else if let ambient = registry.activeAmbientProvider() {
             ambient.ambientView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

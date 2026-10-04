@@ -25,6 +25,7 @@ Also: `python3 Tools/DynamoEQ/dynamo_eq.py selftest`
 |------|--------|
 | `WidgetRegistryTests.swift` | Register / enable / reorder / config sanitize / sneak-peek fan-out |
 | `NotchGeometryTests.swift` | Expanded width/height bounds, peek/HUD sizes |
+| `AmbientModeTests.swift` | Ambient pill size, setting default/persist, waveform animate/settle + routing guards |
 | `AmplifyProfileTests.swift` | Profile resolve + device infer + embedded EQ curves |
 | `HubAndPeekPolicyTests.swift` | Hub categories / filters, calendar peek stages, Notes `ERR|`, ESPN merge, Focus FIFO |
 

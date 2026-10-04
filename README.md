@@ -248,7 +248,7 @@ Signing → paid team if you enable WeatherKit.
 
 **Preferences** (gear in tray, menu **Preferences**, or ⌘,):
 
-- Launch at login, Hidden Mode, Meeting options  
+- Launch at login, Hidden Mode, **Ambient mode** (slim now-playing pill), Meeting options  
 - **Feel & alerts** — collapse delay, **Deliver through Peek only**, router source toggles, Amplify, test Peeks  
 - Display picker, widget toggle + reorder  
 - Clocks city/zone pickers + sort mode  
@@ -279,7 +279,7 @@ Signing → paid team if you enable WeatherKit.
 - **`PeekNotificationCenter`** — queue · coalesce · history · unread  
 - **`NotchSneakPeekController`** — live Peek presentation + dwell  
 - **`LocalAmplifyEngine`** + **`AmplifyToneAI`** + **`Tools/DynamoEQ/`** — Amplify  
-- **`NotchGeometry`** — physical cutout metrics, expanded width (cap 1650pt), notch-aware peek/HUD sizes  
+- **`NotchGeometry`** — physical cutout metrics, Ambient pill size (`collapsedSize(ambientEnabled:isPlaying:)`), expanded width, notch-aware peek/HUD sizes  
 - **`NotchWindowController`** — collapsed ↔ expanded; peeks/HUD are overlays  
 
 **SPM vs Xcode:** `Package.swift` = sources + CI; `project.yml` → signed `.app` with entitlements when needed.

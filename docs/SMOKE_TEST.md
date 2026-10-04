@@ -36,6 +36,14 @@ Use this after a local build to confirm the app is usable day-to-day.
 - [ ] Low battery (≤20%) when nothing else ambient → % + bolt/red tint
 - [ ] Priority: media playing wins over calendar over battery
 
+### Ambient mode (optional menu-bar pill)
+
+- [ ] **Preferences → General → Ambient mode** is off by default; today’s collapsed notch is unchanged
+- [ ] On + music playing → slim menu-bar-height pill: album art left of the camera, 5 red (or album-tinted) bars right; no title
+- [ ] Pause or stop → waveform settles / island returns to the normal closed notch
+- [ ] Reduce Motion → bars stay static (no TimelineView tick)
+- [ ] Hover / click still expands the full tray; toggle off restores the previous collapsed look
+
 ---
 
 ## 3. Settings IA (Phase E)
