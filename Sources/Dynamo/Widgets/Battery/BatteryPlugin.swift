@@ -488,63 +488,64 @@ private struct ExpandedBatteryView: View {
     private var hardwareHealth: Int? { snapshot.hardwareHealthPercent }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 8) {
+                header
 
-            if !snapshot.isPresent {
-                NotchEmptyState(
-                    systemImage: "laptopcomputer",
-                    title: "No internal battery",
-                    caption: "Desktop Mac or power source unavailable.",
-                    prominent: true
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 8) {
-                        heroCard
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .notchAppear()
-                        sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
-                            capacitySection
-                        }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .notchAppear(delay: 0.04)
-                        sectionCard(title: "Power source", systemImage: "powerplug.fill") {
-                            adapterSection
-                        }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .notchAppear(delay: 0.06)
-                    }
-
-                    vitalsStrip
-                        .notchAppear(delay: 0.08)
-
-                    HStack(alignment: .top, spacing: 8) {
-                        sectionCard(title: "Power mode", systemImage: "leaf.fill") {
-                            powerModeControls
-                        }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .notchAppear(delay: 0.1)
-
-                        if plugin.showHistorySparkline {
-                            sectionCard(title: "Recent charge", systemImage: "chart.xyaxis.line") {
-                                historySection
+                if !snapshot.isPresent {
+                    NotchEmptyState(
+                        systemImage: "laptopcomputer",
+                        title: "No internal battery",
+                        caption: "Desktop Mac or power source unavailable.",
+                        prominent: true
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 8) {
+                            heroCard
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .notchAppear()
+                            sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
+                                capacitySection
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .notchAppear(delay: 0.12)
+                            .notchAppear(delay: 0.04)
+                            sectionCard(title: "Power source", systemImage: "powerplug.fill") {
+                                adapterSection
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .notchAppear(delay: 0.06)
                         }
 
-                        if plugin.showTips {
-                            tipsSection
+                        vitalsStrip
+                            .notchAppear(delay: 0.08)
+
+                        HStack(alignment: .top, spacing: 8) {
+                            sectionCard(title: "Power mode", systemImage: "leaf.fill") {
+                                powerModeControls
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .notchAppear(delay: 0.1)
+
+                            if plugin.showHistorySparkline {
+                                sectionCard(title: "Recent charge", systemImage: "chart.xyaxis.line") {
+                                    historySection
+                                }
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .notchAppear(delay: 0.14)
+                                .notchAppear(delay: 0.12)
+                            }
+
+                            if plugin.showTips {
+                                tipsSection
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .notchAppear(delay: 0.14)
+                            }
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
         .animation(NotchTheme.contentSpring, value: snapshot.percent)
         .animation(NotchTheme.contentSpring, value: power.isLowPowerModeEnabled)
         .animation(NotchTheme.contentSpring, value: snapshot.isCharging)

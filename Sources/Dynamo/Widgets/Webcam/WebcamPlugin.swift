@@ -8,12 +8,20 @@ final class WebcamPlugin: ObservableObject, NotchWidgetPlugin, WidgetSettingsPro
     let displayName = "Webcam"
     let systemImage = "web.camera"
 
-    var expandedContentHeight: CGFloat {
+    static func expandedContentHeight(previewSize: PreviewSize) -> CGFloat {
         switch previewSize {
         case .compact: return 132
         case .regular: return NotchTheme.expandedContentBase
         case .large: return 160
         }
+    }
+
+    var expandedContentHeight: CGFloat {
+        Self.expandedContentHeight(previewSize: previewSize)
+    }
+
+    var expandedContentHeightVariants: [CGFloat] {
+        PreviewSize.allCases.map { Self.expandedContentHeight(previewSize: $0) }
     }
 
     enum MirrorShape: String, CaseIterable, Identifiable {

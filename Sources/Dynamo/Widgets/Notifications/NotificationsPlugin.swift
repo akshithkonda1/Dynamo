@@ -105,26 +105,26 @@ private struct ExpandedPeekHubView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            header
-            controlCard
-            if !router.replacesNotificationCenter {
-                optInCard
-            } else if mirror.accessDenied || !router.bannerHintDismissed {
-                replacementSetupCard
-            }
-            filterStrip
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 6) {
+                header
+                controlCard
+                if !router.replacesNotificationCenter {
+                    optInCard
+                } else if mirror.accessDenied || !router.bannerHintDismissed {
+                    replacementSetupCard
+                }
+                filterStrip
 
-            if filteredHistory.isEmpty {
-                NotchEmptyState(
-                    systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
-                    title: emptyTitle,
-                    caption: emptyCaption,
-                    prominent: true
-                )
-                .frame(maxHeight: .infinity)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
+                if filteredHistory.isEmpty {
+                    NotchEmptyState(
+                        systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
+                        title: emptyTitle,
+                        caption: emptyCaption,
+                        prominent: true
+                    )
+                    .frame(minHeight: 48)
+                } else {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         if hub.pendingCount > 0, filter == .all || filter == .unread {
                             pendingBanner
@@ -163,9 +163,9 @@ private struct ExpandedPeekHubView: View {
                         }
                     }
                 }
-            }
 
-            actionRow
+                actionRow
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .notchAppear()

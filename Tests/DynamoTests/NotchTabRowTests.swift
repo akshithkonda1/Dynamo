@@ -32,18 +32,19 @@ final class NotchTabRowTests: XCTestCase {
     }
 
     func testProductionRegistryPluginsAreAllReachable() {
-        let registry = register(NotchTabRow.productionRegisteredIDs)
-        let visible = Set(registry.plugins.map { $0.id })
-        let reachable = Set(NotchTabRow.reachableIDs(from: registry.plugins))
+        let bundle = ProductionTestFixtures.bundle()
+        let catalog = ProductionWidgetKind.allCases.map(\.rawValue)
+        XCTAssertEqual(bundle.ids, catalog)
+        XCTAssertEqual(NotchTabRow.productionRegisteredIDs, catalog)
+        XCTAssertFalse(catalog.contains("weather"), "Weather stays out of the production tray")
 
-        XCTAssertEqual(visible.count, NotchTabRow.productionRegisteredIDs.count)
-        XCTAssertEqual(visible, Set(NotchTabRow.productionRegisteredIDs))
+        let reachable = NotchTabRow.reachableIDs(from: bundle.plugins)
         XCTAssertEqual(
-            reachable,
-            visible,
-            "Tab row dropped a production plugin — every AppDelegate-registered widget must stay in the top band"
+            Set(reachable),
+            Set(bundle.ids),
+            "Tab row dropped a production plugin — every factory-registered widget must stay in the top band"
         )
-        for id in NotchTabRow.productionRegisteredIDs {
+        for id in catalog {
             XCTAssertTrue(reachable.contains(id), "\(id) is not in the tab row")
         }
     }

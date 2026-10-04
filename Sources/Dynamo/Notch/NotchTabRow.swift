@@ -13,22 +13,12 @@ enum NotchTabRow {
     /// Right-side cluster (before Settings): Focus, Sports, Health, Shelf, Webcam.
     static let trailingIDs = ["focus", "sports", "system-health", "shelf", "webcam"]
 
-    /// IDs `AppDelegate` registers today. Weather ships as a plugin but is not
-    /// in the production tray (World Clock replaced WeatherKit).
-    static let productionRegisteredIDs: [String] = [
-        "media",
-        "peek-hub",
-        "calendar",
-        "clipboard",
-        "checklist",
-        "world-clock",
-        "battery",
-        "focus",
-        "sports",
-        "system-health",
-        "shelf",
-        "webcam"
-    ]
+    /// IDs the production factory registers. Weather ships as a plugin but is
+    /// not in the tray (World Clock replaced WeatherKit). Sourced from
+    /// `ProductionWidgets` so AppDelegate and tests cannot drift.
+    static var productionRegisteredIDs: [String] {
+        ProductionWidgets.orderedIDs
+    }
 
     static func leading(from plugins: [any NotchWidgetPlugin]) -> [any NotchWidgetPlugin] {
         let trailing = Set(trailingIDs)

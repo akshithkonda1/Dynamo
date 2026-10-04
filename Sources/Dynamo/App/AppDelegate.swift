@@ -74,28 +74,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.hudController = hudController
         self.sneakPeekController = sneakPeekController
 
-        // Default tray order. Settings can reorder without hosts knowing names.
-        // Weather/WeatherKit is replaced by free World Clock in production.
-        let media = MediaControlsPlugin(provider: MediaRemoteNowPlayingProvider())
-        mediaPlugin = media
-        registry.register(media)
-        // Peek Hub — Dynamo’s notification inbox (not a system banner mirror).
-        registry.register(NotificationsPlugin())
-        registry.register(CalendarPlugin())
-        registry.register(ClipboardPlugin())
-        registry.register(ChecklistPlugin())
-        let clocks = WorldClockPlugin()
-        registry.register(clocks)
-        registry.register(BatteryPlugin())
-        registry.register(FocusPlugin())
-        registry.register(SportsPlugin())
-        registry.register(SystemHealthPlugin())
-        registry.register(ShelfPlugin())
-        registry.register(WebcamPlugin())
+        // Default tray order from the shared catalog. Settings can reorder
+        // without hosts knowing names. Weather/WeatherKit is replaced by free
+        // World Clock in production (`ProductionWidgetKind` omits it).
+        let production = ProductionWidgets.makeDefaultPlugins()
+        mediaPlugin = production.media
+        for plugin in production.plugins {
+            registry.register(plugin)
+        }
 
         // World Clock “Here” needs When-In-Use Location. Prompt once on boot so
         // distance sort + city label work without digging into Preferences.
         // Safe if already granted/denied — Core Location no-ops appropriately.
+        let clocks = production.worldClock
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             clocks.requestCurrentLocation()
         }

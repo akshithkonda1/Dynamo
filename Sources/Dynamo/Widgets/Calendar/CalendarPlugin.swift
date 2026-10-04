@@ -251,13 +251,24 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
     }
 
     /// Compact card when empty / no read access; same ~200pt panel when listing.
-    var expandedContentHeight: CGFloat {
+    static func expandedContentHeight(showComposer: Bool, authState: CalendarAuthState) -> CGFloat {
         if showComposer { return 160 }
         switch authState {
         case .authorized:
             return NotchTheme.expandedContentBase
         case .writeOnly, .denied, .notDetermined:
             return 120
+        }
+    }
+
+    var expandedContentHeight: CGFloat {
+        Self.expandedContentHeight(showComposer: showComposer, authState: authState)
+    }
+
+    var expandedContentHeightVariants: [CGFloat] {
+        let auths: [CalendarAuthState] = [.authorized, .writeOnly, .denied, .notDetermined]
+        return [false, true].flatMap { composer in
+            auths.map { Self.expandedContentHeight(showComposer: composer, authState: $0) }
         }
     }
 

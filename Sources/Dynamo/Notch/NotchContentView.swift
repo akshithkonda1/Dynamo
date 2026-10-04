@@ -121,7 +121,7 @@ struct NotchContentView: View {
             // plugins than a NotchDock-style strip can show at once, so each
             // cheek scrolls — every widget stays one flick away, no overflow menu.
             HStack(spacing: 6) {
-                ScrollView(.horizontal, showsIndicators: false) {
+                NotchTabCheek {
                     HStack(spacing: 4) {
                         ForEach(leadingTrayPlugins, id: \.id) { plugin in
                             trayButton(for: plugin)
@@ -134,7 +134,7 @@ struct NotchContentView: View {
                     .frame(minWidth: 72, idealWidth: 96, maxWidth: 120)
                     .accessibilityHidden(true)
 
-                ScrollView(.horizontal, showsIndicators: false) {
+                NotchTabCheek {
                     HStack(spacing: 4) {
                         ForEach(trailingTrayPlugins, id: \.id) { plugin in
                             trayButton(for: plugin)
