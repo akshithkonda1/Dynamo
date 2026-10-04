@@ -119,7 +119,7 @@ final class WidgetRegistry: ObservableObject {
     }
 
     func movePlugin(fromOffsets: IndexSet, toOffset: Int) {
-        var visibleIDs = plugins.map(\.id)
+        var visibleIDs = plugins.map { $0.id }
         visibleIDs.move(fromOffsets: fromOffsets, toOffset: toOffset)
         // Rebuild full order: visible order first, then disabled in prior relative order.
         let disabled = order.filter { !enabled.contains($0) }

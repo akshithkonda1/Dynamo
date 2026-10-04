@@ -5,6 +5,10 @@ import Foundation
 /// Dynamo registers more plugins than a NotchDock-style strip can show at once.
 /// The row **never drops a plugin** — left and right cheeks scroll when the
 /// compact ~555pt panel cannot fit every icon. Settings is chrome, not a plugin.
+///
+/// `NotchWidgetPlugin.id` is main-actor isolated, so these helpers must run
+/// on the main actor (and tests that call them must be `@MainActor` too).
+@MainActor
 enum NotchTabRow {
     /// Right-side cluster (before Settings): Focus, Sports, Health, Shelf, Webcam.
     static let trailingIDs = ["focus", "sports", "system-health", "shelf", "webcam"]
@@ -40,6 +44,6 @@ enum NotchTabRow {
     /// Every visible plugin, in tab-row order (leading cheek, then trailing).
     /// Overflow is scroll — this list is never a subset of `plugins`.
     static func reachableIDs(from plugins: [any NotchWidgetPlugin]) -> [String] {
-        leading(from: plugins).map(\.id) + trailing(from: plugins).map(\.id)
+        leading(from: plugins).map { $0.id } + trailing(from: plugins).map { $0.id }
     }
 }

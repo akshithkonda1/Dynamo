@@ -33,7 +33,7 @@ final class NotchTabRowTests: XCTestCase {
 
     func testProductionRegistryPluginsAreAllReachable() {
         let registry = register(NotchTabRow.productionRegisteredIDs)
-        let visible = Set(registry.plugins.map(\.id))
+        let visible = Set(registry.plugins.map { $0.id })
         let reachable = Set(NotchTabRow.reachableIDs(from: registry.plugins))
 
         XCTAssertEqual(visible.count, NotchTabRow.productionRegisteredIDs.count)
@@ -56,7 +56,7 @@ final class NotchTabRowTests: XCTestCase {
         ids.append(contentsOf: ["weather", "extra-a", "extra-b", "extra-c"])
         let registry = register(ids)
 
-        let visible = registry.plugins.map(\.id)
+        let visible = registry.plugins.map { $0.id }
         let reachable = NotchTabRow.reachableIDs(from: registry.plugins)
 
         XCTAssertEqual(visible.count, ids.count)
@@ -75,11 +75,11 @@ final class NotchTabRowTests: XCTestCase {
 
     func testTabRowNeverDropsAVisiblePlugin() {
         let registry = register(NotchTabRow.productionRegisteredIDs)
-        let leading = NotchTabRow.leading(from: registry.plugins).map(\.id)
-        let trailing = NotchTabRow.trailing(from: registry.plugins).map(\.id)
+        let leading = NotchTabRow.leading(from: registry.plugins).map { $0.id }
+        let trailing = NotchTabRow.trailing(from: registry.plugins).map { $0.id }
 
         XCTAssertEqual(Set(leading).intersection(trailing).count, 0)
-        XCTAssertEqual(Set(leading + trailing), Set(registry.plugins.map(\.id)))
+        XCTAssertEqual(Set(leading + trailing), Set(registry.plugins.map { $0.id }))
 
         for id in NotchTabRow.trailingIDs {
             XCTAssertTrue(trailing.contains(id), "trailing cluster missing \(id)")
