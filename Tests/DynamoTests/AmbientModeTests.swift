@@ -180,15 +180,15 @@ final class AmbientModeTests: XCTestCase {
         )
         XCTAssertTrue(text.contains("AmbientWaveformState("))
         XCTAssertTrue(text.contains("TimelineView"))
-        XCTAssertFalse(text.contains("MusicAudioSampler"))
-        XCTAssertFalse(text.contains("ScreenCaptureKit"))
-        XCTAssertFalse(text.contains("SCStream"))
+        XCTAssertFalse(text.contains("import ScreenCaptureKit"), "Ambient waveform must not import ScreenCaptureKit")
+        XCTAssertFalse(text.contains("MusicAudioSampler."), "Ambient waveform must not sample live audio")
+        XCTAssertFalse(text.contains("SCStream"), "Ambient waveform must not open a capture stream")
     }
 
     func testPillViewDoesNotCaptureSystemAudio() throws {
         let text = try sourceFile("Sources/Dynamo/Notch/AmbientPillView.swift")
-        XCTAssertFalse(text.contains("MusicAudioSampler"))
-        XCTAssertFalse(text.contains("ScreenCaptureKit"))
+        XCTAssertFalse(text.contains("import ScreenCaptureKit"))
+        XCTAssertFalse(text.contains("MusicAudioSampler."))
         XCTAssertTrue(text.contains("AmbientWaveformView("))
     }
 

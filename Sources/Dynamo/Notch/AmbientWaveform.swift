@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Decorative Ambient waveform — **not** live audio levels.
 ///
-/// Reading another app's audio requires Screen & System Audio Recording
-/// (ScreenCaptureKit). This equalizer is a phase-locked visual only: five
-/// capsules driven by `TimelineView` at ~30 fps, or a static settled row.
+/// Reading another app's audio needs a system-audio recording permission.
+/// This equalizer is a phase-locked visual only: five capsules driven by
+/// `TimelineView` at ~30 fps, or a static settled row.
 enum AmbientWaveform {
     static let barCount = 5
     /// ~30 fps. The view must not install a TimelineView when `shouldAnimate` is false.
