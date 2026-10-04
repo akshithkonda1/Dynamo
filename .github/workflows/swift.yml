@@ -1,5 +1,25 @@
-# CI for Dynamo — native macOS Swift package (build + unit tests).
-# This is the required status check for day-to-day quality.
+# CI for Dynamo — native macOS Swift package (build + unit tests)
+# plus a pause-and-hold merge gate.
+#
+# Jobs:
+#   Build & test — compiles when Swift / package files change. Docs-only PRs
+#                  still report (green, no macOS compile). Label / draft events
+#                  reuse the last Build & test on this head (no second Mac run).
+#   Merge gate   — the required-ready check. Green only when:
+#                    1. MERGE_PAUSED is not true
+#                    2. the PR is not a draft and has no `hold` label
+#                    3. Build & test passed on this head, or the PR touches
+#                       no Swift / package / Swift-workflow files
+#                  Macroscope is intentionally not part of this gate.
+#
+# Hold label: create once (Issues → Labels) if it does not exist:
+#   name: hold
+#   color: B60205
+#   description: Merge gate stays red until this label is removed.
+#
+# Pause every PR: Settings → Secrets and variables → Actions → Variables
+#   MERGE_PAUSED=true
+# Resume: set MERGE_PAUSED=false or delete the variable.
 
 name: Swift
 
@@ -8,31 +28,215 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
+      - ready_for_review
+      - converted_to_draft
 
+# Label / draft events use a separate group so they cannot cancel an
+# in-progress macOS compile on the same ref.
 concurrency:
-  group: swift-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: swift-${{ github.workflow }}-${{ github.ref }}-${{ contains(fromJSON('["labeled","unlabeled","ready_for_review","converted_to_draft"]'), github.event.action) && 'gate' || 'build' }}
+  cancel-in-progress: ${{ !contains(fromJSON('["labeled","unlabeled","ready_for_review","converted_to_draft"]'), github.event.action) }}
+
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  pull-requests: read
 
 jobs:
+  decide:
+    name: Decide runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.plan.outputs.runner }}
+      compile: ${{ steps.plan.outputs.compile }}
+      swift_changed: ${{ steps.plan.outputs.swift_changed }}
+      reuse: ${{ steps.plan.outputs.reuse }}
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Plan
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          gate_only=false
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            case "${EVENT_ACTION}" in
+              labeled|unlabeled|ready_for_review|converted_to_draft)
+                gate_only=true
+                ;;
+            esac
+          fi
+
+          swift_changed=true
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git fetch --no-tags --prune origin "${BASE_SHA}" >/dev/null
+            if git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}" | grep -Eq \
+              '^(Sources/|Tests/|Package\.swift|Package\.resolved|project\.yml|\.github/workflows/swift\.yml)'; then
+              swift_changed=true
+            else
+              swift_changed=false
+            fi
+            echo "Changed files vs ${BASE_SHA}:"
+            git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}" || true
+          fi
+
+          if [[ "${gate_only}" == "true" ]]; then
+            echo "runner=ubuntu-latest" >> "${GITHUB_OUTPUT}"
+            echo "compile=false" >> "${GITHUB_OUTPUT}"
+            echo "reuse=true" >> "${GITHUB_OUTPUT}"
+            echo "swift_changed=${swift_changed}" >> "${GITHUB_OUTPUT}"
+            echo "Plan: reuse Build & test (event=${EVENT_ACTION}, swift_changed=${swift_changed})"
+          elif [[ "${swift_changed}" == "true" ]]; then
+            echo "runner=macos-latest" >> "${GITHUB_OUTPUT}"
+            echo "compile=true" >> "${GITHUB_OUTPUT}"
+            echo "reuse=false" >> "${GITHUB_OUTPUT}"
+            echo "swift_changed=true" >> "${GITHUB_OUTPUT}"
+            echo "Plan: macOS compile"
+          else
+            echo "runner=ubuntu-latest" >> "${GITHUB_OUTPUT}"
+            echo "compile=false" >> "${GITHUB_OUTPUT}"
+            echo "reuse=false" >> "${GITHUB_OUTPUT}"
+            echo "swift_changed=false" >> "${GITHUB_OUTPUT}"
+            echo "Plan: no Swift changes; skip compile"
+          fi
+
   build:
     name: Build & test
-    runs-on: macos-latest
+    needs: decide
+    runs-on: ${{ needs.decide.outputs.runner }}
     timeout-minutes: 30
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        if: needs.decide.outputs.compile == 'true'
+        uses: actions/checkout@v4
 
-    - name: Show Swift version
-      run: swift --version
+      - name: Show Swift version
+        if: needs.decide.outputs.compile == 'true'
+        run: swift --version
 
-    - name: Build
-      run: |
-        # Finder xattrs on resource forks break ad-hoc codesign on some runners.
-        xattr -cr . 2>/dev/null || true
-        swift build -v
+      - name: Build
+        if: needs.decide.outputs.compile == 'true'
+        run: |
+          # Finder xattrs on resource forks break ad-hoc codesign on some runners.
+          xattr -cr . 2>/dev/null || true
+          swift build -v
 
-    - name: Test
-      run: |
-        xattr -cr .build 2>/dev/null || true
-        swift test -v --parallel
+      - name: Test
+        if: needs.decide.outputs.compile == 'true'
+        run: |
+          xattr -cr .build 2>/dev/null || true
+          swift test -v --parallel
+
+      - name: Skip compile (no Swift changes)
+        if: needs.decide.outputs.compile == 'false' && needs.decide.outputs.reuse == 'false'
+        run: echo "No Swift / package / Swift workflow files changed; skipping macOS compile."
+
+      - name: Reuse Build & test from this head
+        if: needs.decide.outputs.reuse == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SWIFT_CHANGED: ${{ needs.decide.outputs.swift_changed }}
+        run: |
+          set -euo pipefail
+          if [[ "${SWIFT_CHANGED}" != "true" ]]; then
+            echo "No Swift changes; treating Build & test as passed."
+            exit 0
+          fi
+          echo "Looking up Build & test for ${PR_HEAD_SHA} (not re-running macOS compile)."
+          conclusion="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${PR_HEAD_SHA}/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "Build & test") | select(.status == "completed") | select(.conclusion == "success" or .conclusion == "failure")] | sort_by(.completed_at) | reverse | .[0].conclusion // empty')"
+          if [[ -z "${conclusion}" ]]; then
+            echo "::error::Build & test has not completed for this head."
+            echo "Build & test has not completed for this head."
+            exit 1
+          fi
+          echo "Reused Build & test conclusion: ${conclusion}"
+          if [[ "${conclusion}" != "success" ]]; then
+            echo "::error::Build & test failed on this head."
+            exit 1
+          fi
+
+  merge-gate:
+    name: Merge gate
+    needs: [decide, build]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate merge gate
+        env:
+          MERGE_PAUSED: ${{ vars.MERGE_PAUSED }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          SWIFT_CHANGED: ${{ needs.decide.outputs.swift_changed }}
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "Merge gate on ${PR_HEAD_SHA}"
+          echo "draft=${IS_DRAFT} labels=${LABELS} MERGE_PAUSED=${MERGE_PAUSED:-} build=${BUILD_RESULT} swift_changed=${SWIFT_CHANGED}"
+
+          paused="$(printf '%s' "${MERGE_PAUSED:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${paused}" == "true" ]]; then
+            echo "::error::Merges paused"
+            echo "Merges paused: set repository variable MERGE_PAUSED to false (or delete it) to resume."
+            exit 1
+          fi
+
+          if [[ "${IS_DRAFT}" == "true" ]]; then
+            echo "::error::On hold: mark ready"
+            echo "On hold: mark the pull request ready for review."
+            exit 1
+          fi
+
+          IFS=',' read -r -a label_list <<< "${LABELS}"
+          for label in "${label_list[@]}"; do
+            if [[ "${label}" == "hold" ]]; then
+              echo "::error::On hold: remove hold label"
+              echo "On hold: remove the \`hold\` label."
+              exit 1
+            fi
+          done
+
+          if [[ "${SWIFT_CHANGED}" != "true" ]]; then
+            echo "No Swift changes on this PR; Merge gate is green."
+            exit 0
+          fi
+
+          if [[ "${BUILD_RESULT}" == "success" ]]; then
+            echo "Build & test passed on this head."
+            exit 0
+          fi
+
+          if [[ "${BUILD_RESULT}" == "failure" || "${BUILD_RESULT}" == "cancelled" ]]; then
+            echo "::error::Build & test did not pass"
+            echo "Build & test ${BUILD_RESULT} on this head; Merge gate stays red."
+            exit 1
+          fi
+
+          # Job skipped (should be rare) — fall back to the check on this head.
+          conclusion="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${PR_HEAD_SHA}/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "Build & test") | select(.status == "completed") | select(.conclusion == "success" or .conclusion == "failure")] | sort_by(.completed_at) | reverse | .[0].conclusion // empty')"
+          if [[ "${conclusion}" == "success" ]]; then
+            echo "Build & test previously passed on this head."
+            exit 0
+          fi
+          echo "::error::Build & test has not passed on this head"
+          echo "Build & test has not passed on this head (result=${BUILD_RESULT}, reused=${conclusion:-missing})."
+          exit 1
