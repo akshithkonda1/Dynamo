@@ -31,6 +31,54 @@ enum NotchGeometry {
     /// Scale the physical cutout width slightly so the collapsed notch reads tighter.
     private static let widthScale: CGFloat = 0.92
 
+    /// Fallback cutout width after the same scale `currentMetrics` applies.
+    static var fallbackNotchWidth: CGFloat { fallbackWidth * widthScale }
+
+    /// Each Ambient cheek (album art / waveform). ~one menu-bar icon.
+    static let ambientCheekWidth: CGFloat = 24
+
+    /// Menu-bar height when no screen is available (tests + headless).
+    static let menuBarHeightFallback: CGFloat = 24
+
+    /// Pill size from independent notch + bar inputs: width = notch + 2 cheeks.
+    static func ambientPillSize(notchWidth: CGFloat, menuBarHeight: CGFloat) -> NSSize {
+        NSSize(width: notchWidth + (2 * ambientCheekWidth), height: menuBarHeight)
+    }
+
+    /// Testable pill size for typical MacBook aspects. The physical notch and
+    /// menu bar do not scale with aspect, so 16:10 and 3:2 share the fallback.
+    static func ambientPillSize(screenWidth _: CGFloat, screenHeight _: CGFloat) -> NSSize {
+        ambientPillSize(notchWidth: fallbackNotchWidth, menuBarHeight: menuBarHeightFallback)
+    }
+
+    static func ambientPillSize(for screen: NSScreen?) -> NSSize {
+        guard let screen else {
+            return ambientPillSize(notchWidth: fallbackNotchWidth, menuBarHeight: menuBarHeightFallback)
+        }
+        let reported = screen.frame.maxY - screen.visibleFrame.maxY
+        let safe = screen.safeAreaInsets.top
+        let menuBar: CGFloat
+        if reported > 0 {
+            menuBar = reported
+        } else if safe > 0 {
+            menuBar = safe
+        } else {
+            menuBar = menuBarHeightFallback
+        }
+        return ambientPillSize(notchWidth: notchWidth(for: screen), menuBarHeight: menuBar)
+    }
+
+    /// Collapsed island size. Ambient pill only when the setting is on **and**
+    /// media is playing; otherwise the normal closed notch (no layout jump when
+    /// Ambient is on but nothing is playing).
+    static func collapsedSize(ambientEnabled: Bool, isPlaying: Bool, screen: NSScreen?) -> NSSize {
+        if AmbientMode.showsPill(ambientEnabled: ambientEnabled, isPlaying: isPlaying) {
+            return ambientPillSize(for: screen)
+        }
+        let metrics = currentMetrics(for: screen)
+        return NSSize(width: metrics.width, height: metrics.height)
+    }
+
     static func currentMetrics(for screen: NSScreen?) -> NotchMetrics {
         guard let screen else {
             return NotchMetrics(

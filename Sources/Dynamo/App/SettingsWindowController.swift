@@ -57,6 +57,7 @@ struct SettingsView: View {
     @AppStorage("peekDwellMultiplier") private var peekDwellMultiplier: Double = 1.0
     @ObservedObject private var amplify = MediaAmplifyController.shared
     @ObservedObject private var mirror = SystemNotificationMirror.shared
+    @ObservedObject private var ambientMode = AmbientModeStore.shared
     @State private var selectedPane: SettingsPane = .general
 
     private enum SettingsPane: Hashable, Identifiable {
@@ -426,6 +427,17 @@ struct SettingsView: View {
                 set: { notch.setHiddenMode($0) }
             ))
             Text("When on, the notch stays hidden until you move the cursor to the top of the screen, then retreats when you move away.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Toggle("Ambient mode", isOn: Binding(
+                get: { ambientMode.isEnabled },
+                set: { ambientMode.setEnabled($0) }
+            ))
+            Text("When on and media is playing, the collapsed notch becomes a slim menu-bar pill: album art left of the camera, a decorative waveform on the right. Off (the default) keeps today’s collapsed notch.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

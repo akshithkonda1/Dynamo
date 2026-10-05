@@ -4,6 +4,11 @@ All notable changes to Dynamo are documented here.
 
 ## [Unreleased]
 
+### Ambient mode
+- Optional **Ambient mode** (Preferences → General, off by default): while media is playing, the collapsed notch becomes a menu-bar-height pill — album art left of the camera, a decorative 5-bar waveform on the right
+- Waveform is visual-only (`TimelineView` ~30 fps). It stops completely when paused, Reduce Motion is on, or the display is asleep — no ScreenCaptureKit / system-audio permission
+- Hover / click still expands the full tray; idle or Ambient-off keeps today’s closed notch size
+
 ### Hub & peeks
 - Widget peeks are categorized (Calendar, reminders, media, sports, …) so Hub filters match real alerts
 - Hub inbox **persists** across relaunch; replay still works without in-memory art
