@@ -39,17 +39,52 @@ final class NotchGeometryTests: XCTestCase {
     }
 
     func testExpandedWidthIsCompactNotBanner() {
-        // ~38% of a 1470pt display ≈ 559pt; fallback is the same density.
-        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 560, accuracy: 0.5)
+        // Owner target ~555pt; 38% of a 1470pt display ≈ 559pt.
+        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 555, accuracy: 0.5)
         XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 1470, screenHeight: 956), 559, accuracy: 1)
         XCTAssertGreaterThanOrEqual(NotchGeometry.expandedWidthFloor, 480)
         XCTAssertLessThanOrEqual(NotchGeometry.expandedWidthCap, 680)
+    }
+
+    func testExpandedPanelSizeNilScreenMatchesOwnerTarget() {
+        let size = NotchGeometry.expandedPanelSize(
+            contentBase: NotchTheme.expandedContentBase,
+            for: nil
+        )
+        XCTAssertEqual(size.width, NotchGeometry.expandedWidthFallback, accuracy: 0.5)
+        XCTAssertEqual(size.height, NotchGeometry.expandedPanelHeightTarget, accuracy: 0.5)
+        XCTAssertEqual(size.height, 200, accuracy: 0.5)
+    }
+
+    func testExpandedPanelSizeMatchesWidthAndHeightHelpers() {
+        let samples: [(CGFloat, CGFloat)] = laptopDisplays + externalDisplays
+        for (width, height) in samples {
+            let size = NotchGeometry.expandedPanelSize(
+                contentBase: NotchTheme.expandedContentBase,
+                screenWidth: width,
+                screenHeight: height
+            )
+            XCTAssertEqual(
+                size.width,
+                NotchGeometry.expandedWidth(screenWidth: width, screenHeight: height),
+                accuracy: 0.5
+            )
+            XCTAssertEqual(
+                size.height,
+                NotchGeometry.expandedPanelHeight(
+                    contentBase: NotchTheme.expandedContentBase,
+                    screenHeight: height
+                ),
+                accuracy: 0.5
+            )
+        }
     }
 
     func testExpandedChromePlusCardStaysUnderCap() {
         XCTAssertEqual(NotchTheme.expandedChromeHeight, 56, accuracy: 0.5)
         XCTAssertEqual(NotchTheme.radiusExpanded, 28, accuracy: 0.5)
         let total = NotchTheme.expandedContentBase + NotchTheme.expandedChromeHeight
+        XCTAssertEqual(total, NotchGeometry.expandedPanelHeightTarget, accuracy: 0.5)
         XCTAssertEqual(total, 200, accuracy: 0.5)
         XCTAssertLessThanOrEqual(total, NotchGeometry.expandedPanelHeightCap)
         for (id, base) in productionHeightSamples() {

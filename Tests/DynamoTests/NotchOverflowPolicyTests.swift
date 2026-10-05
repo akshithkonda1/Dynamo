@@ -7,12 +7,43 @@ import XCTest
 final class NotchOverflowPolicyTests: XCTestCase {
 
     func testWidgetSourcesDoNotUseVerticalScrollView() throws {
+        let swiftFiles = try widgetSwiftFiles()
+        let vertical = try NSRegularExpression(pattern: #"ScrollView\s*(?:\(\s*\.vertical|\s*\{)"#)
+        var offenders: [String] = []
+        for file in swiftFiles {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            if vertical.firstMatch(in: text, range: range) != nil {
+                offenders.append(file.lastPathComponent)
+            }
+        }
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Widget card uses vertical ScrollView for overflow (must be left/right): \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    func testWidgetSourcesDoNotPageFullWidthCards() throws {
+        let files = try widgetSwiftFiles()
+        var offenders: [String] = []
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            if NotchWidgetCardLayout.isFullPageCarousel(text) {
+                offenders.append(file.lastPathComponent)
+            }
+        }
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Widget uses a second full-width page (one tab, one card): \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    private func widgetSwiftFiles() throws -> [URL] {
         let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let widgets = testsDir
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Sources/Dynamo/Widgets", isDirectory: true)
-
         let files = try FileManager.default.contentsOfDirectory(
             at: widgets,
             includingPropertiesForKeys: nil,
@@ -35,19 +66,6 @@ final class NotchOverflowPolicyTests: XCTestCase {
             }
         }
         XCTAssertFalse(swiftFiles.isEmpty, "Did not find widget sources next to the test target")
-
-        let vertical = try NSRegularExpression(pattern: #"ScrollView\s*(?:\(\s*\.vertical|\s*\{)"#)
-        var offenders: [String] = []
-        for file in swiftFiles {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            let range = NSRange(text.startIndex..<text.endIndex, in: text)
-            if vertical.firstMatch(in: text, range: range) != nil {
-                offenders.append(file.lastPathComponent)
-            }
-        }
-        XCTAssertTrue(
-            offenders.isEmpty,
-            "Widget card uses vertical ScrollView for overflow (must be left/right): \(offenders.joined(separator: ", "))"
-        )
+        return swiftFiles
     }
 }

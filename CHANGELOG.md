@@ -4,6 +4,12 @@ All notable changes to Dynamo are documented here.
 
 ## [Unreleased]
 
+### Expanded island
+- Compact black hang is **~555×200pt** (fallback 555×200; chrome 56 + default card 144)
+- Tab icons split left/right around a camera-gap spacer (`NotchTabBand.cameraGapWidth`)
+- Each tab is **one card** (`NotchWidgetCard`) — Media / Battery / Hub / Clipboard no longer page a second full-width panel
+- Window sizes through `NotchGeometry.expandedPanelSize`; media art/transport through `NotchWidgetCardLayout.mediaMetrics`
+
 ### Ambient mode
 - Optional **Ambient mode** (Preferences → General, off by default): while media is playing, the collapsed notch becomes a menu-bar-height pill — album art left of the camera, a decorative 5-bar waveform on the right
 - Waveform is visual-only (`TimelineView` ~30 fps). It stops completely when paused, Reduce Motion is on, or the display is asleep — no ScreenCaptureKit / system-audio permission

@@ -62,14 +62,11 @@ final class NotchWindowController: ObservableObject {
     /// Widget content height + shared chrome (tray / clock / divider).
     /// Width/height adapt to the active display’s size and aspect ratio so the
     /// island stays proportional on 13″, 16″, ultrawide, and external monitors.
+    /// Same `expandedPanelSize` geometry tests cover.
     private var expandedSize: NSSize {
         let screen = preferredScreen()
         let baseContent = registry?.activePlugin?.expandedContentHeight ?? NotchTheme.expandedContentBase
-        let content = NotchGeometry.expandedContentHeight(base: baseContent, for: screen)
-        return NSSize(
-            width: NotchGeometry.expandedWidth(for: screen),
-            height: content + NotchTheme.expandedChromeHeight
-        )
+        return NotchGeometry.expandedPanelSize(contentBase: baseContent, for: screen)
     }
     /// Stay open while the cursor is over the notch; collapse after leave
     /// (delay from Preferences — 0 / 1 / 3 / 5 / 7 / 10 / 30s).

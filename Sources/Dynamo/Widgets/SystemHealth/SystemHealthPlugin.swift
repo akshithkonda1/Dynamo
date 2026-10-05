@@ -337,77 +337,75 @@ private struct ExpandedSystemHealthView: View {
                 refreshButton
             }
 
-            HStack(alignment: .top, spacing: 8) {
-                NotchCard(compact: true) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("\(max(0, report.score))")
-                                .font(NotchTheme.heroDigit.monospacedDigit())
-                                .foregroundStyle(scoreColor)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(report.summary)
-                                    .font(NotchTheme.body)
-                                    .foregroundStyle(NotchTheme.textSecondary)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text(checkedLabel)
-                                    .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                            }
-                            Spacer(minLength: 0)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(max(0, report.score))")
+                            .font(NotchTheme.heroDigit.monospacedDigit())
+                            .foregroundStyle(scoreColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(report.summary)
+                                .font(NotchTheme.body)
+                                .foregroundStyle(NotchTheme.textSecondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(checkedLabel)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textQuaternary)
                         }
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(NotchTheme.chipFill)
-                                Capsule()
-                                    .fill(scoreColor.opacity(0.9))
-                                    .frame(
-                                        width: max(
-                                            6,
-                                            geo.size.width * CGFloat(min(100, max(0, report.score))) / 100
-                                        )
-                                    )
-                            }
-                        }
-                        .frame(height: 5)
+                        Spacer(minLength: 0)
                     }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(NotchTheme.chipFill)
+                            Capsule()
+                                .fill(scoreColor.opacity(0.9))
+                                .frame(
+                                    width: max(
+                                        6,
+                                        geo.size.width * CGFloat(min(100, max(0, report.score))) / 100
+                                    )
+                                )
+                        }
+                    }
+                    .frame(height: 5)
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .notchAppear(delay: 0.03)
 
                 Button {
                     plugin.openUpdatesOrRestart()
                 } label: {
-                    NotchCard(compact: true) {
-                        HStack(spacing: 8) {
-                            Image(systemName: updatesIcon)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(updatesTint)
-                                .frame(width: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(updatesTitle)
-                                    .font(NotchTheme.body.weight(.medium))
-                                    .foregroundStyle(NotchTheme.textPrimary)
+                    HStack(spacing: 8) {
+                        Image(systemName: updatesIcon)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(updatesTint)
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(updatesTitle)
+                                .font(NotchTheme.body.weight(.medium))
+                                .foregroundStyle(NotchTheme.textPrimary)
+                                .lineLimit(1)
+                            if let sub = updatesSubtitle {
+                                Text(sub)
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textTertiary)
                                     .lineLimit(1)
-                                if let sub = updatesSubtitle {
-                                    Text(sub)
-                                        .font(NotchTheme.micro)
-                                        .foregroundStyle(NotchTheme.textTertiary)
-                                        .lineLimit(1)
-                                }
                             }
-                            Spacer(minLength: 0)
-                            if busy {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(NotchTheme.textQuaternary)
-                            }
+                        }
+                        Spacer(minLength: 0)
+                        if busy {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchTheme.textQuaternary)
                         }
                     }
                 }
                 .buttonStyle(.plain)
                 .help("Open Software Update")
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .notchAppear(delay: 0.06)
             }
 

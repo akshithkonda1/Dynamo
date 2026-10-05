@@ -107,14 +107,16 @@ enum NotchGeometry {
 
     // MARK: - Aspect-adaptive expanded panel
 
-    /// Nil-screen fallback — ~38% of a 1470pt laptop (~555pt).
-    static let expandedWidthFallback: CGFloat = 560
+    /// Nil-screen fallback — owner target ~555pt hanging card.
+    static let expandedWidthFallback: CGFloat = 555
     /// Floor covers 13″ laptops.
     static let expandedWidthFloor: CGFloat = 480
     /// Cap keeps large externals from growing a banner.
     static let expandedWidthCap: CGFloat = 680
     /// Chrome + content must stay a compact hanging card (NotchDock density).
     static let expandedPanelHeightCap: CGFloat = 230
+    /// Owner target: tray + one widget card ≈ 200pt.
+    static let expandedPanelHeightTarget: CGFloat = 200
 
     /// Compact hanging panel: ~38% of a typical MacBook width (~555pt on a
     /// 1470pt display) and short — a tidy card under the camera, not a wide
@@ -122,6 +124,30 @@ enum NotchGeometry {
     static func expandedWidth(for screen: NSScreen?) -> CGFloat {
         guard let screen else { return expandedWidthFallback }
         return expandedWidth(screenWidth: screen.frame.width, screenHeight: screen.frame.height)
+    }
+
+    /// Full expanded panel size. `NotchWindowController.expandedSize` calls this
+    /// — do not re-derive width/height at the window.
+    static func expandedPanelSize(contentBase: CGFloat, for screen: NSScreen?) -> NSSize {
+        guard let screen else {
+            return NSSize(
+                width: expandedWidthFallback,
+                height: contentBase + NotchTheme.expandedChromeHeight
+            )
+        }
+        return expandedPanelSize(
+            contentBase: contentBase,
+            screenWidth: screen.frame.width,
+            screenHeight: screen.frame.height
+        )
+    }
+
+    /// Testable panel size from display points (no `NSScreen` required).
+    static func expandedPanelSize(contentBase: CGFloat, screenWidth: CGFloat, screenHeight: CGFloat) -> NSSize {
+        NSSize(
+            width: expandedWidth(screenWidth: screenWidth, screenHeight: screenHeight),
+            height: expandedPanelHeight(contentBase: contentBase, screenHeight: screenHeight)
+        )
     }
 
     /// Testable width from display points (no `NSScreen` required).

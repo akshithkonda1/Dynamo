@@ -75,7 +75,7 @@ Menu bar and gear open **Preferences**. Sections: **General**, **Feel & alerts**
 ### Tray UX
 - **Icon-only** tray — no name chips when a tab is selected  
 - **Hover preview** — short delay, then a tab-style name under the icon  
-- Expanded island width is aspect-adaptive (cap **1650pt** on large displays)  
+- Expanded island is a compact hanging card (~**555×200pt**; width cap **680pt**)  
 - Empty Calendar stays **compact**
 
 ### Clocks (World Clock)
