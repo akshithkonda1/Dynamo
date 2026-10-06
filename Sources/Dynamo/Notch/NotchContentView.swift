@@ -89,11 +89,10 @@ struct NotchContentView: View {
         // Full solid scrim top → bottom (no fade-to-clear; that left a hollow lip).
         .overlay(controller.isExpanded ? NotchTheme.panelScrimExpanded : NotchTheme.panelScrim)
         .overlay(
-            // Soft integrated top sheen — cyan hint only when expanded.
+            // Soft top sheen. Expanded hang stays black — no cyan wash.
             LinearGradient(
                 colors: [
-                    Color.white.opacity(controller.isExpanded ? 0.055 : 0.03),
-                    NotchTheme.neonCyan.opacity(controller.isExpanded ? 0.035 : 0.0),
+                    Color.white.opacity(controller.isExpanded ? 0.04 : 0.03),
                     Color.clear
                 ],
                 startPoint: .top,
@@ -127,70 +126,76 @@ struct NotchContentView: View {
     }
 
     private var expandedBody: some View {
-        VStack(spacing: 0) {
-            // Tab row sits in the menu-bar / camera band. Dynamo ships more
-            // plugins than a NotchDock-style strip can show at once, so each
-            // cheek scrolls — every widget stays one flick away, no overflow menu.
-            HStack(spacing: 6) {
-                NotchTabCheek {
-                    HStack(spacing: 4) {
-                        ForEach(leadingTrayPlugins, id: \.id) { plugin in
-                            trayButton(for: plugin)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Color.clear
-                    .frame(minWidth: 72, idealWidth: 96, maxWidth: 120)
-                    .accessibilityHidden(true)
-
-                NotchTabCheek {
-                    HStack(spacing: 4) {
-                        ForEach(trailingTrayPlugins, id: \.id) { plugin in
-                            trayButton(for: plugin)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-                TrayIconButton(
-                    systemImage: "gearshape.fill",
-                    displayName: "Preferences",
-                    isActive: false
-                ) {
-                    NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
-                }
-                liveClockPill
-            }
-            .padding(.horizontal, NotchTheme.contentInset)
-            .frame(height: NotchTheme.chromeTray)
-
-            // Hairline (fixed chrome slot)
+        GeometryReader { geo in
+            let cameraGap = NotchTabBand.cameraGapWidth(panelWidth: geo.size.width)
             VStack(spacing: 0) {
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.clear,
-                                NotchTheme.separator,
-                                NotchTheme.separator,
-                                Color.clear
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(height: 0.75)
-                    .padding(.horizontal, NotchTheme.spaceLG)
-                Spacer(minLength: 0)
-            }
-            .frame(height: NotchTheme.chromeDivider)
+                // Tab icons split left/right around the camera housing.
+                // Cheeks scroll so every widget stays one flick away.
+                HStack(spacing: 6) {
+                    NotchTabCheek {
+                        HStack(spacing: 4) {
+                            ForEach(leadingTrayPlugins, id: \.id) { plugin in
+                                trayButton(for: plugin)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let active = registry.activePlugin {
-                active.expandedView()
-                    .id(active.id)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    Color.clear
+                        .frame(
+                            minWidth: NotchTabBand.cameraGapMin,
+                            idealWidth: cameraGap,
+                            maxWidth: NotchTabBand.cameraGapMax
+                        )
+                        .frame(width: cameraGap)
+                        .accessibilityHidden(true)
+
+                    NotchTabCheek {
+                        HStack(spacing: 4) {
+                            ForEach(trailingTrayPlugins, id: \.id) { plugin in
+                                trayButton(for: plugin)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    TrayIconButton(
+                        systemImage: "gearshape.fill",
+                        displayName: "Preferences",
+                        isActive: false
+                    ) {
+                        NotificationCenter.default.post(name: .dynamoOpenSettings, object: nil)
+                    }
+                    liveClockPill
+                }
+                .padding(.horizontal, NotchTheme.contentInset)
+                .frame(height: NotchTheme.chromeTray)
+
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.clear,
+                                    NotchTheme.separator,
+                                    NotchTheme.separator,
+                                    Color.clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 0.75)
+                        .padding(.horizontal, NotchTheme.spaceLG)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: NotchTheme.chromeDivider)
+
+                if let active = registry.activePlugin {
+                    NotchWidgetCard {
+                        active.expandedView()
+                            .id(active.id)
+                    }
                     .padding(.horizontal, NotchTheme.contentInset)
                     .padding(.bottom, NotchTheme.chromeContentBottom)
                     .transition(
@@ -199,9 +204,10 @@ struct NotchContentView: View {
                             removal: .opacity.combined(with: .offset(y: -4))
                         )
                     )
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var liveClockPill: some View {

@@ -27,6 +27,11 @@ enum NotchTheme {
     static let contentInset: CGFloat = 16
     /// Horizontal inset for collapsed ambient (clock / media / weather).
     static let ambientInset: CGFloat = 12
+    /// Inner padding of the single widget card under the tab band.
+    /// `NotchWidgetCard` (and only that view) reads this.
+    static let widgetCardInset: CGFloat = 10
+    /// Corner radius of the single widget card. Matches music-player tightness.
+    static let widgetCardRadius: CGFloat = 16
 
     // MARK: Expanded chrome (must match NotchContentView measurements)
     /// Shared compact content-card height. Tray + this ≈ 200pt on a typical MacBook.
@@ -85,7 +90,8 @@ enum NotchTheme {
 
     /// Solid glass density — full coverage edge-to-edge (no transparent bottom).
     static let panelScrim = Color.black.opacity(0.46)
-    static let panelScrimExpanded = Color.black.opacity(0.56)
+    /// Expanded hang is a compact black panel, not a translucent sheet.
+    static let panelScrimExpanded = Color.black.opacity(0.78)
 
     /// System semantic status, slightly boosted for dark glass.
     static var positive: Color { system(.systemGreen).opacity(0.95) }

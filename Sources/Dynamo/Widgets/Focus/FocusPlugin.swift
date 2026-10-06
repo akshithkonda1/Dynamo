@@ -122,16 +122,14 @@ private struct ExpandedFocusView: View {
                 header.padding(.bottom, 6)
                 modePicker.padding(.bottom, 6)
 
-                NotchHScroll(leftHelp: "Earlier focus", rightHelp: "Later focus") {
-                    Group {
-                        if focus.baseMode == .meeting {
-                            meetingCompanion(wide: wide)
-                        } else {
-                            modeBody
-                        }
+                Group {
+                    if focus.baseMode == .meeting {
+                        meetingCompanion(wide: wide)
+                    } else {
+                        modeBody
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
 
                 if focus.baseMode != .meeting {
                     footerActions.padding(.top, 6)

@@ -1,5 +1,27 @@
 import SwiftUI
 
+// MARK: - Widget card (one per tab)
+
+/// Single tidy plate under the camera-gap tab band. `NotchContentView`
+/// wraps the active plugin in this — widgets do not stack extra cards.
+struct NotchWidgetCard<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(NotchTheme.widgetCardInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background {
+                RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.6)
+                    )
+            }
+    }
+}
+
 // MARK: - Card
 
 /// Content surface inside the expanded notch — native material + Dynamo edge.

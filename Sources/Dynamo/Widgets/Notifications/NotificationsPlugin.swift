@@ -105,79 +105,61 @@ private struct ExpandedPeekHubView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            NotchHScroll(leftHelp: "Earlier hub", rightHelp: "Later hub") {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        header
-                        filterStrip
-                        if filteredHistory.isEmpty {
-                            NotchEmptyState(
-                                systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
-                                title: emptyTitle,
-                                caption: emptyCaption,
-                                prominent: true
-                            )
-                            .frame(minHeight: 48)
-                        } else {
-                            NotchHScroll(leftHelp: "Earlier notifications", rightHelp: "Later notifications") {
-                                HStack(alignment: .top, spacing: 8) {
-                                    if hub.pendingCount > 0, filter == .all || filter == .unread {
-                                        pendingBanner
-                                            .frame(width: 220, alignment: .topLeading)
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            filterStrip
+            if filteredHistory.isEmpty {
+                NotchEmptyState(
+                    systemImage: filter == .all ? "bell.badge" : "line.3.horizontal.decrease.circle",
+                    title: emptyTitle,
+                    caption: emptyCaption,
+                    prominent: true
+                )
+                .frame(minHeight: 48)
+            } else {
+                NotchHScroll(leftHelp: "Earlier notifications", rightHelp: "Later notifications") {
+                    HStack(alignment: .top, spacing: 8) {
+                        if hub.pendingCount > 0, filter == .all || filter == .unread {
+                            pendingBanner
+                                .frame(width: 220, alignment: .topLeading)
+                        }
+                        ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(group.title)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                        .textCase(.uppercase)
+                                        .tracking(0.4)
+                                    if group.unread > 0 {
+                                        Text("\(group.unread)")
+                                            .font(.system(size: 9, weight: .bold).monospacedDigit())
+                                            .foregroundStyle(NotchTheme.caution)
                                     }
-                                    ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack(spacing: 6) {
-                                                Text(group.title)
-                                                    .font(.system(size: 10, weight: .semibold))
-                                                    .foregroundStyle(NotchTheme.textTertiary)
-                                                    .textCase(.uppercase)
-                                                    .tracking(0.4)
-                                                if group.unread > 0 {
-                                                    Text("\(group.unread)")
-                                                        .font(.system(size: 9, weight: .bold).monospacedDigit())
-                                                        .foregroundStyle(NotchTheme.caution)
-                                                }
-                                                Spacer(minLength: 0)
-                                                if !group.bundleID.isEmpty {
-                                                    Button("Open") {
-                                                        HubNotificationCenter.openApp(bundleID: group.bundleID)
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                    .font(.system(size: 9, weight: .semibold))
-                                                    .foregroundStyle(NotchTheme.neonCyan.opacity(0.85))
-                                                }
-                                            }
-                                            ForEach(Array(group.items.prefix(3).enumerated()), id: \.element.id) { index, item in
-                                                hubRow(item)
-                                                    .notchAppear(
-                                                        delay: Double(min(gIndex * 4 + index, 10)) * 0.02,
-                                                        rise: 4
-                                                    )
-                                            }
+                                    Spacer(minLength: 0)
+                                    if !group.bundleID.isEmpty {
+                                        Button("Open") {
+                                            HubNotificationCenter.openApp(bundleID: group.bundleID)
                                         }
-                                        .frame(width: 240, alignment: .topLeading)
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(NotchTheme.neonCyan.opacity(0.85))
                                     }
                                 }
+                                ForEach(Array(group.items.prefix(3).enumerated()), id: \.element.id) { index, item in
+                                    hubRow(item)
+                                        .notchAppear(
+                                            delay: Double(min(gIndex * 4 + index, 10)) * 0.02,
+                                            rise: 4
+                                        )
+                                }
                             }
+                            .frame(width: 240, alignment: .topLeading)
                         }
-                        actionRow
-                    }
-                    .frame(width: max(geo.size.width, 1), alignment: .topLeading)
-
-                    controlCard
-                        .frame(width: max(geo.size.width, 1), alignment: .topLeading)
-
-                    if !router.replacesNotificationCenter {
-                        optInCard
-                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
-                    } else if mirror.accessDenied || !router.bannerHintDismissed {
-                        replacementSetupCard
-                            .frame(width: max(geo.size.width, 1), alignment: .topLeading)
                     }
                 }
             }
+            actionRow
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .notchAppear()
@@ -206,6 +188,23 @@ private struct ExpandedPeekHubView: View {
                             .overlay(Capsule().strokeBorder(NotchTheme.caution.opacity(0.25), lineWidth: 0.5))
                     )
             }
+            hubToggle(
+                title: "Replace",
+                help: "Opt in: Hub becomes the inbox and Peek becomes the banner for this Mac",
+                systemImage: "bell.badge.fill",
+                isOn: Binding(
+                    get: { router.replacesNotificationCenter },
+                    set: { router.replacesNotificationCenter = $0 }
+                )
+            )
+            .frame(width: 64)
+            hubToggle(
+                title: "On",
+                help: "Master switch — when off, Dynamo won’t deliver Peeks",
+                systemImage: "power",
+                isOn: Binding(get: { router.isEnabled }, set: { router.isEnabled = $0 })
+            )
+            .frame(width: 52)
         }
     }
 

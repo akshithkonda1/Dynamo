@@ -114,75 +114,71 @@ private struct ExpandedClipboardView: View {
             NotchSectionHeader("Pinned")
                 .padding(.bottom, 8)
 
-            GeometryReader { geo in
-                NotchHScroll(leftHelp: "Earlier clipboard", rightHelp: "Later clipboard") {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            pinnedSection
-                            if plugin.isAddingSnippet {
-                                addSnippetForm
-                            } else {
-                                Button {
-                                    plugin.isAddingSnippet = true
-                                } label: {
-                                    NotchChipLabel(title: "Add snippet", systemImage: "plus")
-                                }
-                                .buttonStyle(.plain)
-                            }
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    pinnedSection
+                    if plugin.isAddingSnippet {
+                        addSnippetForm
+                    } else {
+                        Button {
+                            plugin.isAddingSnippet = true
+                        } label: {
+                            NotchChipLabel(title: "Add snippet", systemImage: "plus")
                         }
-                        .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            NotchSectionHeader(
-                                "History",
-                                trailing: AnyView(
-                                    HStack(spacing: 8) {
-                                        if plugin.canStripFormatting {
-                                            Button("Paste as plain") { plugin.stripFormatting() }
-                                                .buttonStyle(.plain)
-                                                .font(NotchTheme.micro)
-                                                .foregroundStyle(NotchTheme.textTertiary)
-                                                .help("Copy the current pasteboard as plain text")
-                                        }
-                                        if !store.history.isEmpty {
-                                            Button("Clear") { showClearHistoryConfirm = true }
-                                                .buttonStyle(.plain)
-                                                .font(NotchTheme.micro)
-                                                .foregroundStyle(NotchTheme.textTertiary)
-                                        }
-                                    }
-                                )
-                            )
-
-                            if store.canUndoClearHistory {
-                                HStack(spacing: 6) {
-                                    Text("History cleared")
+                VStack(alignment: .leading, spacing: 8) {
+                    NotchSectionHeader(
+                        "History",
+                        trailing: AnyView(
+                            HStack(spacing: 8) {
+                                if plugin.canStripFormatting {
+                                    Button("Paste as plain") { plugin.stripFormatting() }
+                                        .buttonStyle(.plain)
                                         .font(NotchTheme.micro)
                                         .foregroundStyle(NotchTheme.textTertiary)
-                                    Spacer(minLength: 0)
-                                    Button("Undo") { store.undoClearHistory() }
-                                        .buttonStyle(.plain)
-                                        .font(NotchTheme.micro.weight(.semibold))
-                                        .foregroundStyle(NotchTheme.textPrimary)
+                                        .help("Copy the current pasteboard as plain text")
                                 }
-                                .padding(.vertical, 2)
-                                .transition(.opacity)
+                                if !store.history.isEmpty {
+                                    Button("Clear") { showClearHistoryConfirm = true }
+                                        .buttonStyle(.plain)
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                }
                             }
+                        )
+                    )
 
-                            if !store.history.isEmpty {
-                                TextField("Search history…", text: $searchQuery)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(NotchTheme.caption)
-                            }
-
-                            historySection
+                    if store.canUndoClearHistory {
+                        HStack(spacing: 6) {
+                            Text("History cleared")
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                            Spacer(minLength: 0)
+                            Button("Undo") { store.undoClearHistory() }
+                                .buttonStyle(.plain)
+                                .font(NotchTheme.micro.weight(.semibold))
+                                .foregroundStyle(NotchTheme.textPrimary)
                         }
-                        .frame(width: max(geo.size.width, 1), alignment: .topLeading)
+                        .padding(.vertical, 2)
+                        .transition(.opacity)
                     }
-                    .padding(.bottom, 4)
-                    .animation(.easeInOut(duration: 0.2), value: store.canUndoClearHistory)
+
+                    if !store.history.isEmpty {
+                        TextField("Search history…", text: $searchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .font(NotchTheme.caption)
+                    }
+
+                    historySection
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .padding(.bottom, 4)
+            .animation(.easeInOut(duration: 0.2), value: store.canUndoClearHistory)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .notchAppear()
@@ -208,11 +204,13 @@ private struct ExpandedClipboardView: View {
                 prominent: false
             )
         } else {
-            HStack(alignment: .top, spacing: 4) {
-                ForEach(Array(store.snippets.enumerated()), id: \.element.id) { index, snippet in
-                    snippetRow(snippet)
-                        .frame(width: 240, alignment: .topLeading)
-                        .notchAppear(delay: Double(min(index, 6)) * 0.03)
+            NotchHScroll(leftHelp: "Earlier pins", rightHelp: "Later pins") {
+                HStack(alignment: .top, spacing: 4) {
+                    ForEach(Array(store.snippets.enumerated()), id: \.element.id) { index, snippet in
+                        snippetRow(snippet)
+                            .frame(width: 220, alignment: .topLeading)
+                            .notchAppear(delay: Double(min(index, 6)) * 0.03)
+                    }
                 }
             }
         }
@@ -236,11 +234,13 @@ private struct ExpandedClipboardView: View {
                 prominent: false
             )
         } else {
-            HStack(alignment: .top, spacing: 4) {
-                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
-                    historyRow(item)
-                        .frame(width: 240, alignment: .topLeading)
-                        .notchAppear(delay: 0.06 + Double(min(index, 8)) * 0.028)
+            NotchHScroll(leftHelp: "Earlier history", rightHelp: "Later history") {
+                HStack(alignment: .top, spacing: 4) {
+                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                        historyRow(item)
+                            .frame(width: 220, alignment: .topLeading)
+                            .notchAppear(delay: 0.06 + Double(min(index, 8)) * 0.028)
+                    }
                 }
             }
         }
