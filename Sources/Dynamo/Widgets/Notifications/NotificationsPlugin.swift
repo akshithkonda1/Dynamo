@@ -88,6 +88,7 @@ private struct ExpandedPeekHubView: View {
     @ObservedObject var hub: PeekNotificationCenter
     @ObservedObject var router: DynamoNotificationRouter
     @ObservedObject var mirror: SystemNotificationMirror
+    @ObservedObject private var ambientMode = AmbientModeStore.shared
     @State private var filter: HubInboxFilter = .all
 
     private var filteredHistory: [PeekNotificationCenter.PeekHistoryItem] {
@@ -244,6 +245,15 @@ private struct ExpandedPeekHubView: View {
                     help: "Haptic feedback when a Peek appears",
                     systemImage: "hand.tap",
                     isOn: Binding(get: { hub.hapticsEnabled }, set: { hub.hapticsEnabled = $0 })
+                )
+                hubToggle(
+                    title: "Ambient",
+                    help: "Album art and a cover-colored waveform while music plays. Hover still opens the full bar.",
+                    systemImage: "sparkles",
+                    isOn: Binding(
+                        get: { ambientMode.isEnabled },
+                        set: { ambientMode.setEnabled($0) }
+                    )
                 )
                 Spacer(minLength: 0)
             }

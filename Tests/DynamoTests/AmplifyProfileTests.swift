@@ -20,6 +20,7 @@ final class AmplifyProfileTests: XCTestCase {
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "presence"), .presence)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "cinema"), .cinema)
         XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "impact"), .impact)
+        XCTAssertEqual(MediaAmplifyProfile.resolved(fromStored: "dynamicSymphony"), .dynamicSymphony)
     }
 
     func testResolvedLegacyAliases() {
@@ -37,12 +38,53 @@ final class AmplifyProfileTests: XCTestCase {
     func testOnlyImpactAllowsStereoWidth() {
         XCTAssertFalse(MediaAmplifyProfile.reference.allowsStereoWidth)
         XCTAssertFalse(MediaAmplifyProfile.symphony.allowsStereoWidth)
+        XCTAssertFalse(MediaAmplifyProfile.dynamicSymphony.allowsStereoWidth)
         XCTAssertTrue(MediaAmplifyProfile.impact.allowsStereoWidth)
     }
 
     func testReferenceIsFirstCase() {
         XCTAssertEqual(MediaAmplifyProfile.allCases.first, .reference)
         XCTAssertTrue(MediaAmplifyProfile.allCases.contains(.symphony))
+        XCTAssertTrue(MediaAmplifyProfile.allCases.contains(.dynamicSymphony))
+    }
+
+    func testFidelityEnsembleNamesALeadAndStaysBounded() {
+        let muddy = AmplifyToneAI.Features(
+            bassRatio: 0.78, brightness: 0.35, crestDB: 9, zcr: 0.06,
+            dynamicRangeDB: 10, speechLikelihood: 0.08, bandwidthHz: 9000, midRatio: 0.62
+        )
+        let harsh = AmplifyToneAI.Features(
+            bassRatio: 0.4, brightness: 0.9, crestDB: 7, zcr: 0.22,
+            dynamicRangeDB: 8, speechLikelihood: 0.2, bandwidthHz: 15000, midRatio: 0.4
+        )
+        for result in [FidelityModelEnsemble.evaluate(features: muddy), FidelityModelEnsemble.evaluate(features: harsh)] {
+            XCTAssertFalse(result.lead.isEmpty)
+            XCTAssertFalse(result.bias.isEmpty)
+            for value in result.bias.values {
+                XCTAssertTrue(value.isFinite)
+                XCTAssertGreaterThanOrEqual(value, -1.45)
+                XCTAssertLessThanOrEqual(value, 1.15)
+            }
+        }
+    }
+
+    func testLiveDynamicBiasStaysFinite() {
+        let dull = AmplifyToneAI.Features(
+            bassRatio: 0.2, brightness: 0.15, crestDB: 6, zcr: 0.04,
+            dynamicRangeDB: 8, speechLikelihood: 0.1, bandwidthHz: 8000, midRatio: 0.2
+        )
+        let harsh = AmplifyToneAI.Features(
+            bassRatio: 0.7, brightness: 0.85, crestDB: 18, zcr: 0.2,
+            dynamicRangeDB: 20, speechLikelihood: 0.7, bandwidthHz: 14000, midRatio: 0.15
+        )
+        for bias in [AmplifyToneAI.liveDynamicBias(features: dull), AmplifyToneAI.liveDynamicBias(features: harsh)] {
+            XCTAssertFalse(bias.isEmpty)
+            for value in bias.values {
+                XCTAssertTrue(value.isFinite)
+                XCTAssertGreaterThanOrEqual(value, -1.4)
+                XCTAssertLessThanOrEqual(value, 1.4)
+            }
+        }
     }
 }
 

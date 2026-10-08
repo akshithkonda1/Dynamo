@@ -154,12 +154,15 @@ BASE_PROFILES: Dict[str, List[BandSpec]] = {
         BandSpec("highshelf", 7000, 0.4, 0.7, "air"),
     ],
     "symphony": [
-        BandSpec("lowshelf", 65, 0.9, 0.7, "sub"),
-        BandSpec("peak", 180, 0.5, 0.95, "body"),
-        BandSpec("peak", 700, -0.9, 1.0, "mud"),
-        BandSpec("peak", 2200, 0.9, 1.05, "presence"),
-        BandSpec("peak", 4500, 0.4, 1.0, "sheen"),
-        BandSpec("highshelf", 10000, 0.5, 0.7, "air"),
+        BandSpec("lowshelf", 58, 1.05, 0.71, "sub"),
+        BandSpec("peak", 105, 0.6, 1.15, "punch"),
+        BandSpec("peak", 190, 0.35, 1.0, "body"),
+        BandSpec("peak", 320, 0.3, 0.9, "warmth"),
+        BandSpec("peak", 480, -1.15, 1.2, "mud"),
+        BandSpec("peak", 1750, 0.85, 1.2, "presence"),
+        BandSpec("peak", 3400, 0.55, 1.1, "sheen"),
+        BandSpec("peak", 6800, 0.22, 1.0, "brilliance"),
+        BandSpec("highshelf", 11200, 0.42, 0.7, "air"),
     ],
 }
 

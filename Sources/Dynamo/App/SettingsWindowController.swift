@@ -437,7 +437,7 @@ struct SettingsView: View {
                 get: { ambientMode.isEnabled },
                 set: { ambientMode.setEnabled($0) }
             ))
-            Text("When on and media is playing, the collapsed notch becomes a slim menu-bar pill: album art left of the camera, a decorative waveform on the right. Off (the default) keeps today’s collapsed notch.")
+            Text("When music is playing, the collapsed notch rests as a slim pill: album art on the left of the camera, and a waveform on the right tinted by the cover. Move the pointer onto it and the full bar comes down; it returns to the pill when the pointer leaves. Off keeps the usual collapsed notch.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -736,7 +736,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            Text("Fidelity Amplify (local): Reference = transparent; Symphony = mild contour; live adaptive trims; linked true-peak limiter (−1 dBTP). Auto path: Dolby Atmos bed / Spatial / Stereo / stereo-mix fallback. Width only on Impact. Device calibration is mild (AirPods, MacBook, monitors). Works with Atmos/Spatial — does not decode Dolby codecs. macOS 14.2+.")
+            Text("Symphony opens the mix: tighter mud, a vocal pocket, and controlled air. Dynamic Symphony runs six on-device models — Clarity, De-mud, De-harsh, Weight, Air, and Focus — and only the ones the live mix needs. Nothing is uploaded. Linked true-peak limiter (−1 dBTP). macOS 14.2+.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
