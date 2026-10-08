@@ -101,6 +101,8 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     /// Last genre used for curve rebuild (avoids thrashing).
     private var lastToneGenreApplied: String = ""
     private var lastToneRebuildAt: Date = .distantPast
+    /// Live spectral trims from the fidelity ensemble.
+    private var liveDynamicBias: [String: Float] = [:]
 
     private(set) var isRunning = false
     private(set) var lastError: String?
@@ -248,7 +250,9 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         if !tapModeLabel.isEmpty {
             parts.append(tapModeLabel)
         }
-        if !toneGenre.isEmpty, toneGenre != "unknown" {
+        if profile == .dynamicSymphony, !liveMediaHint.isEmpty {
+            parts.append(liveMediaHint)
+        } else if !toneGenre.isEmpty, toneGenre != "unknown" {
             let pretty = toneGenre.prefix(1).uppercased() + toneGenre.dropFirst()
             parts.append("AI \(pretty)")
         } else if !liveMediaHint.isEmpty {
@@ -277,7 +281,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         sampleRate: Double,
         path: AmplifySpatialPath
     ) -> AmplifyEQCurve {
-        if let fromPy = DynamoEQPython.coeffs(
+        // Dynamic Symphony’s curve is rebuilt in-process from the fidelity
+        // ensemble. The Python helper has no view of that live state.
+        if profile != .dynamicSymphony,
+           let fromPy = DynamoEQPython.coeffs(
             profile: profile.rawValue,
             device: device.rawValue,
             sampleRate: sampleRate,
@@ -287,10 +294,19 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         ) {
             return fromPy
         }
-        let bias = AmplifyToneAI.scaledNoteBias(
+        let intensity: Float = profile == .dynamicSymphony ? 0.55 : 0.72
+        var bias = AmplifyToneAI.scaledNoteBias(
             for: toneGenre.isEmpty ? "unknown" : toneGenre,
-            confidence: max(0.4, toneConfidence)
+            confidence: max(0.4, toneConfidence),
+            intensity: intensity
         )
+        if profile == .dynamicSymphony {
+            // Fidelity models lead. Genre is only a light prior so it cannot
+            // fight a clarity or de-harsh decision.
+            for (key, value) in liveDynamicBias {
+                bias[key, default: 0] += value
+            }
+        }
         return DynamoEQCurves.curve(
             for: profile,
             device: device,
@@ -950,6 +966,15 @@ final class LocalAmplifyEngine: @unchecked Sendable {
             hfT = 1.0 + (hfT - 1.0) * 0.20
             presenceT = 1.0 + (presenceT - 1.0) * 0.25
             bassT = 1.0 + (bassT - 1.0) * 0.20
+        } else if profileRaw == MediaAmplifyProfile.dynamicSymphony.rawValue {
+            let fidelity = FidelityModelEnsemble.evaluate(features: feats)
+            liveDynamicBias = fidelity.bias
+            hint = fidelity.lead
+            // Keep level honest. Clarity comes from the filters, not from louder makeup.
+            makeupT = 1.0 + (makeupT - 1.0) * 0.35
+            hfT = 1.0 + (hfT - 1.0) * 0.5
+            presenceT = 1.0 + (presenceT - 1.0) * 0.85
+            bassT = 1.0 + (bassT - 1.0) * 0.45
         }
 
         liveMakeupTarget = max(0.92, min(1.16, makeupT))
@@ -973,15 +998,23 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     private func maybeRebuildForTone(verdict: AmplifyToneAI.Verdict) {
         guard profileRaw != "reference" else { return }
-        guard verdict.confidence >= 0.34 else { return }
+        let dynamic = profileRaw == MediaAmplifyProfile.dynamicSymphony.rawValue
+        guard dynamic || verdict.confidence >= 0.34 else { return }
         let genre = verdict.genre
         let now = Date()
-        // Rebuild at most every 2.5s and only on genre change.
-        guard genre != lastToneGenreApplied || now.timeIntervalSince(lastToneRebuildAt) > 8 else {
-            return
-        }
-        guard now.timeIntervalSince(lastToneRebuildAt) > 2.5 || lastToneGenreApplied.isEmpty else {
-            return
+        if dynamic {
+            // The live mix moves inside one song. Refresh the curve, but not every window.
+            guard now.timeIntervalSince(lastToneRebuildAt) > 1.4 || lastToneGenreApplied.isEmpty else {
+                return
+            }
+        } else {
+            // Rebuild at most every 2.5s and only on genre change.
+            guard genre != lastToneGenreApplied || now.timeIntervalSince(lastToneRebuildAt) > 8 else {
+                return
+            }
+            guard now.timeIntervalSince(lastToneRebuildAt) > 2.5 || lastToneGenreApplied.isEmpty else {
+                return
+            }
         }
         lastToneGenreApplied = genre
         lastToneRebuildAt = now
@@ -1468,19 +1501,38 @@ enum DynamoEQCurves {
             width = 0.08 // only Impact may widen (and only on pure stereo)
             gainCap = 2.8
         case .symphony:
-            // Mild concert contour + room for Tone AI note boosts.
+            // Concert contour: punch separated from body, a vocal pocket, mud pulled
+            // out, air that doesn't turn into hiss.
             bands = [
-                ("lowshelf", 65, 0.9, 0.7, "sub"),
-                ("peak", 110, 0.35, 1.0, "punch"),
-                ("peak", 180, 0.5, 0.95, "body"),
-                ("peak", 700, -0.9, 1.0, "mud"),
-                ("peak", 2200, 0.95, 1.05, "presence"),
-                ("peak", 4500, 0.45, 1.0, "sheen"),
-                ("highshelf", 10000, 0.55, 0.7, "air")
+                ("lowshelf", 58, 1.05, 0.71, "sub"),
+                ("peak", 105, 0.6, 1.15, "punch"),
+                ("peak", 190, 0.35, 1.0, "body"),
+                ("peak", 320, 0.3, 0.9, "warmth"),
+                ("peak", 480, -1.15, 1.2, "mud"),
+                ("peak", 1750, 0.85, 1.2, "presence"),
+                ("peak", 3400, 0.55, 1.1, "sheen"),
+                ("peak", 6800, 0.22, 1.0, "brilliance"),
+                ("highshelf", 11200, 0.42, 0.7, "air")
             ]
-            makeupDB = 0.22
+            makeupDB = 0.24
             width = 0
-            gainCap = 2.4
+            gainCap = 2.6
+        case .dynamicSymphony:
+            // Same musical skeleton, with room for the live fidelity-model offsets.
+            bands = [
+                ("lowshelf", 55, 0.85, 0.7, "sub"),
+                ("peak", 100, 0.45, 1.2, "punch"),
+                ("peak", 180, 0.3, 1.0, "body"),
+                ("peak", 300, 0.2, 0.95, "warmth"),
+                ("peak", 500, -0.9, 1.15, "mud"),
+                ("peak", 1800, 0.7, 1.15, "presence"),
+                ("peak", 3500, 0.35, 1.05, "sheen"),
+                ("peak", 7000, 0.15, 1.0, "brilliance"),
+                ("highshelf", 11500, 0.3, 0.7, "air")
+            ]
+            makeupDB = 0.2
+            width = 0
+            gainCap = 3.4
         }
 
         // Mild device calibration (Tier B) — not aggressive immersive.
@@ -1536,12 +1588,13 @@ enum DynamoEQCurves {
         bands = bands.map { kind, freq, gain, q, label in
             (kind, freq, max(-gainCap, min(gainCap, gain)), q, label)
         }
-        makeupDB = min(makeupDB, profile == .reference ? 0.2 : 0.3)
+        makeupDB = min(makeupDB, profile == .reference ? 0.2 : (profile == .dynamicSymphony ? 0.45 : 0.3))
 
         // Headroom-first staging (Tier B): scale so sum of positive boosts stays modest.
         let posSum = bands.reduce(Float(0)) { $0 + max(0, $1.2) }
-        if posSum + makeupDB > 3.5 {
-            let scale = 3.5 / (posSum + makeupDB)
+        let headroom: Float = profile == .dynamicSymphony ? 5.2 : 3.5
+        if posSum + makeupDB > headroom {
+            let scale = headroom / (posSum + makeupDB)
             bands = bands.map { kind, freq, gain, q, label in
                 (kind, freq, gain * scale, q, label)
             }

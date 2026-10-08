@@ -262,6 +262,45 @@ enum AmplifyToneAI {
         )
     }
 
+    /// Moment-to-moment dB trims from the live mix. Dynamic Symphony adds these
+    /// on top of the genre map so the curve follows the music, not a preset.
+    static func liveDynamicBias(features: Features) -> [String: Float] {
+        var bias: [String: Float] = [:]
+        if features.bassRatio < 0.26 {
+            bias["sub"] = 0.75
+            bias["punch"] = 0.45
+        } else if features.bassRatio > 0.62 {
+            bias["sub"] = -0.65
+            bias["mud"] = -0.8
+            bias["body"] = -0.3
+        }
+        if features.brightness > 0.74 {
+            bias["sheen"] = (bias["sheen"] ?? 0) - 0.7
+            bias["air"] = (bias["air"] ?? 0) - 0.45
+            bias["presence"] = (bias["presence"] ?? 0) + 0.2
+        } else if features.brightness < 0.26 {
+            bias["presence"] = (bias["presence"] ?? 0) + 0.6
+            bias["sheen"] = (bias["sheen"] ?? 0) + 0.4
+            bias["air"] = (bias["air"] ?? 0) + 0.45
+        }
+        if features.crestDB < 8 {
+            bias["punch"] = (bias["punch"] ?? 0) + 0.4
+            bias["mud"] = (bias["mud"] ?? 0) - 0.25
+        } else if features.crestDB > 16 {
+            bias["air"] = (bias["air"] ?? 0) + 0.3
+            bias["sub"] = (bias["sub"] ?? 0) - 0.15
+        }
+        if features.speechLikelihood > 0.55 {
+            bias["presence"] = (bias["presence"] ?? 0) + 0.85
+            bias["sub"] = (bias["sub"] ?? 0) - 0.55
+            bias["mud"] = (bias["mud"] ?? 0) - 0.45
+        } else if features.midRatio < 0.22 {
+            bias["presence"] = (bias["presence"] ?? 0) + 0.4
+            bias["warmth"] = (bias["warmth"] ?? 0) + 0.2
+        }
+        return bias.mapValues { max(-1.4, min(1.4, $0)) }
+    }
+
     /// Band dB bias for curve rebuild (scaled by confidence).
     static func scaledNoteBias(for genre: String, confidence: Float, intensity: Float = 0.72) -> [String: Float] {
         let base = genreNoteBias[genre] ?? genreNoteBias["unknown"]!

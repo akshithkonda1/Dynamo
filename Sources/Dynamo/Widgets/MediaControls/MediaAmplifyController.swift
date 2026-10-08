@@ -5,11 +5,15 @@ import Foundation
 /// Intent profiles for local Symphony EQ — fidelity-first by default options.
 ///
 /// Curves from `Tools/DynamoEQ/dynamo_eq.py` + `LocalAmplifyEngine` (process tap EQ).
-/// **Reference** = transparent; **Symphony** = mild musical; Impact alone may widen stereo.
+/// **Reference** = transparent; **Symphony** = concert contour; **Dynamic Symphony**
+/// retunes that contour on device. Impact alone may widen stereo.
 enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
     /// Transparent high-fidelity: tiny tilt, no mid-side, linked true-peak only.
     case reference
     case symphony
+    /// Symphony contour that keeps moving with the live mix. Six on-device
+    /// fidelity models decide the trims. Nothing is uploaded.
+    case dynamicSymphony
     case presence
     case cinema
     case impact
@@ -20,6 +24,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
         switch self {
         case .reference: return "Reference"
         case .symphony: return "Symphony"
+        case .dynamicSymphony: return "Dynamic Symphony"
         case .presence: return "Presence"
         case .cinema: return "Cinema"
         case .impact: return "Impact"
@@ -29,7 +34,8 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .reference: return "Max fidelity — minimal EQ, Atmos/Spatial safe, no width"
-        case .symphony: return "Mild concert contour — live adaptive + seamless morph"
+        case .symphony: return "Concert contour — separated lows, vocal pocket, controlled air"
+        case .dynamicSymphony: return "Fidelity models — clarity, de-mud, de-harsh, weight, air, focus"
         case .presence: return "Dialogue clarity — soft air, no stereo width"
         case .cinema: return "Soft loudness contour — mid scoop, fidelity-capped gains"
         case .impact: return "Bass body & punch — only profile that may widen stereo"
@@ -40,6 +46,7 @@ enum MediaAmplifyProfile: String, CaseIterable, Identifiable {
         switch self {
         case .reference: return "tuningfork"
         case .symphony: return "music.quarternote.3"
+        case .dynamicSymphony: return "waveform"
         case .presence: return "ear"
         case .cinema: return "film"
         case .impact: return "waveform.path.ecg"
