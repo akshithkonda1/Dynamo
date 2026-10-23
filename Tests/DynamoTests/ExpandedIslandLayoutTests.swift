@@ -49,6 +49,31 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         XCTAssertEqual(NotchTheme.widgetCardRadius, 16, accuracy: 0.5)
     }
 
+    func testMediaCopyHelpersMatchSpecCard() {
+        XCTAssertEqual(
+            NotchWidgetCardLayout.mediaSubtitle(artist: "Radiohead", album: "In Rainbows"),
+            "Radiohead · In Rainbows"
+        )
+        XCTAssertEqual(NotchWidgetCardLayout.mediaSubtitle(artist: "Radiohead", album: ""), "Radiohead")
+        XCTAssertEqual(NotchWidgetCardLayout.mediaSubtitle(artist: "  ", album: "Kid A"), "Kid A")
+        XCTAssertEqual(NotchWidgetCardLayout.formatTime(125), "2:05")
+        XCTAssertEqual(NotchWidgetCardLayout.formatTime(0), "0:00")
+        XCTAssertEqual(
+            NotchWidgetCardLayout.remainingLabel(elapsed: 42, duration: 180),
+            "-2:18"
+        )
+        XCTAssertEqual(
+            NotchWidgetCardLayout.remainingLabel(elapsed: 0, duration: 0),
+            "--:--"
+        )
+    }
+
+    func testExpandedHangStaysBlackAndOneCard() {
+        XCTAssertEqual(NotchTheme.expandedContentBase + NotchTheme.expandedChromeHeight, 200, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 555, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedPanelHeightTarget, 200, accuracy: 0.5)
+    }
+
     // MARK: - Source guards (fail if views stop calling the helpers)
 
     func testContentViewUsesTabBandGapAndWidgetCard() throws {
@@ -69,6 +94,8 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         let text = try sourceFile("Sources/Dynamo/Theme/NotchChrome.swift")
         XCTAssertTrue(text.contains("NotchTheme.widgetCardInset"))
         XCTAssertTrue(text.contains("NotchTheme.widgetCardRadius"))
+        XCTAssertTrue(text.contains("NotchTheme.widgetCardFill"))
+        XCTAssertTrue(text.contains("NotchTheme.widgetCardStroke"))
         XCTAssertTrue(text.contains("struct NotchWidgetCard"))
     }
 
@@ -86,9 +113,42 @@ final class ExpandedIslandLayoutTests: XCTestCase {
             text.contains("NotchWidgetCardLayout.mediaMetrics("),
             "Music card must size art/transport through NotchWidgetCardLayout.mediaMetrics"
         )
+        XCTAssertTrue(
+            text.contains("NotchWidgetCardLayout.mediaSubtitle("),
+            "Music card must build artist · album through NotchWidgetCardLayout.mediaSubtitle"
+        )
+        XCTAssertTrue(
+            text.contains("NotchWidgetCardLayout.remainingLabel("),
+            "Progress row must show remaining time through NotchWidgetCardLayout.remainingLabel"
+        )
+        XCTAssertTrue(text.contains("appBadge"), "Spec card keeps a small player badge")
+        XCTAssertFalse(
+            text.contains("Now Playing"),
+            "Music card must not grow a Now Playing header chip row"
+        )
         XCTAssertFalse(
             NotchWidgetCardLayout.isFullPageCarousel(text),
             "Music tab must stay one player card — no second page"
+        )
+    }
+
+    func testExpandedPanelDropsCyanHangShadow() throws {
+        let text = try sourceFile("Sources/Dynamo/Notch/NotchContentView.swift")
+        XCTAssertFalse(
+            text.contains("NotchTheme.neonCyan.opacity(0.10)"),
+            "Expanded hang shadow must stay black, not a cyan bloom"
+        )
+        XCTAssertTrue(text.contains("Color.black.opacity(0.32)"))
+    }
+
+    func testBatteryExpandedBodyIsOneCard() throws {
+        let text = try sourceFile("Sources/Dynamo/Widgets/Battery/BatteryPlugin.swift")
+        XCTAssertTrue(text.contains("chargeRing"))
+        XCTAssertTrue(text.contains("powerModeControls"))
+        XCTAssertTrue(text.contains("vitalsStrip"))
+        XCTAssertTrue(
+            text.contains("No nested plates"),
+            "Battery body comment is the contract: one tidy card, no nested plates"
         )
     }
 

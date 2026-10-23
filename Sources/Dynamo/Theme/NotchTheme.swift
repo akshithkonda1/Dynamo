@@ -91,7 +91,11 @@ enum NotchTheme {
     /// Solid glass density — full coverage edge-to-edge (no transparent bottom).
     static let panelScrim = Color.black.opacity(0.46)
     /// Expanded hang is a compact black panel, not a translucent sheet.
-    static let panelScrimExpanded = Color.black.opacity(0.78)
+    static let panelScrimExpanded = Color.black.opacity(0.88)
+    /// Fill of the single widget plate under the tab band.
+    static let widgetCardFill = Color.white.opacity(0.045)
+    /// Hairline on that plate — quiet, not a neon frame.
+    static let widgetCardStroke = Color.white.opacity(0.08)
 
     /// System semantic status, slightly boosted for dark glass.
     static var positive: Color { system(.systemGreen).opacity(0.95) }

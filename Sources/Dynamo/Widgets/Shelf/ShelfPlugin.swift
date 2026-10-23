@@ -147,31 +147,28 @@ private struct ExpandedShelfView: View {
     }
 
     private var dropHint: some View {
-        NotchCard {
-            VStack(spacing: 8) {
-                Image(systemName: isDropTargeted ? "tray.and.arrow.down.fill" : "plus")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isDropTargeted ? NotchTheme.textPrimary : NotchTheme.textTertiary)
-                    .scaleEffect(isDropTargeted ? 1.12 : 1.0)
-                Text(isDropTargeted ? "Drop to stash" : "Park files here")
-                    .font(NotchTheme.caption.weight(.medium))
-                    .foregroundStyle(NotchTheme.textSecondary)
-                Text(isDropTargeted
-                    ? "Release to copy into Dynamo"
-                    : "Drag in, or click to pick — originals stay put")
-                    .font(NotchTheme.micro)
-                    .foregroundStyle(NotchTheme.textQuaternary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+        VStack(spacing: 8) {
+            Image(systemName: isDropTargeted ? "tray.and.arrow.down.fill" : "plus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isDropTargeted ? NotchTheme.textPrimary : NotchTheme.textTertiary)
+                .scaleEffect(isDropTargeted ? 1.12 : 1.0)
+            Text(isDropTargeted ? "Drop to stash" : "Park files here")
+                .font(NotchTheme.caption.weight(.medium))
+                .foregroundStyle(NotchTheme.textSecondary)
+            Text(isDropTargeted
+                ? "Release to copy into Dynamo"
+                : "Drag in, or click to pick — originals stay put")
+                .font(NotchTheme.micro)
+                .foregroundStyle(NotchTheme.textQuaternary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
         .overlay(
-            RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
+            RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
                 .strokeBorder(
                     isDropTargeted ? NotchTheme.mediaGlow : Color.clear,
-                    lineWidth: isDropTargeted ? 2 : 0
+                    lineWidth: isDropTargeted ? 1.5 : 0
                 )
-                .shadow(color: isDropTargeted ? NotchTheme.mediaGlow.opacity(0.5) : .clear, radius: 10)
         )
         .scaleEffect(isDropTargeted ? 1.02 : 1.0)
         .animation(NotchTheme.snappy, value: isDropTargeted)

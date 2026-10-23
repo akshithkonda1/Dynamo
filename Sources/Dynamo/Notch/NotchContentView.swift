@@ -54,15 +54,10 @@ struct NotchContentView: View {
         }
         .shadow(
             color: controller.isExpanded
-                ? NotchTheme.neonCyan.opacity(0.10)
+                ? Color.black.opacity(0.32)
                 : (isShowingOverlay ? Color.black.opacity(0.22) : ambientAccent.opacity(0.10)),
-            radius: controller.isExpanded ? 22 : (isShowingOverlay ? 10 : 2),
-            y: controller.isExpanded ? 6 : (isShowingOverlay ? 2 : 0)
-        )
-        .shadow(
-            color: controller.isExpanded ? Color.black.opacity(0.28) : .clear,
-            radius: controller.isExpanded ? 18 : 0,
-            y: controller.isExpanded ? 8 : 0
+            radius: controller.isExpanded ? 16 : (isShowingOverlay ? 10 : 2),
+            y: controller.isExpanded ? 8 : (isShowingOverlay ? 2 : 0)
         )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
@@ -389,7 +384,7 @@ private struct TrayIconButton: View {
     }
 
     private var strokeColor: Color {
-        if isActive { return NotchTheme.neonCyan.opacity(0.45) }
+        if isActive { return Color.white.opacity(0.22) }
         return isHovering ? Color.white.opacity(0.14) : Color.clear
     }
 }
