@@ -13,10 +13,31 @@ struct NotchWidgetCard<Content: View>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.045))
+                    .fill(NotchTheme.widgetCardFill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [NotchTheme.widgetCardSheen, Color.clear],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                )
+                            )
+                    }
                     .overlay(
                         RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.6)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.18),
+                                        NotchTheme.widgetCardStroke,
+                                        Color.white.opacity(0.04)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.7
+                            )
                     )
             }
     }
@@ -31,42 +52,17 @@ struct NotchCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        // Material plate owns the glass; padding keeps legacy NotchCard API.
+        // Flat plate — no neon frame. Padding keeps the legacy NotchCard API.
         content()
             .padding(compact ? NotchTheme.spaceSM : padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 ZStack {
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .environment(\.colorScheme, .dark)
+                        .fill(NotchTheme.widgetCardFill)
                     RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.07),
-                                    NotchTheme.cardFill.opacity(0.55),
-                                    Color.clear
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                    RoundedRectangle(cornerRadius: NotchTheme.radiusCard, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.18),
-                                    NotchTheme.neonCyan.opacity(0.12),
-                                    Color.white.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.6
-                        )
+                        .strokeBorder(NotchTheme.widgetCardStroke, lineWidth: 0.6)
                 }
-                .shadow(color: Color.black.opacity(0.2), radius: 7, y: 2)
             }
     }
 }
@@ -85,15 +81,8 @@ struct NotchSectionHeader: View {
     var body: some View {
         HStack(spacing: NotchTheme.spaceSM) {
             Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [NotchTheme.neonCyan.opacity(0.9), NotchTheme.neonViolet.opacity(0.7)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 2.5, height: 10)
-                .shadow(color: NotchTheme.neonCyan.opacity(0.45), radius: 3, y: 0)
+                .fill(Color.white.opacity(0.28))
+                .frame(width: 2, height: 10)
             Text(title)
                 .font(NotchTheme.section)
                 .foregroundStyle(NotchTheme.textTertiary)
@@ -192,9 +181,8 @@ struct NotchStatusChip: View {
                     .fill(kind.fill)
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(kind.foreground.opacity(0.28), lineWidth: 0.6)
+                            .strokeBorder(kind.foreground.opacity(0.22), lineWidth: 0.5)
                     )
-                    .shadow(color: kind.foreground.opacity(0.22), radius: 4, y: 0)
             )
             .animation(NotchTheme.snappy, value: text)
     }
@@ -224,30 +212,9 @@ struct NotchChipLabel: View {
                 .overlay(
                     Capsule(style: .continuous)
                         .strokeBorder(
-                            active
-                                ? LinearGradient(
-                                    colors: [
-                                        NotchTheme.neonCyan.opacity(0.65),
-                                        NotchTheme.neonViolet.opacity(0.5)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                : LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.18),
-                                        Color.white.opacity(0.06)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
+                            active ? Color.white.opacity(0.22) : Color.white.opacity(0.08),
                             lineWidth: active ? 0.8 : 0.5
                         )
-                )
-                .shadow(
-                    color: active ? NotchTheme.neonCyan.opacity(0.28) : .clear,
-                    radius: active ? 5 : 0,
-                    y: 0
                 )
         )
         .scaleEffect(active ? 1.02 : 1.0)

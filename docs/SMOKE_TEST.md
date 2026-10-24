@@ -20,6 +20,7 @@ Use this after a local build to confirm the app is usable day-to-day.
 ## 1. Notch shell (Phases A / D)
 
 - [ ] Collapsed panel sits in / under the physical notch
+- [ ] Hover expands a compact **black hang ~555×200**; tab icons split around the camera gap; **one card per tab** (no nested plates)
 - [ ] Hover expands tray with spring motion; design tokens (cards, chips) look consistent
 - [ ] Leaving the panel collapses after the Settings delay (default 10s)
 - [ ] **Settings → General → Collapse after leaving notch**: try 3s / hover-only

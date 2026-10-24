@@ -38,6 +38,21 @@ final class NotchOverflowPolicyTests: XCTestCase {
         )
     }
 
+    func testWidgetSourcesDoNotNestNotchCard() throws {
+        let files = try widgetSwiftFiles()
+        var offenders: [String] = []
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            if NotchWidgetCardLayout.hasNestedWidgetCard(text) {
+                offenders.append(file.lastPathComponent)
+            }
+        }
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Widget wraps content in NotchCard (host already provides one card): \(offenders.joined(separator: ", "))"
+        )
+    }
+
     private func widgetSwiftFiles() throws -> [URL] {
         let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let widgets = testsDir

@@ -285,46 +285,40 @@ private struct ExpandedWeatherView: View {
     }
 
     private func currentConditions(_ snapshot: WeatherSnapshot) -> some View {
-        NotchCard {
-            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-                Image(systemName: snapshot.symbolName)
-                    .symbolRenderingMode(.multicolor)
-                    .font(.system(size: 36))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(TemperatureFormat.short(snapshot.temperature))
-                        .font(NotchTheme.heroDigit)
-                        .foregroundStyle(NotchTheme.textPrimary)
-                    Text(snapshot.conditionDescription)
-                        .font(NotchTheme.caption)
-                        .foregroundStyle(NotchTheme.textSecondary)
-                    if let high = snapshot.high, let low = snapshot.low {
-                        Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
-                            .font(NotchTheme.micro.monospacedDigit())
-                            .foregroundStyle(NotchTheme.textTertiary)
-                    }
-                    if snapshot.feelsLike != nil || snapshot.windSpeedKph != nil || snapshot.humidityPercent != nil {
-                        HStack(spacing: 8) {
-                            if let fl = snapshot.feelsLike {
-                                Label(TemperatureFormat.short(fl), systemImage: "thermometer.medium")
-                            }
-                            if let w = snapshot.windSpeedKph {
-                                Label("\(Int(w)) km/h", systemImage: "wind")
-                            }
-                            if let h = snapshot.humidityPercent {
-                                Label("\(h)%", systemImage: "humidity")
-                            }
-                        }
-                        .font(NotchTheme.micro)
+        HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+            Image(systemName: snapshot.symbolName)
+                .symbolRenderingMode(.multicolor)
+                .font(.system(size: 36))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(TemperatureFormat.short(snapshot.temperature))
+                    .font(NotchTheme.heroDigit)
+                    .foregroundStyle(NotchTheme.textPrimary)
+                Text(snapshot.conditionDescription)
+                    .font(NotchTheme.caption)
+                    .foregroundStyle(NotchTheme.textSecondary)
+                if let high = snapshot.high, let low = snapshot.low {
+                    Text("H \(TemperatureFormat.short(high))   L \(TemperatureFormat.short(low))")
+                        .font(NotchTheme.micro.monospacedDigit())
                         .foregroundStyle(NotchTheme.textTertiary)
-                    }
                 }
-                Spacer(minLength: 0)
+                if snapshot.feelsLike != nil || snapshot.windSpeedKph != nil || snapshot.humidityPercent != nil {
+                    HStack(spacing: 8) {
+                        if let fl = snapshot.feelsLike {
+                            Label(TemperatureFormat.short(fl), systemImage: "thermometer.medium")
+                        }
+                        if let w = snapshot.windSpeedKph {
+                            Label("\(Int(w)) km/h", systemImage: "wind")
+                        }
+                        if let h = snapshot.humidityPercent {
+                            Label("\(h)%", systemImage: "humidity")
+                        }
+                    }
+                    .font(NotchTheme.micro)
+                    .foregroundStyle(NotchTheme.textTertiary)
+                }
             }
+            Spacer(minLength: 0)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
     }
 
     private func hourlyStrip(_ hours: [WeatherHourItem]) -> some View {

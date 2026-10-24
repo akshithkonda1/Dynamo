@@ -375,47 +375,52 @@ private struct ExpandedMediaView: View {
     var body: some View {
         GeometryReader { geo in
             let metrics = NotchWidgetCardLayout.mediaMetrics(width: geo.size.width)
-            HStack(alignment: .top, spacing: NotchTheme.spaceMD) {
+            // One plate: art left, copy + progress + centered transport.
+            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
                 artwork(size: metrics.artSize)
-                    .padding(.top, 2)
                     .notchAppear()
 
-                VStack(alignment: .leading, spacing: 5) {
-                    header
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if hasTrack {
+                                MarqueeText(
+                                    text: plugin.info.title,
+                                    font: .system(size: metrics.titleSize, weight: .semibold),
+                                    foreground: NotchTheme.textPrimary,
+                                    speed: 32
+                                )
+                                .frame(height: 22)
+                                .onTapGesture { plugin.openConnectedApp() }
+                                MarqueeText(
+                                    text: subtitle,
+                                    font: NotchTheme.caption,
+                                    foreground: NotchTheme.textSecondary,
+                                    speed: 28
+                                )
+                                .frame(height: 16)
+                            } else {
+                                Text("Ready when you are")
+                                    .font(NotchTheme.body.weight(.semibold))
+                                    .foregroundStyle(NotchTheme.textPrimary)
+                                Text("Queue something in Music or Spotify — skip & volume still work.")
+                                    .font(NotchTheme.micro)
+                                    .foregroundStyle(NotchTheme.textTertiary)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        appBadge
+                    }
+
                     if hasTrack {
-                        MarqueeText(
-                            text: plugin.info.title,
-                            font: .system(size: metrics.titleSize, weight: .semibold),
-                            foreground: NotchTheme.textPrimary,
-                            speed: 32
-                        )
-                        .frame(height: 22)
-                        .onTapGesture { plugin.openConnectedApp() }
-                        MarqueeText(
-                            text: subtitle,
-                            font: NotchTheme.caption,
-                            foreground: NotchTheme.textSecondary,
-                            speed: 28
-                        )
-                        .frame(height: 16)
-                        .padding(.bottom, 1)
                         timelineBar
                     } else {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Ready when you are")
-                                .font(NotchTheme.body.weight(.semibold))
-                                .foregroundStyle(NotchTheme.textPrimary)
-                            Text("Queue something in Music or Spotify — skip & volume still work.")
-                                .font(NotchTheme.micro)
-                                .foregroundStyle(NotchTheme.textTertiary)
-                            Button {
-                                plugin.openConnectedApp()
-                            } label: {
-                                NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
-                            }
-                            .buttonStyle(.plain)
+                        Button {
+                            plugin.openConnectedApp()
+                        } label: {
+                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
                     }
 
                     transportRow(
@@ -423,11 +428,9 @@ private struct ExpandedMediaView: View {
                         sideDiameter: metrics.sideDiameter,
                         auxDiameter: metrics.auxDiameter
                     )
-                    .padding(.top, 2)
                     compactVolumeRow
                 }
                 .notchAppear(delay: 0.04)
-                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -474,79 +477,25 @@ private struct ExpandedMediaView: View {
 
     private var subtitle: String {
         if hasTrack {
-            return plugin.info.artist.isEmpty ? plugin.info.album : plugin.info.artist
+            return NotchWidgetCardLayout.mediaSubtitle(artist: plugin.info.artist, album: plugin.info.album)
         }
         return "Play something and it'll show up here."
     }
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(plugin.info.isPlaying ? "Now Playing" : "Music")
-                    .font(NotchTheme.section)
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-                if hasTrack, !plugin.info.album.isEmpty, plugin.info.artist != plugin.info.album {
-                    Text(plugin.info.album)
-                        .font(NotchTheme.micro)
-                        .foregroundStyle(NotchTheme.textQuaternary)
-                        .lineLimit(1)
-                }
-            }
-            if plugin.info.isPlaying {
-                // Album-accent bars from MediaPeekPulse cover palette.
-                MusicBarsView(
-                    isPlaying: plugin.info.isPlaying,
-                    barCount: 6,
-                    maxHeight: 16,
-                    color: MediaPeekPulse.shared.palette.accent
-                        .boosted(saturation: 1.35).color
-                )
-                .fixedSize()
-                .padding(.leading, 2)
-            }
-            // Explicit badge
-            if plugin.info.isExplicit {
-                Text("E")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .foregroundStyle(NotchTheme.textTertiary)
-                    .frame(width: 14, height: 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .strokeBorder(NotchTheme.textQuaternary, lineWidth: 1)
-                    )
-            }
-            // Genre chip
-            if let genre = plugin.info.genre {
-                Text(genre)
-                    .font(NotchTheme.micro.weight(.medium))
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            // Release year
-            if let year = plugin.info.releaseYear {
-                Text(String(year))
-                    .font(NotchTheme.micro.monospacedDigit())
-                    .foregroundStyle(NotchTheme.textQuaternary)
-                    .fixedSize()
-            }
-            Spacer(minLength: 0)
-            // Icon that opens Music / Spotify
-            Image(systemName: playerAppName == "Spotify" ? "music.note.list" : "music.note.house")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(NotchTheme.textSecondary)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(NotchTheme.chipFill))
-                .contentShape(Circle())
-                .onTapGesture { plugin.openConnectedApp() }
-                .help("Open \(playerAppName)")
-        }
-        .padding(.bottom, 2)
+    /// Small player badge — top-right of the spec card.
+    private var appBadge: some View {
+        Image(systemName: playerAppName == "Spotify" ? "music.note.list" : "music.note.house")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(NotchTheme.textSecondary)
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(NotchTheme.chipFill))
+            .contentShape(Circle())
+            .onTapGesture { plugin.openConnectedApp() }
+            .help("Open \(playerAppName)")
+            .accessibilityLabel("Open \(playerAppName)")
     }
 
-    /// Scrubbable playback position — album-accent tint; mini EQ stays in the header.
+    /// Scrubbable playback position — album-accent tint (purposeful, not chrome).
     private var timelineBar: some View {
         let duration = max(plugin.info.duration, 0)
         let canSeek = duration > 0.5 && hasTrack
@@ -581,24 +530,15 @@ private struct ExpandedMediaView: View {
             .animation(NotchTheme.contentSpring, value: MediaPeekPulse.shared.trackKey)
 
             HStack {
-                Text(Self.formatTime(effectiveElapsed))
+                Text(NotchWidgetCardLayout.formatTime(effectiveElapsed))
                     .font(NotchTheme.micro.monospacedDigit())
                     .foregroundStyle(NotchTheme.textTertiary)
                 Spacer(minLength: 0)
-                Text(canSeek ? Self.formatTime(duration) : "--:--")
+                Text(NotchWidgetCardLayout.remainingLabel(elapsed: effectiveElapsed, duration: duration))
                     .font(NotchTheme.micro.monospacedDigit())
                     .foregroundStyle(NotchTheme.textQuaternary)
             }
         }
-        .padding(.top, 2)
-    }
-
-    private static func formatTime(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds.rounded(.down))
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%d:%02d", m, s)
     }
 
     /// Amplify icon button — **green glow when on**, **red glow when off**.
@@ -857,16 +797,7 @@ private struct ExpandedMediaView: View {
                 .help(plugin.isTrackLiked ? "In Library" : "Add to Library")
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 2)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
-                )
-        )
+        .padding(.vertical, 2)
     }
 
     private func transportButton(

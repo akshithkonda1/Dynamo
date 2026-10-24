@@ -489,8 +489,6 @@ private struct ExpandedBatteryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            header
-
             if !snapshot.isPresent {
                 NotchEmptyState(
                     systemImage: "laptopcomputer",
@@ -499,28 +497,42 @@ private struct ExpandedBatteryView: View {
                     prominent: true
                 )
             } else {
-                HStack(alignment: .top, spacing: 8) {
-                    heroCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .notchAppear()
-                    VStack(alignment: .leading, spacing: 6) {
-                        sectionCard(title: "Capacity", systemImage: "rectangle.stack.fill") {
-                            capacitySection
+                // One tidy card: hero + meter + modes + vitals. No nested plates.
+                HStack(alignment: .center, spacing: 10) {
+                    chargeRing
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            Text("\(snapshot.percent)%")
+                                .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(barColor)
+                                .contentTransition(.numericText())
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: snapshot.percent)
+                            NotchStatusChip(text: statusChipText, kind: statusChipKind)
+                            Spacer(minLength: 0)
                         }
-                        .notchAppear(delay: 0.04)
-                        sectionCard(title: "Power source", systemImage: "powerplug.fill") {
-                            adapterSection
+                        Text(timeInfo.value)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(NotchTheme.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        if let sub = timeInfo.subtitle {
+                            Text(sub)
+                                .font(NotchTheme.micro)
+                                .foregroundStyle(NotchTheme.textTertiary)
+                                .lineLimit(1)
                         }
-                        .notchAppear(delay: 0.06)
-                        sectionCard(title: "Power mode", systemImage: "leaf.fill") {
-                            powerModeControls
-                        }
-                        .notchAppear(delay: 0.08)
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    Spacer(minLength: 0)
                 }
+                .notchAppear()
+
+                chargeMeter
+
+                powerModeControls
+                    .notchAppear(delay: 0.04)
+
                 vitalsStrip
-                    .notchAppear(delay: 0.1)
+                    .notchAppear(delay: 0.06)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

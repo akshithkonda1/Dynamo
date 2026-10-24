@@ -91,7 +91,20 @@ enum NotchTheme {
     /// Solid glass density — full coverage edge-to-edge (no transparent bottom).
     static let panelScrim = Color.black.opacity(0.46)
     /// Expanded hang is a compact black panel, not a translucent sheet.
-    static let panelScrimExpanded = Color.black.opacity(0.78)
+    static let panelScrimExpanded = Color.black.opacity(0.88)
+    /// Fill of the single widget plate under the tab band.
+    static let widgetCardFill = Color.white.opacity(0.045)
+    /// Hairline on that plate — quiet, not a neon frame.
+    static let widgetCardStroke = Color.white.opacity(0.10)
+    /// Top-edge sheen inside the widget plate (static — no GPU pulse).
+    static let widgetCardSheen = Color.white.opacity(0.10)
+    /// Soft black hang depth. `NotchContentView` reads this for the expanded shadow.
+    static let panelDepth = Color.black.opacity(0.46)
+    static let panelDepthRadius: CGFloat = 22
+    static let panelDepthY: CGFloat = 10
+    /// Cool-white rim glow — crisp, not a cyan bloom.
+    static let panelGlow = Color.white.opacity(0.16)
+    static let panelGlowRadius: CGFloat = 10
 
     /// System semantic status, slightly boosted for dark glass.
     static var positive: Color { system(.systemGreen).opacity(0.95) }
@@ -131,23 +144,34 @@ enum NotchTheme {
     static let shadowRadius: CGFloat = 24
     static let shadowY: CGFloat = 12
 
-    // MARK: Animation — instantaneous feel (tight springs, short settles)
-    /// Island expand/collapse.
+    // MARK: Animation — buttery springs, short settles (cheap, no display-link)
+    /// Island expand/collapse. Views and the window both read these numbers.
+    static let expandResponse: Double = 0.28
+    static let expandDamping: Double = 0.78
     static var expandSpring: Animation {
-        .spring(response: 0.20, dampingFraction: 0.90, blendDuration: 0.04)
+        .spring(response: expandResponse, dampingFraction: expandDamping, blendDuration: 0.08)
     }
 
-    /// Content cross-fade / tab switch.
+    /// Content cross-fade / card swap.
+    static let contentResponse: Double = 0.20
+    static let contentDamping: Double = 0.84
     static var contentSpring: Animation {
-        .spring(response: 0.16, dampingFraction: 0.92, blendDuration: 0.03)
+        .spring(response: contentResponse, dampingFraction: contentDamping, blendDuration: 0.05)
+    }
+
+    /// Tab icon select / hover — slightly punchier than content.
+    static let tabResponse: Double = 0.18
+    static let tabDamping: Double = 0.72
+    static var tabSpring: Animation {
+        .spring(response: tabResponse, dampingFraction: tabDamping, blendDuration: 0.04)
     }
 
     static var snappy: Animation {
-        .spring(response: 0.12, dampingFraction: 0.90)
+        .spring(response: 0.14, dampingFraction: 0.86)
     }
 
     static var quick: Animation {
-        .easeOut(duration: 0.07)
+        .easeOut(duration: 0.08)
     }
 
     /// Ambient rim pulse — slow so it costs almost no CPU.
@@ -155,11 +179,11 @@ enum NotchTheme {
         .easeInOut(duration: 2.6).repeatForever(autoreverses: true)
     }
 
-    /// Match AppKit panel frame animation to SwiftUI expand spring feel.
-    static let panelExpandDuration: TimeInterval = 0.20
-    /// Standard macOS ease with a light overshoot for island character.
+    /// Match AppKit panel frame animation to the SwiftUI expand spring.
+    static var panelExpandDuration: TimeInterval { expandResponse }
+    /// Soft overshoot so the hang lands like an island, not a linear fade.
     static var panelExpandTiming: CAMediaTimingFunction {
-        CAMediaTimingFunction(controlPoints: 0.16, 0.95, 0.18, 1.02)
+        CAMediaTimingFunction(controlPoints: 0.18, 1.14, 0.24, 1.0)
     }
 
     // MARK: Helpers

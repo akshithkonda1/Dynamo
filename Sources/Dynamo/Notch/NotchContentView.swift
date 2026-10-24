@@ -40,29 +40,37 @@ struct NotchContentView: View {
                     collapsedBody
                 }
             }
-            .transition(.opacity)
+            .transition(
+                .asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)),
+                    removal: .opacity
+                )
+            )
         }
         // Solid island: hard clip only — no soft-fade mask (that made the bottom ghosty).
         .compositingGroup()
         .clipShape(NotchShape(cornerRadius: cornerRadius))
-        // No stroke. No expanded silhouette shadow. Clean continuous bottom lip.
         .overlay {
-            if !controller.isExpanded && !isShowingOverlay && !showsAmbientPill {
+            if controller.isExpanded {
+                NotchShape(cornerRadius: cornerRadius)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.6)
+                    .allowsHitTesting(false)
+            } else if !isShowingOverlay && !showsAmbientPill {
                 AmbientBreathingRim(accent: ambientAccent)
                     .allowsHitTesting(false)
             }
         }
         .shadow(
             color: controller.isExpanded
-                ? NotchTheme.neonCyan.opacity(0.10)
+                ? NotchTheme.panelDepth
                 : (isShowingOverlay ? Color.black.opacity(0.22) : ambientAccent.opacity(0.10)),
-            radius: controller.isExpanded ? 22 : (isShowingOverlay ? 10 : 2),
-            y: controller.isExpanded ? 6 : (isShowingOverlay ? 2 : 0)
+            radius: controller.isExpanded ? NotchTheme.panelDepthRadius : (isShowingOverlay ? 10 : 2),
+            y: controller.isExpanded ? NotchTheme.panelDepthY : (isShowingOverlay ? 2 : 0)
         )
         .shadow(
-            color: controller.isExpanded ? Color.black.opacity(0.28) : .clear,
-            radius: controller.isExpanded ? 18 : 0,
-            y: controller.isExpanded ? 8 : 0
+            color: controller.isExpanded ? NotchTheme.panelGlow : .clear,
+            radius: controller.isExpanded ? NotchTheme.panelGlowRadius : 0,
+            y: 0
         )
         .animation(NotchTheme.expandSpring, value: controller.isExpanded)
         .animation(NotchTheme.contentSpring, value: registry.activePluginID)
@@ -92,7 +100,7 @@ struct NotchContentView: View {
             // Soft top sheen. Expanded hang stays black — no cyan wash.
             LinearGradient(
                 colors: [
-                    Color.white.opacity(controller.isExpanded ? 0.04 : 0.03),
+                    Color.white.opacity(controller.isExpanded ? 0.07 : 0.03),
                     Color.clear
                 ],
                 startPoint: .top,
@@ -200,8 +208,10 @@ struct NotchContentView: View {
                     .padding(.bottom, NotchTheme.chromeContentBottom)
                     .transition(
                         .asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: 6)),
-                            removal: .opacity.combined(with: .offset(y: -4))
+                            insertion: .opacity
+                                .combined(with: .scale(scale: 0.985, anchor: .top))
+                                .combined(with: .offset(y: 7)),
+                            removal: .opacity.combined(with: .offset(y: -5))
                         )
                     )
                 }
@@ -310,12 +320,17 @@ private struct TrayIconButton: View {
                     .fill(fillColor)
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(strokeColor, lineWidth: 0.6)
+                            .strokeBorder(strokeColor, lineWidth: isActive ? 0.8 : 0.6)
                     )
                     .shadow(
-                        color: isActive ? Color.black.opacity(0.22) : .clear,
-                        radius: isActive ? 3 : 0,
+                        color: isActive ? Color.black.opacity(0.28) : .clear,
+                        radius: isActive ? 4 : 0,
                         y: 1
+                    )
+                    .shadow(
+                        color: isActive ? Color.white.opacity(0.14) : .clear,
+                        radius: isActive ? 5 : 0,
+                        y: 0
                     )
             )
             .contentShape(Capsule())
@@ -328,10 +343,10 @@ private struct TrayIconButton: View {
                 previewTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: Self.previewDelayNs)
                     guard !Task.isCancelled, isHovering else { return }
-                    withAnimation(NotchTheme.quick) { showPreview = true }
+                    withAnimation(NotchTheme.tabSpring) { showPreview = true }
                 }
             } else {
-                withAnimation(NotchTheme.quick) { showPreview = false }
+                withAnimation(NotchTheme.tabSpring) { showPreview = false }
             }
         }
         .onDisappear {
@@ -362,9 +377,9 @@ private struct TrayIconButton: View {
             }
         }
         .zIndex(showPreview ? 20 : 0)
-        .animation(NotchTheme.quick, value: isHovering)
-        .animation(NotchTheme.snappy, value: isActive)
-        .animation(NotchTheme.quick, value: showPreview)
+        .animation(NotchTheme.tabSpring, value: isHovering)
+        .animation(NotchTheme.tabSpring, value: isActive)
+        .animation(NotchTheme.tabSpring, value: showPreview)
         .accessibilityLabel(displayName)
         .accessibilityHint("Opens \(displayName)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
@@ -389,8 +404,8 @@ private struct TrayIconButton: View {
     }
 
     private var strokeColor: Color {
-        if isActive { return NotchTheme.neonCyan.opacity(0.45) }
-        return isHovering ? Color.white.opacity(0.14) : Color.clear
+        if isActive { return Color.white.opacity(0.28) }
+        return isHovering ? Color.white.opacity(0.16) : Color.clear
     }
 }
 
@@ -400,9 +415,9 @@ private struct TrayIconButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.88 : (isHovering ? 1.06 : 1.0))
-            .animation(NotchTheme.snappy, value: configuration.isPressed)
-            .animation(NotchTheme.quick, value: isHovering)
+            .scaleEffect(configuration.isPressed ? 0.90 : (isHovering ? 1.08 : 1.0))
+            .animation(NotchTheme.tabSpring, value: configuration.isPressed)
+            .animation(NotchTheme.tabSpring, value: isHovering)
     }
 }
 
