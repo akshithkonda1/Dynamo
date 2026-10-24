@@ -14,9 +14,30 @@ struct NotchWidgetCard<Content: View>: View {
             .background {
                 RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
                     .fill(NotchTheme.widgetCardFill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [NotchTheme.widgetCardSheen, Color.clear],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                )
+                            )
+                    }
                     .overlay(
                         RoundedRectangle(cornerRadius: NotchTheme.widgetCardRadius, style: .continuous)
-                            .strokeBorder(NotchTheme.widgetCardStroke, lineWidth: 0.6)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.18),
+                                        NotchTheme.widgetCardStroke,
+                                        Color.white.opacity(0.04)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.7
+                            )
                     )
             }
     }

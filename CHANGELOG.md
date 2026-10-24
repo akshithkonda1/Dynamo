@@ -12,6 +12,8 @@ All notable changes to Dynamo are documented here.
 - Tidy-card restyle (Akshith 2026-10-04): blacker expanded scrim, no cyan hang bloom, no nested `NotchCard` plates
 - Music card is art + title/artist + badge + remaining-time bar + centered transport (no Now Playing chip row)
 - Battery sits as one hero/meter/modes/vitals plate instead of stacked inner cards
+- Premium hang motion: buttery expand spring (`0.28 / 0.78`) shared by SwiftUI and the AppKit frame; tab icons use `tabSpring`
+- Crisp depth: `panelDepth` + cool-white `panelGlow` (static shadows, no pulse); widget cards get a top sheen + graded hairline
 
 ### Ambient mode
 - Optional **Ambient mode** (Preferences → General, off by default): while media is playing, the collapsed notch becomes a menu-bar-height pill — album art left of the camera, a decorative 5-bar waveform on the right

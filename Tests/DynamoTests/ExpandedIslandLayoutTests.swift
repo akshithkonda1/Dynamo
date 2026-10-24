@@ -96,7 +96,18 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         XCTAssertTrue(text.contains("NotchTheme.widgetCardRadius"))
         XCTAssertTrue(text.contains("NotchTheme.widgetCardFill"))
         XCTAssertTrue(text.contains("NotchTheme.widgetCardStroke"))
+        XCTAssertTrue(text.contains("NotchTheme.widgetCardSheen"))
         XCTAssertTrue(text.contains("struct NotchWidgetCard"))
+    }
+
+    func testMotionTokensStayButteryAndPaired() {
+        XCTAssertEqual(NotchTheme.expandResponse, 0.28, accuracy: 0.001)
+        XCTAssertEqual(NotchTheme.expandDamping, 0.78, accuracy: 0.001)
+        XCTAssertEqual(NotchTheme.panelExpandDuration, NotchTheme.expandResponse, accuracy: 0.001)
+        XCTAssertGreaterThan(NotchTheme.tabResponse, 0)
+        XCTAssertLessThan(NotchTheme.tabDamping, 0.9)
+        XCTAssertEqual(NotchTheme.panelDepthRadius, 22, accuracy: 0.5)
+        XCTAssertEqual(NotchTheme.panelGlowRadius, 10, accuracy: 0.5)
     }
 
     func testWindowUsesExpandedPanelSize() throws {
@@ -132,13 +143,16 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         )
     }
 
-    func testExpandedPanelDropsCyanHangShadow() throws {
+    func testExpandedPanelUsesDepthAndGlowTokens() throws {
         let text = try sourceFile("Sources/Dynamo/Notch/NotchContentView.swift")
         XCTAssertFalse(
-            text.contains("NotchTheme.neonCyan.opacity(0.10)"),
-            "Expanded hang shadow must stay black, not a cyan bloom"
+            text.contains("NotchTheme.neonCyan"),
+            "Expanded hang must not paint a cyan bloom"
         )
-        XCTAssertTrue(text.contains("Color.black.opacity(0.32)"))
+        XCTAssertTrue(text.contains("NotchTheme.panelDepth"))
+        XCTAssertTrue(text.contains("NotchTheme.panelGlow"))
+        XCTAssertTrue(text.contains("NotchTheme.expandSpring"))
+        XCTAssertTrue(text.contains("NotchTheme.tabSpring"))
     }
 
     func testBatteryExpandedBodyIsOneCard() throws {

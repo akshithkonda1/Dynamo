@@ -4,7 +4,7 @@ import SwiftUI
 /// Honors Reduce Motion (instant / short easeOut, no spring).
 struct NotchAppear: ViewModifier {
     var delay: Double = 0
-    var rise: CGFloat = 6
+    var rise: CGFloat = 5
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
@@ -27,7 +27,7 @@ struct NotchAppear: ViewModifier {
 
 extension View {
     /// Fade + slight rise when the view appears (tab content, cards, rows).
-    func notchAppear(delay: Double = 0, rise: CGFloat = 6) -> some View {
+    func notchAppear(delay: Double = 0, rise: CGFloat = 5) -> some View {
         modifier(NotchAppear(delay: delay, rise: rise))
     }
 }
