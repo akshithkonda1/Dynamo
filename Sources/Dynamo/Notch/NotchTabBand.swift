@@ -10,10 +10,12 @@ enum NotchTabBand {
     static let cameraGapIdeal: CGFloat = 96
     static let cameraGapMax: CGFloat = 120
 
-    /// Empty width reserved for the camera housing. Scales gently with the
-    /// ~555pt panel, then clamps so icons still have cheek room.
+    /// Empty width reserved for the camera housing. Tracks the owner-target
+    /// hang so the gap stays near the physical camera, then clamps so icons
+    /// still have cheek room on narrower or wider panels.
     static func cameraGapWidth(panelWidth: CGFloat) -> CGFloat {
-        let raw = panelWidth * 0.17
+        let scale = cameraGapIdeal / NotchGeometry.expandedWidthFallback
+        let raw = panelWidth * scale
         return min(cameraGapMax, max(cameraGapMin, raw.rounded()))
     }
 }

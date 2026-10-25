@@ -57,7 +57,7 @@ final class NotchTabRowTests: XCTestCase {
     }
 
     func testOverflowDoesNotDropPlugins() {
-        // Compact ~555pt panel cannot show 13+ icons at once. Cheeks scroll;
+        // Compact ~640pt panel cannot show 13+ icons at once. Cheeks scroll;
         // membership must still include every visible plugin — including
         // Weather (ships but is not in the production tray) and extras.
         var ids = requiredProductionIDs
