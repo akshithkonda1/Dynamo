@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Dynamo registers more plugins than a NotchDock-style strip can show at once.
 /// The row **never drops a plugin** — left and right cheeks scroll when the
-/// compact ~555pt panel cannot fit every icon. Settings is chrome, not a plugin.
+/// compact ~640pt panel cannot fit every icon. Settings is chrome, not a plugin.
 ///
 /// `NotchWidgetPlugin.id` is main-actor isolated, so these helpers must run
 /// on the main actor (and tests that call them must be `@MainActor` too).

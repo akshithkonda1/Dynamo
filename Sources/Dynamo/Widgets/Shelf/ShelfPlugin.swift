@@ -116,7 +116,7 @@ private struct ExpandedShelfView: View {
                     HStack(alignment: .top, spacing: 6) {
                         ForEach(Array(store.items.enumerated()), id: \.element.id) { index, item in
                             row(item)
-                                .frame(width: 220, alignment: .topLeading)
+                                .frame(width: NotchWidgetCardLayout.stripTileCompact, alignment: .topLeading)
                                 .notchAppear(delay: Double(min(index, 8)) * 0.028)
                         }
                     }

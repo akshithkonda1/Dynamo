@@ -122,7 +122,7 @@ private struct ExpandedPeekHubView: View {
                     HStack(alignment: .top, spacing: 8) {
                         if hub.pendingCount > 0, filter == .all || filter == .unread {
                             pendingBanner
-                                .frame(width: 220, alignment: .topLeading)
+                                .frame(width: NotchWidgetCardLayout.stripTileCompact, alignment: .topLeading)
                         }
                         ForEach(Array(groupedHistory.enumerated()), id: \.element.id) { gIndex, group in
                             VStack(alignment: .leading, spacing: 4) {
@@ -155,7 +155,7 @@ private struct ExpandedPeekHubView: View {
                                         )
                                 }
                             }
-                            .frame(width: 240, alignment: .topLeading)
+                            .frame(width: NotchWidgetCardLayout.stripTileWidth, alignment: .topLeading)
                         }
                     }
                 }

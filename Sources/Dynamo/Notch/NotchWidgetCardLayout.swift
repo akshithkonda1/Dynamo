@@ -18,16 +18,55 @@ enum NotchWidgetCardLayout {
     }
 
     /// Art + transport scale with the hanging card, not a second page.
+    /// Wide metrics kick in a bit below the 640pt target so a screen-clamped
+    /// card still looks filled rather than a compact plate in leftover space.
     static func mediaMetrics(width: CGFloat) -> MediaMetrics {
-        let wide = width >= NotchGeometry.expandedWidthFallback
+        if width >= NotchGeometry.expandedWidthFallback - 16 {
+            return MediaMetrics(
+                artSize: 86,
+                playDiameter: 44,
+                sideDiameter: 34,
+                auxDiameter: 28,
+                titleSize: 17
+            )
+        }
+        if width >= 520 {
+            return MediaMetrics(
+                artSize: 80,
+                playDiameter: 42,
+                sideDiameter: 32,
+                auxDiameter: 28,
+                titleSize: 17
+            )
+        }
         return MediaMetrics(
-            artSize: wide ? 80 : 68,
-            playDiameter: wide ? 42 : 38,
+            artSize: 68,
+            playDiameter: 38,
             sideDiameter: 32,
             auxDiameter: 28,
-            titleSize: wide ? 17 : 16
+            titleSize: 16
         )
     }
+
+    /// Inner width of the widget card on the owner-target hang.
+    static var targetCardInnerWidth: CGFloat {
+        NotchGeometry.expandedWidthFallback
+            - (NotchTheme.contentInset * 2)
+            - (NotchTheme.widgetCardInset * 2)
+    }
+
+    /// Two-up strip tile: fills the ~640pt plate with a short peek of the next card.
+    static var stripTileWidth: CGFloat {
+        let peek: CGFloat = 28
+        let spacing: CGFloat = 8
+        return ((targetCardInnerWidth - peek - spacing) / 2).rounded()
+    }
+
+    /// Narrower strip tile (pins, files, pending banners).
+    static var stripTileCompact: CGFloat { (stripTileWidth - 20).rounded() }
+
+    /// Slightly wider strip tile (sports / world-clock columns).
+    static var stripTileWide: CGFloat { (stripTileWidth + 4).rounded() }
 
     /// Artist · album on one line — the spec card has no extra header chips.
     static func mediaSubtitle(artist: String, album: String) -> String {

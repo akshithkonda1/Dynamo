@@ -279,7 +279,7 @@ private struct ExpandedSportsView: View {
                     eventRow(event)
                         .notchAppear(delay: Double(min(index, 8)) * 0.028)
                 }
-                .frame(width: 260, alignment: .topLeading)
+                .frame(width: NotchWidgetCardLayout.stripTileWide, alignment: .topLeading)
             }
         }
     }
