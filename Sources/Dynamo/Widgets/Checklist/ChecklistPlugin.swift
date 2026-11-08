@@ -584,7 +584,7 @@ private struct ExpandedChecklistView: View {
             } else {
                 ForEach(Array(reminders.items.enumerated()), id: \.element.id) { index, item in
                     reminderRow(item)
-                        .frame(width: 240, alignment: .topLeading)
+                        .frame(width: NotchWidgetCardLayout.stripTileWidth, alignment: .topLeading)
                         .notchAppear(delay: Double(min(index, 8)) * 0.028)
                 }
             }
@@ -668,7 +668,7 @@ private struct ExpandedChecklistView: View {
             }
             ForEach(Array(notes.items.enumerated()), id: \.element.id) { index, item in
                 noteRow(item)
-                    .frame(width: 240, alignment: .topLeading)
+                    .frame(width: NotchWidgetCardLayout.stripTileWidth, alignment: .topLeading)
                     .notchAppear(delay: Double(min(index, 8)) * 0.028)
             }
         }

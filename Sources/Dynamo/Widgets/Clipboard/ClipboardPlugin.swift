@@ -208,7 +208,7 @@ private struct ExpandedClipboardView: View {
                 HStack(alignment: .top, spacing: 4) {
                     ForEach(Array(store.snippets.enumerated()), id: \.element.id) { index, snippet in
                         snippetRow(snippet)
-                            .frame(width: 220, alignment: .topLeading)
+                            .frame(width: NotchWidgetCardLayout.stripTileCompact, alignment: .topLeading)
                             .notchAppear(delay: Double(min(index, 6)) * 0.03)
                     }
                 }
@@ -238,7 +238,7 @@ private struct ExpandedClipboardView: View {
                 HStack(alignment: .top, spacing: 4) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
                         historyRow(item)
-                            .frame(width: 220, alignment: .topLeading)
+                            .frame(width: NotchWidgetCardLayout.stripTileCompact, alignment: .topLeading)
                             .notchAppear(delay: 0.06 + Double(min(index, 8)) * 0.028)
                     }
                 }

@@ -39,11 +39,31 @@ final class NotchGeometryTests: XCTestCase {
     }
 
     func testExpandedWidthIsCompactNotBanner() {
-        // Owner target ~555pt; 38% of a 1470pt display ≈ 559pt.
-        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 555, accuracy: 0.5)
-        XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 1470, screenHeight: 956), 559, accuracy: 1)
+        // Owner target ~640pt on a typical MacBook; large 16:10 can grow to the cap.
+        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 640, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 1470, screenHeight: 956), 640, accuracy: 1)
         XCTAssertGreaterThanOrEqual(NotchGeometry.expandedWidthFloor, 480)
         XCTAssertLessThanOrEqual(NotchGeometry.expandedWidthCap, 680)
+    }
+
+    func testExpandedWidthNeverExceedsScreen() {
+        let samples: [(CGFloat, CGFloat)] = [
+            (400, 300),
+            (500, 400),
+            (640, 400),
+            (800, 500),
+            (1024, 768),
+            (1440, 900),
+            (1470, 956)
+        ]
+        for (width, height) in samples {
+            let w = NotchGeometry.expandedWidth(screenWidth: width, screenHeight: height)
+            XCTAssertLessThanOrEqual(w, width, "\(Int(width))×\(Int(height)) overflowed the screen")
+            XCTAssertGreaterThan(w, 0)
+        }
+        XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 400, screenHeight: 300), 400, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 500, screenHeight: 400), 500, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedWidth(screenWidth: 640, screenHeight: 400), 640, accuracy: 0.5)
     }
 
     func testExpandedPanelSizeNilScreenMatchesOwnerTarget() {
@@ -103,9 +123,9 @@ final class NotchGeometryTests: XCTestCase {
             let w = NotchGeometry.expandedWidth(screenWidth: width, screenHeight: height)
             XCTAssertGreaterThanOrEqual(w, NotchGeometry.expandedWidthFloor, "16:10 \(Int(width))×\(Int(height)) width")
             XCTAssertLessThanOrEqual(w, NotchGeometry.expandedWidthCap, "16:10 \(Int(width))×\(Int(height)) width")
-            // ~38% density on 1440×900 → 547pt, not a banner.
+            // Owner target on a 13″ 16:10 — 640pt, not a banner.
             if width == 1440 {
-                XCTAssertEqual(w, 547, accuracy: 1)
+                XCTAssertEqual(w, 640, accuracy: 1)
             }
             for (id, base) in productionHeightSamples() {
                 let panelHeight = NotchGeometry.expandedPanelHeight(contentBase: base, screenHeight: height)

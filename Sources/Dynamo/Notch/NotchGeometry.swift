@@ -107,9 +107,9 @@ enum NotchGeometry {
 
     // MARK: - Aspect-adaptive expanded panel
 
-    /// Nil-screen fallback — owner target ~555pt hanging card.
-    static let expandedWidthFallback: CGFloat = 555
-    /// Floor covers 13″ laptops.
+    /// Nil-screen fallback — owner target ~640pt hanging card.
+    static let expandedWidthFallback: CGFloat = 640
+    /// Floor covers 13″ laptops when the aspect math undershoots.
     static let expandedWidthFloor: CGFloat = 480
     /// Cap keeps large externals from growing a banner.
     static let expandedWidthCap: CGFloat = 680
@@ -118,9 +118,10 @@ enum NotchGeometry {
     /// Owner target: tray + one widget card ≈ 200pt.
     static let expandedPanelHeightTarget: CGFloat = 200
 
-    /// Compact hanging panel: ~38% of a typical MacBook width (~555pt on a
-    /// 1470pt display) and short — a tidy card under the camera, not a wide
-    /// wing bar and not a tall tray.
+    /// Compact hanging panel: owner target ~640pt on a typical MacBook, short
+    /// — a tidy card under the camera, not a wide wing bar and not a tall tray.
+    /// Aspect math can grow toward the cap on large 16:10 / 16:9 displays;
+    /// the result is always clamped to the screen so small displays never overflow.
     static func expandedWidth(for screen: NSScreen?) -> CGFloat {
         guard let screen else { return expandedWidthFallback }
         return expandedWidth(screenWidth: screen.frame.width, screenHeight: screen.frame.height)
@@ -163,8 +164,11 @@ enum NotchGeometry {
         } else {                    // nearer square / portrait external
             fraction = 0.42
         }
-        let raw = w * fraction
-        return min(expandedWidthCap, max(expandedWidthFloor, raw.rounded()))
+        let raw = (w * fraction).rounded()
+        // Prefer the ~640pt owner target when the display can hold it; never
+        // exceed the screen itself (tiny / highly-scaled displays).
+        let desired = max(expandedWidthFloor, max(raw, expandedWidthFallback))
+        return min(expandedWidthCap, desired, w)
     }
 
     /// Keep the content card short. Never grow taller than the plugin’s

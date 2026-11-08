@@ -544,7 +544,7 @@ private struct ExpandedCalendarView: View {
                             }
                         }
                     }
-                    .frame(width: 240, alignment: .topLeading)
+                    .frame(width: NotchWidgetCardLayout.stripTileWidth, alignment: .topLeading)
                 }
             }
         }
