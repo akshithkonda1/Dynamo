@@ -182,6 +182,7 @@ final class NotchGeometryTests: XCTestCase {
             "clipboard": [144],
             "checklist": [144],
             "world-clock": [144],
+            "weather": [144],
             "battery": [160],
             "focus": [144, 160],
             "sports": [144],
