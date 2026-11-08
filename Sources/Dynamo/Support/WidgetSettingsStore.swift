@@ -10,21 +10,34 @@ final class WidgetSettingsStore {
 
     private init() {}
 
-    /// Widget ids that must never appear in production tray prefs (even if
-    /// a previous build saved them).
-    private static let productionExcludedIDs: Set<String> = ["weather"]
+    /// Older builds stripped Weather because ad-hoc signing cannot use WeatherKit.
+    /// Developer-signed builds put it back once.
+    private static let weatherEnabledMigrationKey = "dynamo.weather.reenabled"
+    private static let productionExcludedIDs: Set<String> = []
 
     func apply(to registry: WidgetRegistry) {
         let defaults = UserDefaults.standard
-        let order = (defaults.stringArray(forKey: orderKey) ?? [])
+        var order = (defaults.stringArray(forKey: orderKey) ?? [])
             .filter { !Self.productionExcludedIDs.contains($0) }
         let enabledArray = defaults.stringArray(forKey: enabledKey)
-        let enabled: Set<String>
+        var enabled: Set<String>
         if let enabledArray {
             enabled = Set(enabledArray).subtracting(Self.productionExcludedIDs)
         } else {
             // First launch: enable everything currently registered.
             enabled = Set(registry.allRegistered.map(\.id))
+        }
+        if !defaults.bool(forKey: Self.weatherEnabledMigrationKey) {
+            let hadSavedConfig = enabledArray != nil || !(defaults.stringArray(forKey: orderKey) ?? []).isEmpty
+            enabled.insert("weather")
+            if !order.contains("weather") {
+                order.append("weather")
+            }
+            defaults.set(true, forKey: Self.weatherEnabledMigrationKey)
+            if hadSavedConfig {
+                defaults.set(order, forKey: orderKey)
+                defaults.set(Array(enabled), forKey: enabledKey)
+            }
         }
         if !order.isEmpty || enabledArray != nil {
             registry.applyConfiguration(order: order, enabledIDs: enabled)
