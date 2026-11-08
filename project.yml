@@ -36,7 +36,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # Set your paid team here, or leave blank and pick it in Xcode's
     # Signing & Capabilities tab after generating.
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "L85K85Q7MB"
     ENABLE_HARDENED_RUNTIME: YES
 
 targets:
@@ -87,7 +87,7 @@ targets:
           cp "$SRC" "$DEST"
           chmod +x "$DEST"
           if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY}" != "-" ]; then
-            codesign --force --options runtime --timestamp --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "$DEST"
+            codesign --force --options runtime --timestamp=none --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "$DEST"
           else
             codesign --force --sign - "$DEST"
           fi

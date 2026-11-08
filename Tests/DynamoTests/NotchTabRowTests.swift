@@ -35,7 +35,7 @@ final class NotchTabRowTests: XCTestCase {
     /// from `ProductionWidgetKind` / `NotchTabRow` so a dropped widget fails.
     private let requiredProductionIDs = [
         "media", "peek-hub", "calendar", "clipboard", "checklist",
-        "world-clock", "battery", "focus", "sports", "system-health",
+        "world-clock", "weather", "battery", "focus", "sports", "system-health",
         "shelf", "webcam"
     ]
 
@@ -43,7 +43,7 @@ final class NotchTabRowTests: XCTestCase {
         let bundle = ProductionTestFixtures.bundle()
         let liveIDs = Set(bundle.plugins.map { $0.id })
         XCTAssertEqual(liveIDs, Set(requiredProductionIDs), "Factory no longer matches the production tray contract")
-        XCTAssertFalse(liveIDs.contains("weather"), "Weather stays out of the production tray")
+        XCTAssertTrue(liveIDs.contains("weather"), "Weather is part of the production tray")
 
         let reachable = Set(NotchTabRow.reachableIDs(from: bundle.plugins))
         XCTAssertEqual(
@@ -61,7 +61,7 @@ final class NotchTabRowTests: XCTestCase {
         // membership must still include every visible plugin — including
         // Weather (ships but is not in the production tray) and extras.
         var ids = requiredProductionIDs
-        ids.append(contentsOf: ["weather", "extra-a", "extra-b", "extra-c"])
+        ids.append(contentsOf: ["extra-a", "extra-b", "extra-c"])
         let registry = register(ids)
 
         let visible = registry.plugins.map { $0.id }

@@ -4,8 +4,7 @@ import Foundation
 ///
 /// Tests instantiate this factory instead of a hand-typed ID list. Adding a
 /// case registers it on launch; renaming `rawValue` must match `plugin.id`
-/// or `NotchTabRowTests` fails. Weather is intentionally omitted (World Clock
-/// replaced WeatherKit in production).
+/// or `NotchTabRowTests` fails. Weather ships next to World Clock.
 enum ProductionWidgetKind: String, CaseIterable {
     case media = "media"
     case peekHub = "peek-hub"
@@ -13,6 +12,7 @@ enum ProductionWidgetKind: String, CaseIterable {
     case clipboard = "clipboard"
     case checklist = "checklist"
     case worldClock = "world-clock"
+    case weather = "weather"
     case battery = "battery"
     case focus = "focus"
     case sports = "sports"
@@ -53,6 +53,7 @@ enum ProductionWidgets {
             case .clipboard: return ClipboardPlugin()
             case .checklist: return ChecklistPlugin()
             case .worldClock: return worldClock
+            case .weather: return WeatherPlugin()
             case .battery: return BatteryPlugin()
             case .focus: return FocusPlugin()
             case .sports: return SportsPlugin()

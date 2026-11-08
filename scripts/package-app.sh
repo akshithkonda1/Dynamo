@@ -70,23 +70,36 @@ xattr -cr "${APP_DIR}" 2>/dev/null || true
 xattr -c "${MACOS}/Dynamo" 2>/dev/null || true
 [[ -f "${MACOS}/DynamoMediaRemoteHelper" ]] && xattr -c "${MACOS}/DynamoMediaRemoteHelper" 2>/dev/null || true
 
-echo "→ Ad-hoc codesign…"
+# The display name matches two login-keychain certs, so codesign rejects it
+# as ambiguous. Pick the first hash for that identity.
+SIGN_LABEL="Apple Development: akkikonda2000@gmail.com (5AQ9HG95ML)"
+SIGN_ID="$(security find-identity -v -p codesigning | awk -v label="${SIGN_LABEL}" 'index($0, label) { print $2; exit }')"
+ENTITLEMENTS="${ROOT}/Sources/Dynamo/Dynamo.entitlements"
+if [[ -n "${SIGN_ID}" ]]; then
+  echo "→ Signing with Apple Development (${SIGN_ID})…"
+  SIGN_ARGS=(--sign "${SIGN_ID}")
+  ENT_ARGS=(--entitlements "${ENTITLEMENTS}")
+else
+  echo "→ Ad-hoc codesign…"
+  SIGN_ARGS=(--sign -)
+  ENT_ARGS=()
+fi
 if [[ -x "${MACOS}/DynamoMediaRemoteHelper" ]]; then
-  codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
+  codesign --force "${SIGN_ARGS[@]}" --timestamp=none "${MACOS}/DynamoMediaRemoteHelper"
   echo "✓ Embedded DynamoMediaRemoteHelper"
 else
   echo "warning: DynamoMediaRemoteHelper not embedded (media falls back to AppleScript)"
 fi
-codesign --force --sign - --timestamp=none "${MACOS}/Dynamo"
-if ! codesign --force --sign - --timestamp=none "${APP_DIR}" 2>/dev/null; then
+codesign --force "${SIGN_ARGS[@]}" "${ENT_ARGS[@]}" --timestamp=none "${MACOS}/Dynamo"
+if ! codesign --force "${SIGN_ARGS[@]}" "${ENT_ARGS[@]}" --timestamp=none "${APP_DIR}" 2>/dev/null; then
   # Icon xattrs sometimes break bundle sign — drop icon and retry once.
   echo "  retry without AppIcon…"
   rm -f "${RESOURCES}/AppIcon.icns"
   /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFile" "${CONTENTS}/Info.plist" 2>/dev/null || true
   xattr -cr "${APP_DIR}" 2>/dev/null || true
-  codesign --force --sign - --timestamp=none "${MACOS}/DynamoMediaRemoteHelper" 2>/dev/null || true
-  codesign --force --sign - --timestamp=none "${MACOS}/Dynamo"
-  codesign --force --sign - --timestamp=none "${APP_DIR}"
+  codesign --force "${SIGN_ARGS[@]}" --timestamp=none "${MACOS}/DynamoMediaRemoteHelper" 2>/dev/null || true
+  codesign --force "${SIGN_ARGS[@]}" "${ENT_ARGS[@]}" --timestamp=none "${MACOS}/Dynamo"
+  codesign --force "${SIGN_ARGS[@]}" "${ENT_ARGS[@]}" --timestamp=none "${APP_DIR}"
 fi
 codesign --verify --verbose=0 "${APP_DIR}"
 

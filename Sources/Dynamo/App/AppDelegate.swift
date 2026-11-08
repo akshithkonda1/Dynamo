@@ -75,8 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.sneakPeekController = sneakPeekController
 
         // Default tray order from the shared catalog. Settings can reorder
-        // without hosts knowing names. Weather/WeatherKit is replaced by free
-        // World Clock in production (`ProductionWidgetKind` omits it).
+        // without hosts knowing names.
         let production = ProductionWidgets.makeDefaultPlugins()
         mediaPlugin = production.media
         for plugin in production.plugins {
@@ -96,8 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         WidgetSettingsStore.shared.apply(to: registry)
-        // Drop any legacy "weather" id from saved tray prefs.
-        WidgetSettingsStore.shared.stripDisabledWidgets(from: registry, ids: ["weather"])
         notchController.attach(registry: registry, hud: hudController, sneakPeek: sneakPeekController)
         hudController.attach(notch: notchController)
         sneakPeekController.attach(registry: registry, notch: notchController)

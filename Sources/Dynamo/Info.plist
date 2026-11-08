@@ -41,6 +41,8 @@
 	<!-- Required so Continuity Camera devices appear as .continuityCamera (not mislabeled built-in). -->
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Dynamo uses Apple Music to show catalog details, artwork, and your library for the track that is playing. Music data stays on this Mac.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dynamo controls Music and Spotify for media, and Apple Notes for the Checklist Notes tab (create, list, open, and delete notes in the Dynamo folder).</string>
 	<!-- Live peek equalizer samples system / player audio (Core Audio process tap). -->
