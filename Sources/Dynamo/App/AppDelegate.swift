@@ -324,9 +324,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func appDidBecomeActive() {
         MainActor.assumeIsolated {
-            // User may have toggled FDA / Camera / Automation in System Settings.
+            // User may have toggled FDA / Camera / Automation / Accessibility in System Settings.
             PermissionsStore.shared.refreshFromSystem()
             NotificationCenter.default.post(name: .dynamoPermissionsDidRefresh, object: nil)
+            // Accessibility grant → start HID key interception so system OSD stays hidden.
+            hudController?.refreshInterceptionMode()
         }
     }
 
