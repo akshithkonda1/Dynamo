@@ -5,7 +5,7 @@ All notable changes to Dynamo are documented here.
 ## [Unreleased]
 
 ### Expanded island
-- Compact black hang is **~555×200pt** (fallback 555×200; chrome 56 + default card 144)
+- Compact black hang is **~640×200pt** (fallback 640×200; chrome 56 + default card 144; clamped to the screen)
 - Tab icons split left/right around a camera-gap spacer (`NotchTabBand.cameraGapWidth`)
 - Each tab is **one card** (`NotchWidgetCard`) — Media / Battery / Hub / Clipboard no longer page a second full-width panel
 - Window sizes through `NotchGeometry.expandedPanelSize`; media art/transport through `NotchWidgetCardLayout.mediaMetrics`

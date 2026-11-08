@@ -256,7 +256,9 @@ final class MediaAmplifyController: ObservableObject {
                 }
                 let bundle = self.preferredPlayerBundleID
                     ?? Self.guessPlayerBundleID()
-                let device = self.resolvedDevice
+                // Pass `.auto` through. Resolving it here calls Core Audio on
+                // the main thread and can freeze the notch.
+                let device = self.outputDevice
                 LocalAmplifyEngine.shared.start(
                     profile: self.profile,
                     device: device,
@@ -287,7 +289,7 @@ final class MediaAmplifyController: ObservableObject {
 
     private func updateEngineProfile() {
         guard #available(macOS 14.2, *) else { return }
-        LocalAmplifyEngine.shared.setProfile(profile, device: resolvedDevice)
+        LocalAmplifyEngine.shared.setProfile(profile, device: outputDevice)
         syncFromEngine()
     }
 

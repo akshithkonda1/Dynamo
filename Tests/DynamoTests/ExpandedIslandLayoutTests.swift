@@ -1,12 +1,16 @@
 import XCTest
 @testable import Dynamo
 
-/// Expanded hang: ~555×200, camera-gap tab band, one card per tab.
+/// Expanded hang: ~640×200, camera-gap tab band, one card per tab.
 /// Tests call the same helpers the views / window use.
 final class ExpandedIslandLayoutTests: XCTestCase {
 
     func testCameraGapClampsAroundIdeal() {
-        XCTAssertEqual(NotchTabBand.cameraGapWidth(panelWidth: 555), 94, accuracy: 0.5)
+        XCTAssertEqual(
+            NotchTabBand.cameraGapWidth(panelWidth: NotchGeometry.expandedWidthFallback),
+            NotchTabBand.cameraGapIdeal,
+            accuracy: 0.5
+        )
         XCTAssertEqual(NotchTabBand.cameraGapWidth(panelWidth: 400), NotchTabBand.cameraGapMin)
         XCTAssertEqual(NotchTabBand.cameraGapWidth(panelWidth: 900), NotchTabBand.cameraGapMax)
         XCTAssertEqual(NotchTabBand.cameraGapIdeal, 96, accuracy: 0.5)
@@ -18,12 +22,29 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         XCTAssertEqual(compact.playDiameter, 38)
         XCTAssertEqual(compact.titleSize, 16)
 
+        let mid = NotchWidgetCardLayout.mediaMetrics(width: 560)
+        XCTAssertEqual(mid.artSize, 80)
+        XCTAssertEqual(mid.playDiameter, 42)
+        XCTAssertEqual(mid.titleSize, 17)
+
         let wide = NotchWidgetCardLayout.mediaMetrics(width: NotchGeometry.expandedWidthFallback)
-        XCTAssertEqual(wide.artSize, 80)
-        XCTAssertEqual(wide.playDiameter, 42)
+        XCTAssertEqual(wide.artSize, 86)
+        XCTAssertEqual(wide.playDiameter, 44)
         XCTAssertEqual(wide.titleSize, 17)
-        XCTAssertEqual(wide.sideDiameter, 32)
+        XCTAssertEqual(wide.sideDiameter, 34)
         XCTAssertEqual(wide.auxDiameter, 28)
+    }
+
+    func testStripTilesFillOwnerTargetWithoutOverflow() {
+        let inner = NotchWidgetCardLayout.targetCardInnerWidth
+        XCTAssertEqual(inner, 588, accuracy: 0.5)
+        XCTAssertEqual(NotchWidgetCardLayout.stripTileWidth, 276, accuracy: 0.5)
+        XCTAssertEqual(NotchWidgetCardLayout.stripTileCompact, 256, accuracy: 0.5)
+        XCTAssertEqual(NotchWidgetCardLayout.stripTileWide, 280, accuracy: 0.5)
+        let twoUp = NotchWidgetCardLayout.stripTileWidth * 2 + 8
+        XCTAssertLessThan(twoUp, inner)
+        XCTAssertGreaterThan(inner - twoUp, 16)
+        XCTAssertLessThan(inner - twoUp, 40)
     }
 
     func testCarouselDetectorMatchesFullPagePatternOnly() {
@@ -70,7 +91,7 @@ final class ExpandedIslandLayoutTests: XCTestCase {
 
     func testExpandedHangStaysBlackAndOneCard() {
         XCTAssertEqual(NotchTheme.expandedContentBase + NotchTheme.expandedChromeHeight, 200, accuracy: 0.5)
-        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 555, accuracy: 0.5)
+        XCTAssertEqual(NotchGeometry.expandedWidthFallback, 640, accuracy: 0.5)
         XCTAssertEqual(NotchGeometry.expandedPanelHeightTarget, 200, accuracy: 0.5)
     }
 
@@ -153,6 +174,25 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         XCTAssertTrue(text.contains("NotchTheme.panelGlow"))
         XCTAssertTrue(text.contains("NotchTheme.expandSpring"))
         XCTAssertTrue(text.contains("NotchTheme.tabSpring"))
+    }
+
+    func testStripWidgetsUseSharedTileWidths() throws {
+        let files = [
+            "Sources/Dynamo/Widgets/Notifications/NotificationsPlugin.swift",
+            "Sources/Dynamo/Widgets/Clipboard/ClipboardPlugin.swift",
+            "Sources/Dynamo/Widgets/Shelf/ShelfPlugin.swift",
+            "Sources/Dynamo/Widgets/Checklist/ChecklistPlugin.swift",
+            "Sources/Dynamo/Widgets/Calendar/CalendarPlugin.swift",
+            "Sources/Dynamo/Widgets/Sports/SportsPlugin.swift",
+            "Sources/Dynamo/Widgets/WorldClock/WorldClockPlugin.swift"
+        ]
+        for path in files {
+            let text = try sourceFile(path)
+            XCTAssertTrue(
+                text.contains("NotchWidgetCardLayout.stripTile"),
+                "\(path) must size strip cards through NotchWidgetCardLayout"
+            )
+        }
     }
 
     func testBatteryExpandedBodyIsOneCard() throws {

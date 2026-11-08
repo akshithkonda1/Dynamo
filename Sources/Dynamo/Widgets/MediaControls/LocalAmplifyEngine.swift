@@ -24,6 +24,10 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     static let shared = LocalAmplifyEngine()
 
     private let queue = DispatchQueue(label: "com.akshithkonda.Dynamo.localAmplify", qos: .userInteractive)
+    /// Core Audio calls the IO block on this queue, and `AudioDeviceStop` waits
+    /// until that block returns. Stop must never run here — doing it on `queue`
+    /// deadlocks the HAL lock and freezes the main thread inside device enumeration.
+    private let ioQueue = DispatchQueue(label: "com.akshithkonda.Dynamo.localAmplify.io", qos: .userInteractive)
 
     private var tapID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID: AudioObjectID = AudioObjectID(kAudioObjectUnknown)
@@ -129,6 +133,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         contentImmersiveHint: Bool = false
     ) {
         queue.async {
+            let device = Self.resolved(device)
             self.pendingStopAfterWet = false
             self.preferredBundleID = preferredBundleID
             self.profileRaw = profile.rawValue
@@ -156,6 +161,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
 
     func setProfile(_ profile: MediaAmplifyProfile, device: AmplifyOutputDevice) {
         queue.async {
+            let device = Self.resolved(device)
             self.profileRaw = profile.rawValue
             self.deviceRaw = device.rawValue
             let sr = self.format.mSampleRate > 0 ? self.format.mSampleRate : 48_000
@@ -414,19 +420,31 @@ final class LocalAmplifyEngine: @unchecked Sendable {
     private func finishPendingStopIfNeeded() {
         guard pendingStopAfterWet, wetGain <= 0.001 else { return }
         pendingStopAfterWet = false
-        teardownLocked()
-        isRunning = false
-        statusLine = "Off"
-        lastError = nil
-        spatialHint = ""
-        spatialPath = .stereo
-        tapModeLabel = ""
-        toneGenre = ""
-        toneConfidence = 0
-        metadataToneText = ""
-        AmplifyToneAI.session.reset()
-        wetGain = 0
-        wetInc = 0
+        // The IO callback is running on `ioQueue`. Stopping the device from here
+        // waits for this callback and never returns.
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.teardownLocked()
+            self.isRunning = false
+            self.statusLine = "Off"
+            self.lastError = nil
+            self.spatialHint = ""
+            self.spatialPath = .stereo
+            self.tapModeLabel = ""
+            self.toneGenre = ""
+            self.toneConfidence = 0
+            self.metadataToneText = ""
+            AmplifyToneAI.session.reset()
+            self.wetGain = 0
+            self.wetInc = 0
+        }
+    }
+
+    /// Resolve "auto" off the main thread. Device enumeration takes the HAL
+    /// lock; doing it on the UI thread freezes the notch when that lock is busy.
+    private static func resolved(_ device: AmplifyOutputDevice) -> AmplifyOutputDevice {
+        guard device == .auto else { return device }
+        return AmplifyOutputDevice.infer(fromDeviceName: SystemLevelReader.defaultOutputDeviceName())
     }
 
     /// Equal-power crossfade weights (seamless A↔B without mid-fade dips).
@@ -565,7 +583,7 @@ final class LocalAmplifyEngine: @unchecked Sendable {
         }
         aggregateID = agg
 
-        err = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, queue) {
+        err = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, ioQueue) {
             [weak self] _, inInputData, _, outOutputData, _ in
             self?.render(input: inInputData, output: outOutputData)
         }

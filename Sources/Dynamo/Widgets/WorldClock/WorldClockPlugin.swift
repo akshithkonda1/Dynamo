@@ -786,15 +786,15 @@ private struct ExpandedWorldClockView: View {
                     HStack(alignment: .top, spacing: 8) {
                         ForEach(Array(plugin.activeEntries.enumerated()), id: \.element.id) { index, entry in
                             cityCard(entry, at: context.date, isHero: index == 0)
-                                .frame(width: 260, alignment: .topLeading)
+                                .frame(width: NotchWidgetCardLayout.stripTileWide, alignment: .topLeading)
                                 .notchAppear(delay: Double(min(index, 5)) * 0.035)
                         }
                         converterCard(at: context.date)
-                            .frame(width: 240, alignment: .topLeading)
+                            .frame(width: NotchWidgetCardLayout.stripTileWidth, alignment: .topLeading)
                             .notchAppear(delay: 0.12)
                         if showMeasureConvert || units.showConversionTable {
                             measureConvertCard
-                                .frame(width: 260, alignment: .topLeading)
+                                .frame(width: NotchWidgetCardLayout.stripTileWide, alignment: .topLeading)
                                 .notchAppear(delay: 0.14)
                         }
                     }
