@@ -61,6 +61,9 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
                 Task { @MainActor in self?.publishBest() }
             }
         }
+        AppleScriptMedia.shared.onInfoUpdated = { [weak self] in
+            self?.publishBest()
+        }
         refreshAll()
         // MediaRemote notifications drive most updates; adaptive poll is a sparse safety net.
         scheduleAdaptivePoll()
@@ -310,7 +313,8 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
 
     private func refreshAll() {
         refreshMediaRemote()
-        // AppleScript is cheap enough at 1 Hz and is the reliable path for Music.
+        // AppleScript runs off the main thread; publishBest uses the last snapshot.
+        AppleScriptMedia.shared.refreshInBackground()
         publishBest()
     }
 

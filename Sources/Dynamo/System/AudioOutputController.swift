@@ -19,8 +19,18 @@ final class AudioOutputController: ObservableObject {
     }
 
     func refresh() {
-        devices = Self.enumerateOutputs()
-        selectedID = SystemLevelReader.defaultOutputDeviceID()
+        Task.detached(priority: .userInitiated) {
+            let devices = Self.enumerateOutputs()
+            let selected = SystemLevelReader.defaultOutputDeviceID()
+            await MainActor.run {
+                AudioOutputController.shared.applyEnumeration(devices: devices, selectedID: selected)
+            }
+        }
+    }
+
+    fileprivate func applyEnumeration(devices: [AudioOutputDevice], selectedID: AudioDeviceID?) {
+        self.devices = devices
+        self.selectedID = selectedID
     }
 
     func select(id: AudioDeviceID) {
@@ -31,7 +41,7 @@ final class AudioOutputController: ObservableObject {
         refresh()
     }
 
-    private static func enumerateOutputs() -> [AudioOutputDevice] {
+    nonisolated private static func enumerateOutputs() -> [AudioOutputDevice] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -66,7 +76,7 @@ final class AudioOutputController: ObservableObject {
         return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    private static func hasOutputChannels(_ id: AudioDeviceID) -> Bool {
+    nonisolated private static func hasOutputChannels(_ id: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
             mScope: kAudioDevicePropertyScopeOutput,
@@ -90,7 +100,7 @@ final class AudioOutputController: ObservableObject {
         return channels > 0
     }
 
-    private static func deviceName(_ id: AudioDeviceID) -> String? {
+    nonisolated private static func deviceName(_ id: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioObjectPropertyName,
             mScope: kAudioObjectPropertyScopeGlobal,
