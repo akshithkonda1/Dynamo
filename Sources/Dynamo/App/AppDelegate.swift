@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Safe if already granted/denied — Core Location no-ops appropriately.
         let clocks = production.worldClock
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            // LSUIElement apps often swallow the first location prompt unless active.
+            NSApp.activate(ignoringOtherApps: true)
             clocks.requestCurrentLocation()
         }
         // Contacts: so call/text Peeks can show the contact photo + matching tint.
