@@ -565,6 +565,16 @@ private final class DropHostingView: NSHostingView<NotchContentView> {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.isOpaque = false
+        // The panel sets our frame. Intrinsic-size Auto Layout fights that and
+        // AppKit kills the process: "another Update Constraints in Window pass".
+        if #available(macOS 13.0, *) {
+            sizingOptions = []
+        }
+        translatesAutoresizingMaskIntoConstraints = true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
     @available(*, unavailable)

@@ -78,6 +78,8 @@ enum NotchTabScroll {
 }
 
 final class NotchTabScrollView: NSScrollView {
+    private var isLayingOut = false
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         drawsBackground = false
@@ -119,12 +121,17 @@ final class NotchTabScrollView: NSScrollView {
     }
 
     func layoutDocument() {
-        guard let doc = documentView else { return }
+        guard !isLayingOut, let doc = documentView else { return }
+        isLayingOut = true
+        defer { isLayingOut = false }
         doc.layoutSubtreeIfNeeded()
         let fitting = doc.fittingSize
         let height = max(contentView.bounds.height, 1)
         let width = max(fitting.width, contentView.bounds.width)
-        doc.setFrameSize(NSSize(width: width, height: height))
+        let next = NSSize(width: width, height: height)
+        if abs(doc.frame.width - next.width) > 0.5 || abs(doc.frame.height - next.height) > 0.5 {
+            doc.setFrameSize(next)
+        }
     }
 
     private func clamped(_ origin: NSPoint) -> NSPoint {
@@ -142,6 +149,9 @@ private struct NotchTabScrollViewRepresentable<Content: View>: NSViewRepresentab
         let scroll = NotchTabScrollView()
         let host = NSHostingView(rootView: content)
         host.translatesAutoresizingMaskIntoConstraints = false
+        if #available(macOS 13.0, *) {
+            host.sizingOptions = [.intrinsicContentSize]
+        }
         scroll.documentView = host
         NSLayoutConstraint.activate([
             host.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),

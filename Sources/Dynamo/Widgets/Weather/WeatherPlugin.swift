@@ -290,7 +290,7 @@ private struct ExpandedWeatherView: View {
                     get: { plugin.manualQuery },
                     set: { plugin.manualQuery = $0 }
                 ))
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .onSubmit { plugin.applyManualQuery() }
                 Button(plugin.isGeocoding ? "…" : "Set") { plugin.applyManualQuery() }
                     .buttonStyle(.bordered)

@@ -90,7 +90,6 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
         case .authorized:
             locationManager.requestLocation()
         case .notDetermined:
-            NSApp.activate(ignoringOtherApps: true)
             locationManager.requestWhenInUseAuthorization()
         case .denied:
             if snapshot == nil {
