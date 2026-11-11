@@ -240,16 +240,15 @@ private struct ExpandedWeatherView: View {
             Button("Allow Location Access") { plugin.requestLocationAccess() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-            Text("Or set a location in Settings → Weather.")
-                .font(NotchTheme.micro)
-                .foregroundStyle(NotchTheme.textTertiary)
+            cityLookupField
         } else if plugin.snapshot == nil, plugin.locationAuth == .denied {
             NotchEmptyState(
                 systemImage: "location.slash",
                 title: "Location access denied",
-                caption: "Enable Location Services, or set a city in Settings → Weather.",
+                caption: "Enable Location in System Settings, or type a city below.",
                 prominent: true
             )
+            cityLookupField
         } else if let snapshot = plugin.snapshot {
             HStack(alignment: .top, spacing: 8) {
                 currentConditions(snapshot)
@@ -280,6 +279,26 @@ private struct ExpandedWeatherView: View {
         } else {
             Text(plugin.lastError ?? "Fetching weather…")
                 .font(NotchTheme.caption)
+                .foregroundStyle(NotchTheme.textTertiary)
+        }
+    }
+
+    private var cityLookupField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("City (e.g. Austin)", text: Binding(
+                    get: { plugin.manualQuery },
+                    set: { plugin.manualQuery = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { plugin.applyManualQuery() }
+                Button(plugin.isGeocoding ? "…" : "Set") { plugin.applyManualQuery() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(plugin.manualQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || plugin.isGeocoding)
+            }
+            Text("Weather uses your city only. Location is optional.")
+                .font(NotchTheme.micro)
                 .foregroundStyle(NotchTheme.textTertiary)
         }
     }

@@ -1,3 +1,4 @@
+import AppKit
 import CoreLocation
 import Foundation
 import WeatherKit
@@ -28,6 +29,9 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
     /// Last coordinate we resolved (from CoreLocation or a manual place).
     private var lastLatitude: Double?
     private var lastLongitude: Double?
+    /// Last successful automatic GPS fix — used so weather still loads after a
+    /// permission reset while Core Location is catching up.
+    private var lastAutomaticPlace: WeatherPlace?
 
     override init() {
         super.init()
@@ -45,14 +49,16 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
         switch locationMode {
         case .automatic:
             locationAuth = Self.mapAuth(locationManager.authorizationStatus)
-            switch locationAuth {
-            case .authorized:
-                locationManager.requestLocation()
-            case .notDetermined:
-                locationManager.requestWhenInUseAuthorization()
-            default:
-                break
+            if let last = lastAutomaticPlace {
+                lastLatitude = last.latitude
+                lastLongitude = last.longitude
+                Task { await refresh() }
+            } else if let guessed = Self.place(forTimeZone: TimeZone.current.identifier) {
+                lastLatitude = guessed.latitude
+                lastLongitude = guessed.longitude
+                Task { await refresh() }
             }
+            requestLocationIfNeeded()
         case .manual(let place):
             locationAuth = .unavailable
             lastLatitude = place.latitude
@@ -75,7 +81,24 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
 
     func requestLocationAccess() {
         guard case .automatic = locationMode else { return }
+        NSApp.activate(ignoringOtherApps: true)
         locationManager.requestWhenInUseAuthorization()
+    }
+
+    private func requestLocationIfNeeded() {
+        switch locationAuth {
+        case .authorized:
+            locationManager.requestLocation()
+        case .notDetermined:
+            NSApp.activate(ignoringOtherApps: true)
+            locationManager.requestWhenInUseAuthorization()
+        case .denied:
+            if snapshot == nil {
+                lastError = "Allow Location in System Settings, or set a city in Settings → Weather."
+            }
+        case .unavailable:
+            break
+        }
     }
 
     func setManualPlace(_ place: WeatherPlace?) {
@@ -90,21 +113,15 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
             locationMode = .automatic
             persistMode()
             locationAuth = Self.mapAuth(locationManager.authorizationStatus)
-            switch locationAuth {
-            case .authorized:
-                locationManager.requestLocation()
-            case .notDetermined:
-                locationManager.requestWhenInUseAuthorization()
-            default:
-                break
-            }
+            requestLocationIfNeeded()
         }
         onChange?()
     }
 
     func refresh() async {
         guard let lat = lastLatitude, let lon = lastLongitude else {
-            // Automatic mode with no fix yet — wait for CoreLocation to reply.
+            requestLocationIfNeeded()
+            onChange?()
             return
         }
         let location = CLLocation(latitude: lat, longitude: lon)
@@ -153,19 +170,56 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
                 )
             }
             lastError = nil
-        } catch {
-            let raw = error.localizedDescription
-            // Ad-hoc / free-team builds can't call WeatherKit — show a calm hint.
-            if raw.localizedCaseInsensitiveContains("weatherkit")
-                || raw.localizedCaseInsensitiveContains("entitlement")
-                || raw.localizedCaseInsensitiveContains("not authorized")
-                || raw.localizedCaseInsensitiveContains("unauthorized") {
-                lastError = "Weather needs a paid Apple Developer team + WeatherKit entitlement (Xcode-signed build). Use Settings → Weather to set a city for when that's available, or leave this widget off for ad-hoc builds."
-            } else {
-                lastError = "Weather unavailable: \(raw)"
+            if case .automatic = locationMode {
+                lastAutomaticPlace = WeatherPlace(name: name, latitude: lat, longitude: lon)
+                persistMode()
             }
+        } catch {
+            lastError = Self.friendlyMessage(for: error)
         }
         onChange?()
+    }
+
+    /// City-level fallback so Weather still loads when Location is off.
+    nonisolated static func place(forTimeZone identifier: String) -> WeatherPlace? {
+        switch identifier {
+        case "America/Chicago": return WeatherPlace(name: "Chicago", latitude: 41.8781, longitude: -87.6298)
+        case "America/New_York": return WeatherPlace(name: "New York", latitude: 40.7128, longitude: -74.0060)
+        case "America/Los_Angeles": return WeatherPlace(name: "Los Angeles", latitude: 34.0522, longitude: -118.2437)
+        case "America/Denver": return WeatherPlace(name: "Denver", latitude: 39.7392, longitude: -104.9903)
+        case "America/Phoenix": return WeatherPlace(name: "Phoenix", latitude: 33.4484, longitude: -112.0740)
+        case "America/Vancouver": return WeatherPlace(name: "Vancouver", latitude: 49.2827, longitude: -123.1207)
+        case "America/Toronto": return WeatherPlace(name: "Toronto", latitude: 43.6532, longitude: -79.3832)
+        case "America/Mexico_City": return WeatherPlace(name: "Mexico City", latitude: 19.4326, longitude: -99.1332)
+        case "America/Sao_Paulo": return WeatherPlace(name: "São Paulo", latitude: -23.5505, longitude: -46.6333)
+        case "America/Buenos_Aires", "America/Argentina/Buenos_Aires":
+            return WeatherPlace(name: "Buenos Aires", latitude: -34.6037, longitude: -58.3816)
+        case "Europe/London": return WeatherPlace(name: "London", latitude: 51.5074, longitude: -0.1278)
+        case "Europe/Paris": return WeatherPlace(name: "Paris", latitude: 48.8566, longitude: 2.3522)
+        case "Asia/Kolkata": return WeatherPlace(name: "Delhi", latitude: 28.6139, longitude: 77.2090)
+        case "Asia/Tokyo": return WeatherPlace(name: "Tokyo", latitude: 35.6762, longitude: 139.6503)
+        case "Australia/Sydney": return WeatherPlace(name: "Sydney", latitude: -33.8688, longitude: 151.2093)
+        case "Australia/Melbourne": return WeatherPlace(name: "Melbourne", latitude: -37.8136, longitude: 144.9631)
+        case "Pacific/Honolulu": return WeatherPlace(name: "Honolulu", latitude: 21.3069, longitude: -157.8583)
+        default: return nil
+        }
+    }
+
+    nonisolated static func friendlyMessage(for error: Error) -> String {
+        let raw = error.localizedDescription
+        let folded = raw.lowercased()
+        if folded.contains("not entitled")
+            || folded.contains("entitlement")
+            || folded.contains("missing entitlement") {
+            return "This build isn’t signed for WeatherKit. Set a city in Settings → Weather, or relaunch the developer-signed app."
+        }
+        if folded.contains("not authorized") || folded.contains("unauthorized") {
+            return "WeatherKit wasn’t authorized. Set a city in Settings → Weather if Location is off."
+        }
+        if folded.contains("network") || folded.contains("offline") || folded.contains("internet") {
+            return "Can’t reach Weather. Check the network and try again."
+        }
+        return "Weather unavailable: \(raw)"
     }
 
     // MARK: - Attribution (required by WeatherKit terms)
@@ -212,10 +266,16 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        let message = error.localizedDescription
+        let ns = error as NSError
         Task { @MainActor in
-            // kCLErrorLocationUnknown is transient; keep any prior snapshot.
-            self.lastError = "Location error: \(message)"
+            if ns.domain == kCLErrorDomain, ns.code == CLError.locationUnknown.rawValue {
+                if self.snapshot == nil, self.lastLatitude == nil {
+                    self.lastError = "Waiting for a location fix…"
+                    self.onChange?()
+                }
+                return
+            }
+            self.lastError = "Location error: \(error.localizedDescription)"
             self.onChange?()
         }
     }
@@ -224,9 +284,7 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
     private func handleAuthChange(_ status: CLAuthorizationStatus) {
         guard case .automatic = locationMode else { return }
         locationAuth = Self.mapAuth(status)
-        if locationAuth == .authorized {
-            locationManager.requestLocation()
-        }
+        requestLocationIfNeeded()
         onChange?()
     }
 
@@ -259,20 +317,26 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
     private struct PersistedMode: Codable {
         /// `nil` means automatic location.
         var manual: WeatherPlace?
+        var lastAutomatic: WeatherPlace?
     }
 
     private func persistMode() {
         let manual: WeatherPlace?
         if case .manual(let place) = locationMode { manual = place } else { manual = nil }
-        AppSupportStore.save(PersistedMode(manual: manual), to: Self.placeFile)
+        AppSupportStore.save(
+            PersistedMode(manual: manual, lastAutomatic: lastAutomaticPlace),
+            to: Self.placeFile
+        )
     }
 
     private func loadPersistedMode() {
-        if let persisted = AppSupportStore.load(PersistedMode.self, from: Self.placeFile),
-           let place = persisted.manual {
-            locationMode = .manual(place)
-        } else {
-            locationMode = .automatic
+        if let persisted = AppSupportStore.load(PersistedMode.self, from: Self.placeFile) {
+            lastAutomaticPlace = persisted.lastAutomatic
+            if let place = persisted.manual {
+                locationMode = .manual(place)
+                return
+            }
         }
+        locationMode = .automatic
     }
 }
