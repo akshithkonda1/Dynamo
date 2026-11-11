@@ -6,9 +6,9 @@ import Foundation
 final class AppleScriptMedia {
     static let shared = AppleScriptMedia()
 
-    static let musicBundle = "com.apple.Music"
-    static let spotifyBundle = "com.spotify.client"
-    private static let sep = "\u{001F}"
+    nonisolated static let musicBundle = "com.apple.Music"
+    nonisolated static let spotifyBundle = "com.spotify.client"
+    nonisolated private static let sep = "\u{001F}"
 
     private var artworkCache: [String: Data] = [:]
     private var lastArtworkKey: String?
@@ -20,6 +20,15 @@ final class AppleScriptMedia {
     private var pendingSpotifyArtworkKeys: Set<String> = []
     private var playlistCache: [String] = []
     private var playlistCacheAt: Date?
+    /// Last Music/Spotify snapshot collected off the main thread. `currentInfo()`
+    /// returns this immediately so the notch never waits on Apple Events.
+    private var cachedInfo: NowPlayingInfo?
+    private var refreshInFlight = false
+    var onInfoUpdated: (() -> Void)?
+    private static let scriptQueue = DispatchQueue(
+        label: "com.akshithkonda.Dynamo.appleScript",
+        qos: .userInitiated
+    )
 
     private init() {}
 
@@ -31,29 +40,39 @@ final class AppleScriptMedia {
     // MARK: - Now playing
 
     func currentInfo() -> NowPlayingInfo? {
-        let music = infoFromMusic()
-        let spotify = infoFromSpotify()
+        refreshInBackground()
+        return cachedInfo
+    }
 
-        if let music, music.isPlaying {
-            return music.withArtwork(fetchArtworkIfNeeded(for: music, player: .music))
+    /// Collects Music/Spotify metadata on a background queue. Safe to call
+    /// from the 1 Hz poll — overlapping calls collapse into one in-flight run.
+    func refreshInBackground() {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        let musicRunning = isRunning(bundleID: Self.musicBundle)
+        let spotifyRunning = isRunning(bundleID: Self.spotifyBundle)
+        Self.scriptQueue.async { [weak self] in
+            let snapshot = Self.collectInfo(musicRunning: musicRunning, spotifyRunning: spotifyRunning)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshInFlight = false
+                let changed = snapshot != self.cachedInfo
+                self.cachedInfo = snapshot
+                if let snapshot, snapshot.sourceApp == .spotify {
+                    _ = self.fetchArtworkIfNeeded(for: snapshot, player: .spotify)
+                }
+                if changed { self.onInfoUpdated?() }
+            }
         }
-        if let spotify, spotify.isPlaying {
-            return musicWithSpotifyArt(spotify)
-        }
-        if let music, music.title != NowPlayingInfo.empty.title {
-            return music.withArtwork(fetchArtworkIfNeeded(for: music, player: .music))
-        }
-        if let spotify, spotify.title != NowPlayingInfo.empty.title {
-            return musicWithSpotifyArt(spotify)
-        }
-        return nil
     }
 
     func preferredPlayer() -> Player? {
-        let music = infoFromMusic()
-        let spotify = infoFromSpotify()
-        if let music, music.isPlaying { return .music }
-        if let spotify, spotify.isPlaying { return .spotify }
+        if let cached = cachedInfo {
+            if cached.isPlaying {
+                if cached.sourceApp == .spotify { return .spotify }
+                return .music
+            }
+        }
         if isRunning(bundleID: Self.musicBundle) { return .music }
         if isRunning(bundleID: Self.spotifyBundle) { return .spotify }
         return nil
@@ -399,22 +418,22 @@ final class AppleScriptMedia {
             end try
         end tell
         """
-        guard let urlString = runReturning(script)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !urlString.isEmpty,
-              let url = URL(string: urlString)
-        else {
-            pendingSpotifyArtworkKeys.remove(key)
-            return
-        }
-
-        Task { [weak self] in
-            let data = await Task.detached { try? Data(contentsOf: url) }.value
-            await MainActor.run {
-                guard let self else { return }
-                self.pendingSpotifyArtworkKeys.remove(key)
-                guard let data, !data.isEmpty, self.lastArtworkKey == key else { return }
-                self.artworkCache[key] = data
+        Self.scriptQueue.async { [weak self] in
+            let urlString = Self.executeReturning(script)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !urlString.isEmpty, let url = URL(string: urlString) else {
+                DispatchQueue.main.async { self?.pendingSpotifyArtworkKeys.remove(key) }
+                return
+            }
+            Task { [weak self] in
+                let data = await Task.detached { try? Data(contentsOf: url) }.value
+                await MainActor.run { [weak self] in
+                    guard let media = self else { return }
+                    media.pendingSpotifyArtworkKeys.remove(key)
+                    guard let data, !data.isEmpty, media.lastArtworkKey == key else { return }
+                    media.artworkCache[key] = data
+                    media.onInfoUpdated?()
+                }
             }
         }
     }
@@ -447,25 +466,152 @@ final class AppleScriptMedia {
 
     @discardableResult
     private func runReturning(_ source: String) -> String? {
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else { return nil }
-        let result = script.executeAndReturnError(&error)
-        if error != nil {
-            rememberAutomationFailure(for: source)
-            return nil
-        }
-        rememberAutomationSuccess(for: source)
-        return result.stringValue
-    }
-
-    private func run(_ source: String) {
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        if error != nil {
+        let result = Self.executeReturning(source)
+        if result == nil {
             rememberAutomationFailure(for: source)
         } else {
             rememberAutomationSuccess(for: source)
         }
+        return result
+    }
+
+    private func run(_ source: String) {
+        Self.scriptQueue.async { [weak self] in
+            let ok = Self.execute(source)
+            DispatchQueue.main.async {
+                if ok {
+                    self?.rememberAutomationSuccess(for: source)
+                } else {
+                    self?.rememberAutomationFailure(for: source)
+                }
+            }
+        }
+    }
+
+    /// Blocking Apple Event. Call only from `scriptQueue`.
+    nonisolated private static func executeReturning(_ source: String) -> String? {
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return nil }
+        let result = script.executeAndReturnError(&error)
+        if error != nil { return nil }
+        return result.stringValue
+    }
+
+    @discardableResult
+    nonisolated private static func execute(_ source: String) -> Bool {
+        var error: NSDictionary?
+        NSAppleScript(source: source)?.executeAndReturnError(&error)
+        return error == nil
+    }
+
+    nonisolated private static func collectInfo(musicRunning: Bool, spotifyRunning: Bool) -> NowPlayingInfo? {
+        let music = musicRunning ? parseBlocking(musicScript(), source: .music) : nil
+        let spotify = spotifyRunning ? parseBlocking(spotifyScript(), source: .spotify) : nil
+        if let music, music.isPlaying {
+            return music.withArtwork(fetchMusicArtworkBlocking())
+        }
+        if let spotify, spotify.isPlaying { return spotify }
+        if let music, music.title != NowPlayingInfo.empty.title {
+            return music.withArtwork(fetchMusicArtworkBlocking())
+        }
+        if let spotify, spotify.title != NowPlayingInfo.empty.title { return spotify }
+        return nil
+    }
+
+    nonisolated private static func musicScript() -> String {
+        let s = sep
+        return """
+        tell application id "\(musicBundle)"
+            try
+                set playerStateText to (player state as string)
+                if playerStateText is "stopped" then return ""
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                set isPlayingFlag to (playerStateText is "playing")
+                set playlistName to ""
+                try
+                    set playlistName to name of current playlist
+                end try
+                set elapsedSeconds to player position
+                set durationSeconds to duration of current track
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & playlistName & "\(s)" & elapsedSeconds & "\(s)" & durationSeconds
+            on error
+                return ""
+            end try
+        end tell
+        """
+    }
+
+    nonisolated private static func spotifyScript() -> String {
+        let s = sep
+        return """
+        tell application id "\(spotifyBundle)"
+            try
+                set playerStateText to (player state as string)
+                if playerStateText is "stopped" then return ""
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                set isPlayingFlag to (playerStateText is "playing")
+                set elapsedSeconds to player position
+                set durationSeconds to (duration of current track) / 1000
+                return trackName & "\(s)" & trackArtist & "\(s)" & trackAlbum & "\(s)" & isPlayingFlag & "\(s)" & "" & "\(s)" & elapsedSeconds & "\(s)" & durationSeconds
+            on error
+                return ""
+            end try
+        end tell
+        """
+    }
+
+    nonisolated private static func parseBlocking(_ source: String, source player: MediaPlayerApp) -> NowPlayingInfo? {
+        parseStatic(executeReturning(source), source: player)
+    }
+
+    nonisolated private static func parseStatic(_ raw: String?, source: MediaPlayerApp) -> NowPlayingInfo? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let parts = raw.components(separatedBy: sep)
+        guard parts.count >= 4 else { return nil }
+        let title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let playlist = parts.count >= 5 ? parts[4].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let elapsed = parts.count >= 6 ? Double(parts[5].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 : 0
+        let duration = parts.count >= 7 ? Double(parts[6].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 : 0
+        return NowPlayingInfo(
+            title: title,
+            artist: parts[1],
+            album: parts[2],
+            isPlaying: parts[3].lowercased().contains("true"),
+            artworkData: nil,
+            playlistName: playlist.isEmpty ? nil : playlist,
+            sourceApp: source,
+            elapsed: max(0, elapsed),
+            duration: max(0, duration)
+        )
+    }
+
+    nonisolated private static func fetchMusicArtworkBlocking() -> Data? {
+        let script = """
+        tell application id "\(musicBundle)"
+            try
+                if (count of artworks of current track) < 1 then return
+                return data of artwork 1 of current track
+            on error
+                return
+            end try
+        end tell
+        """
+        var error: NSDictionary?
+        guard let appleScript = NSAppleScript(source: script) else { return nil }
+        let result = appleScript.executeAndReturnError(&error)
+        if error != nil { return nil }
+        let payload = result.data
+        if !payload.isEmpty { return payload }
+        if result.numberOfItems > 0, let item = result.atIndex(1) {
+            let nested = item.data
+            if !nested.isEmpty { return nested }
+        }
+        return nil
     }
 
     private func rememberAutomationSuccess(for source: String) {
