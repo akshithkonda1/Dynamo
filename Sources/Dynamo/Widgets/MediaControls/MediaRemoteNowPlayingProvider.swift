@@ -142,14 +142,13 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         // Dual-fire for instant response: MediaRemote + scriptable player + MusicKit.
         _ = send(wantPlaying ? MRCommand.play : MRCommand.pause)
         _ = send(MRCommand.togglePlayPause)
-        if AppleScriptMedia.shared.hasScriptablePlayer {
-            AppleScriptMedia.shared.setPlaying(wantPlaying)
-        }
-        if #available(macOS 12.0, *),
-           current.sourceApp == .music,
+        if #available(macOS 14.0, *),
+           current.sourceApp != .spotify,
            MusicKitBridge.shared.isAuthorized {
             let bridge = MusicKitBridge.shared
             Task { if wantPlaying { await bridge.play() } else { bridge.pause() } }
+        } else if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.setPlaying(wantPlaying)
         }
         scheduleRefresh(after: 0.04)
         scheduleRefresh(after: 0.14)
@@ -158,13 +157,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
 
     func nextTrack() {
         _ = send(MRCommand.nextTrack)
-        if AppleScriptMedia.shared.hasScriptablePlayer {
-            AppleScriptMedia.shared.nextTrack()
-        }
-        if #available(macOS 12.0, *),
-           current.sourceApp == .music,
+        if #available(macOS 14.0, *),
+           current.sourceApp != .spotify,
            MusicKitBridge.shared.isAuthorized {
             Task { await MusicKitBridge.shared.skipToNext() }
+        } else if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.nextTrack()
         }
         scheduleRefresh(after: 0.04)
         scheduleRefresh(after: 0.12)
@@ -174,13 +172,12 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
 
     func previousTrack() {
         _ = send(MRCommand.previousTrack)
-        if AppleScriptMedia.shared.hasScriptablePlayer {
-            AppleScriptMedia.shared.previousTrack()
-        }
-        if #available(macOS 12.0, *),
-           current.sourceApp == .music,
+        if #available(macOS 14.0, *),
+           current.sourceApp != .spotify,
            MusicKitBridge.shared.isAuthorized {
             Task { await MusicKitBridge.shared.skipToPrevious() }
+        } else if AppleScriptMedia.shared.hasScriptablePlayer {
+            AppleScriptMedia.shared.previousTrack()
         }
         scheduleRefresh(after: 0.04)
         scheduleRefresh(after: 0.12)
@@ -193,7 +190,15 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     }
 
     func availablePlaylists() -> [String] {
-        AppleScriptMedia.shared.musicPlaylists()
+        if #available(macOS 14.0, *), MusicKitBridge.shared.isAuthorized {
+            let native = MusicKitBridge.shared.cachedPlaylistNames
+            if native.isEmpty {
+                Task { _ = await MusicKitBridge.shared.libraryPlaylistNames() }
+            } else {
+                return native
+            }
+        }
+        return AppleScriptMedia.shared.musicPlaylists()
     }
 
     func playPlaylist(named name: String) {
@@ -216,7 +221,11 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
         if !Self.isEmpty(optimistic) {
             publish(optimistic)
         }
-        if AppleScriptMedia.shared.hasScriptablePlayer {
+        if #available(macOS 14.0, *),
+           current.sourceApp != .spotify,
+           MusicKitBridge.shared.isAuthorized {
+            MusicKitBridge.shared.seek(to: target)
+        } else if AppleScriptMedia.shared.hasScriptablePlayer {
             AppleScriptMedia.shared.seek(to: target)
         }
         scheduleRefresh(after: 0.2)
@@ -356,7 +365,13 @@ final class MediaRemoteNowPlayingProvider: NowPlayingProvider {
     /// Merge artwork from any candidate that shares the same track identity.
     private func publishBest() {
         let scripted = AppleScriptMedia.shared.currentInfo()
-        let candidates = [latestMRInfo, latestHelperInfo, scripted].compactMap { $0 }.filter { !Self.isEmpty($0) }
+        let musicKit: NowPlayingInfo?
+        if #available(macOS 12.0, *) {
+            musicKit = MusicKitBridge.shared.playerNowPlaying()
+        } else {
+            musicKit = nil
+        }
+        let candidates = [musicKit, latestMRInfo, latestHelperInfo, scripted].compactMap { $0 }.filter { !Self.isEmpty($0) }
 
         guard var best = Self.pickBest(from: candidates) else {
             emptyStreak += 1

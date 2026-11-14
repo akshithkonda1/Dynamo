@@ -29,6 +29,10 @@ final class WidgetRegistry: ObservableObject {
         return plugins.first { $0.id == activePluginID } ?? plugins.first
     }
 
+    func plugin(id: String) -> (any NotchWidgetPlugin)? {
+        allPlugins[id]
+    }
+
     func register(_ plugin: any NotchWidgetPlugin) {
         allPlugins[plugin.id] = plugin
         if !order.contains(plugin.id) {

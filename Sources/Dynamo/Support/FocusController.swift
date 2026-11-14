@@ -479,7 +479,7 @@ final class FocusController: ObservableObject {
             return true
         }
         if MeetingMode.shared.quietOnFocus,
-           MeetingMode.shared.isFocusActive(),
+           (MeetingMode.shared.isFocusActive() || AppleFocusMirror.shared.isFocused),
            peek.urgency < .high {
             return true
         }

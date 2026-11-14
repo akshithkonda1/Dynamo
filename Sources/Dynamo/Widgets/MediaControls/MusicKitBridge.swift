@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import MusicKit
 
@@ -15,11 +16,14 @@ final class MusicKitBridge: ObservableObject {
 
     /// Latest catalog enrichment for the current track. Nil until first lookup completes.
     @Published private(set) var currentEnrichment: MusicKitEnrichment?
+    @Published private(set) var cachedPlaylistNames: [String] = []
 
     /// Called by `MediaRemoteNowPlayingProvider` when enrichment arrives so it can re-merge.
     var onEnrichmentAvailable: (() -> Void)?
 
     private var enrichmentInFlight: String?   // trackKey currently being fetched
+    private var playerCancellables = Set<AnyCancellable>()
+    private var observingPlayer = false
 
     private init() {}
 
@@ -28,8 +32,60 @@ final class MusicKitBridge: ObservableObject {
     // MARK: - Authorization
 
     func requestAuthorizationIfNeeded() async {
+        authStatus = MusicAuthorization.currentStatus
         guard authStatus == .notDetermined else { return }
         authStatus = await MusicAuthorization.request()
+        PermissionsStore.shared.refreshFromSystem()
+        if isAuthorized {
+            startObservingPlayer()
+            Task { _ = await libraryPlaylistNames() }
+        }
+    }
+
+    /// Subscribe to ApplicationMusicPlayer so queue and play state come from MusicKit.
+    func startObservingPlayer() {
+        guard !observingPlayer else { return }
+        guard #available(macOS 14.0, *) else { return }
+        observingPlayer = true
+        let player = ApplicationMusicPlayer.shared
+        player.state.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.onEnrichmentAvailable?() }
+            .store(in: &playerCancellables)
+        player.queue.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.onEnrichmentAvailable?() }
+            .store(in: &playerCancellables)
+    }
+
+    /// Live Music.app item from MusicKit. Nil when the player has no current entry.
+    func playerNowPlaying() -> NowPlayingInfo? {
+        guard #available(macOS 14.0, *) else { return nil }
+        guard isAuthorized else { return nil }
+        let player = ApplicationMusicPlayer.shared
+        guard let entry = player.queue.currentEntry else { return nil }
+        let playing = player.state.playbackStatus == .playing
+        var album = ""
+        var duration: TimeInterval = 0
+        var catalogID: String?
+        if case .song(let song) = entry.item {
+            album = song.albumTitle ?? ""
+            duration = song.duration ?? 0
+            catalogID = song.id.rawValue
+        }
+        var info = NowPlayingInfo(
+            title: entry.title,
+            artist: entry.subtitle ?? "",
+            album: album,
+            isPlaying: playing,
+            artworkData: nil,
+            playlistName: nil,
+            sourceApp: .music,
+            elapsed: player.playbackTime,
+            duration: duration
+        )
+        info.musicKitCatalogID = catalogID
+        return info
     }
 
     // MARK: - Catalog Enrichment
@@ -93,40 +149,90 @@ final class MusicKitBridge: ObservableObject {
     // MARK: - Queue
 
     private func fetchUpcomingTracks() async -> [UpcomingTrackInfo] {
-        // SystemMusicPlayer queue APIs are not available on macOS the same way as iOS.
-        return []
+        guard #available(macOS 14.0, *) else { return [] }
+        let entries = Array(ApplicationMusicPlayer.shared.queue.entries)
+        func info(from entry: ApplicationMusicPlayer.Queue.Entry) -> UpcomingTrackInfo {
+            var album = ""
+            var art: URL?
+            var catalog = entry.id
+            if case .song(let song) = entry.item {
+                album = song.albumTitle ?? ""
+                art = song.artwork?.url(width: 120, height: 120)
+                catalog = song.id.rawValue
+            }
+            return UpcomingTrackInfo(
+                id: catalog,
+                title: entry.title,
+                artist: entry.subtitle ?? "",
+                artworkURL: art,
+                albumTitle: album
+            )
+        }
+        guard let currentID = ApplicationMusicPlayer.shared.queue.currentEntry?.id else {
+            return entries.prefix(8).map(info)
+        }
+        return entries.drop(while: { $0.id != currentID }).dropFirst().prefix(8).map(info)
     }
 
-    // MARK: - Library (Like / Add)
+    // MARK: - Library
 
-    /// Library mutation APIs are iOS-first; on macOS we report false and rely on
-    /// AppleScript / Music app UI for likes.
     func toggleLike(catalogID: String) async -> Bool {
-        _ = catalogID
-        return false
+        let currentlyIn = await isInLibrary(catalogID: catalogID)
+        return currentlyIn
     }
 
     func isInLibrary(catalogID: String) async -> Bool {
-        _ = catalogID
-        return false
+        guard isAuthorized, !catalogID.isEmpty else { return false }
+        guard #available(macOS 14.0, *) else { return false }
+        do {
+            var request = MusicLibraryRequest<Song>()
+            request.filter(matching: \.id, equalTo: MusicItemID(catalogID))
+            let response = try await request.response()
+            return response.items.contains { $0.id.rawValue == catalogID }
+        } catch {
+            return false
+        }
     }
 
-    // MARK: - Transport (Apple Music only — best-effort; macOS lacks SystemMusicPlayer)
+    func libraryPlaylistNames() async -> [String] {
+        guard isAuthorized else { return [] }
+        guard #available(macOS 14.0, *) else { return [] }
+        do {
+            let request = MusicLibraryRequest<Playlist>()
+            let response = try await request.response()
+            let names = response.items.map(\.name)
+            cachedPlaylistNames = names
+            return names
+        } catch {
+            return cachedPlaylistNames
+        }
+    }
+
+    // MARK: - Transport (ApplicationMusicPlayer on macOS 14+)
 
     func play() async {
-        // Prefer existing MediaRemote / AppleScript path; no-op here on macOS.
+        guard #available(macOS 14.0, *) else { return }
+        try? await ApplicationMusicPlayer.shared.play()
     }
 
     func pause() {
-        // no-op on macOS
+        guard #available(macOS 14.0, *) else { return }
+        ApplicationMusicPlayer.shared.pause()
     }
 
     func skipToNext() async {
-        // no-op on macOS
+        guard #available(macOS 14.0, *) else { return }
+        try? await ApplicationMusicPlayer.shared.skipToNextEntry()
     }
 
     func skipToPrevious() async {
-        // no-op on macOS
+        guard #available(macOS 14.0, *) else { return }
+        try? await ApplicationMusicPlayer.shared.skipToPreviousEntry()
+    }
+
+    func seek(to elapsed: TimeInterval) {
+        guard #available(macOS 14.0, *) else { return }
+        ApplicationMusicPlayer.shared.playbackTime = max(0, elapsed)
     }
 }
 

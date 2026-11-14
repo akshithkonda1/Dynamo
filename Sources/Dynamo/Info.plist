@@ -32,6 +32,8 @@
 	<string>Dynamo reads and updates your Apple Reminders in the Checklist tab so you can list, create, complete, and delete reminders from the notch.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Dynamo needs full Reminders access to read, create, complete, and delete reminders from the Checklist tab. Changes sync with the Reminders app.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Dynamo reads whether Apple Focus is on so the notch can stay quiet during Do Not Disturb. Focus status stays on this Mac.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dynamo can use your current location to label the “Here” world clock with your city name. Time always follows this Mac’s time zone; location is optional and used only for the place label.</string>
 	<key>NSContactsUsageDescription</key>
