@@ -22,13 +22,14 @@ final class AudioOutputController: ObservableObject {
 
     func refresh() {
         Task.detached(priority: .userInitiated) {
-            var devices = Self.enumerateOutputs()
+            var listed = Self.enumerateOutputs()
             let selected = SystemLevelReader.defaultOutputDeviceID()
             if let selected,
-               !devices.contains(where: { $0.id == selected }),
+               !listed.contains(where: { $0.id == selected }),
                let name = SystemLevelReader.defaultOutputDeviceName() {
-                devices.insert(AudioOutputDevice(id: selected, name: name), at: 0)
+                listed.insert(AudioOutputDevice(id: selected, name: name), at: 0)
             }
+            let devices = listed
             await MainActor.run {
                 AudioOutputController.shared.applyEnumeration(devices: devices, selectedID: selected)
             }
