@@ -940,10 +940,15 @@ struct SettingsView: View {
             }
             Spacer(minLength: 0)
             if permissions.status(for: permission) != .granted {
-                Button("System Settings") {
-                    permissions.openSystemSettings(for: permission)
+                Button(permission == .fullDiskAccess || permission == .notificationMirror ? "System Settings" : "Allow") {
+                    if permission == .fullDiskAccess || permission == .notificationMirror {
+                        permissions.openSystemSettings(for: permission)
+                    } else {
+                        Task { await permissions.requestAccess(permission) }
+                    }
                 }
                 .controlSize(.small)
+                .buttonStyle(.borderedProminent)
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)

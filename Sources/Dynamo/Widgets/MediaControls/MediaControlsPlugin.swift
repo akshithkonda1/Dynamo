@@ -359,6 +359,8 @@ private struct ExpandedMediaView: View {
     @ObservedObject private var volume = SystemVolumeController.shared
     @ObservedObject private var amplify = MediaAmplifyController.shared
     @ObservedObject private var focus = FocusController.shared
+    @ObservedObject private var permissions = PermissionsStore.shared
+    @ObservedObject private var musicKit = MusicKitBridge.shared
     /// Local scrub value while the user is dragging the timeline.
     @State private var scrubElapsed: Double?
     @State private var displayElapsed: Double = 0
@@ -378,63 +380,60 @@ private struct ExpandedMediaView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let metrics = NotchWidgetCardLayout.mediaMetrics(width: geo.size.width)
+            let width = geo.size.width > 40 ? geo.size.width : NotchGeometry.expandedWidthFallback
+            let metrics = NotchWidgetCardLayout.mediaMetrics(width: width)
             // One plate: art left, copy + progress + centered transport.
-            HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
-                artwork(size: metrics.artSize)
-                    .notchAppear()
+            VStack(alignment: .leading, spacing: 8) {
+                mediaAccessBanner
+                HStack(alignment: .center, spacing: NotchTheme.spaceMD) {
+                    artwork(size: metrics.artSize)
+                        .notchAppear()
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            if hasTrack {
-                                MarqueeText(
-                                    text: plugin.info.title,
-                                    font: .system(size: metrics.titleSize, weight: .semibold),
-                                    foreground: NotchTheme.textPrimary,
-                                    speed: 32
-                                )
-                                .frame(height: 22)
-                                .onTapGesture { plugin.openConnectedApp() }
-                                MarqueeText(
-                                    text: subtitle,
-                                    font: NotchTheme.caption,
-                                    foreground: NotchTheme.textSecondary,
-                                    speed: 28
-                                )
-                                .frame(height: 16)
-                            } else {
-                                Text("Ready when you are")
-                                    .font(NotchTheme.body.weight(.semibold))
-                                    .foregroundStyle(NotchTheme.textPrimary)
-                                Text("Queue something in Music or Spotify — skip & volume still work.")
-                                    .font(NotchTheme.micro)
-                                    .foregroundStyle(NotchTheme.textTertiary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                if hasTrack {
+                                    MarqueeText(
+                                        text: plugin.info.title,
+                                        font: .system(size: metrics.titleSize, weight: .semibold),
+                                        foreground: NotchTheme.textPrimary,
+                                        speed: 32
+                                    )
+                                    .frame(height: 22)
+                                    .onTapGesture { plugin.openConnectedApp() }
+                                    MarqueeText(
+                                        text: subtitle,
+                                        font: NotchTheme.caption,
+                                        foreground: NotchTheme.textSecondary,
+                                        speed: 28
+                                    )
+                                    .frame(height: 16)
+                                } else {
+                                    Text("Play a song in Music")
+                                        .font(NotchTheme.body.weight(.semibold))
+                                        .foregroundStyle(NotchTheme.textPrimary)
+                                    Text("Title, artist, and skip land here. Allow access below if this stays empty.")
+                                        .font(NotchTheme.micro)
+                                        .foregroundStyle(NotchTheme.textTertiary)
+                                }
                             }
+                            Spacer(minLength: 0)
+                            appBadge
                         }
-                        Spacer(minLength: 0)
-                        appBadge
-                    }
 
-                    if hasTrack {
-                        timelineBar
-                    } else {
-                        Button {
-                            plugin.openConnectedApp()
-                        } label: {
-                            NotchChipLabel(title: "Open \(playerAppName)", systemImage: "arrow.up.right")
+                        if hasTrack {
+                            timelineBar
                         }
-                        .buttonStyle(.plain)
-                    }
 
-                    transportRow(
-                        playDiameter: metrics.playDiameter,
-                        sideDiameter: metrics.sideDiameter,
-                        auxDiameter: metrics.auxDiameter
-                    )
-                    compactVolumeRow
+                        transportRow(
+                            playDiameter: metrics.playDiameter,
+                            sideDiameter: metrics.sideDiameter,
+                            auxDiameter: metrics.auxDiameter
+                        )
+                        compactVolumeRow
+                    }
+                    .notchAppear(delay: 0.04)
                 }
-                .notchAppear(delay: 0.04)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -442,6 +441,9 @@ private struct ExpandedMediaView: View {
             plugin.refreshPlaylists()
             SystemVolumeController.shared.start()
             SystemVolumeController.shared.refreshFromSystem()
+            AudioOutputController.shared.refresh()
+            AppleScriptMedia.shared.refreshInBackground()
+            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
             displayElapsed = plugin.info.elapsed
             lastTick = .now
         }
@@ -469,6 +471,30 @@ private struct ExpandedMediaView: View {
             lastTick = now
             let next = min(plugin.info.duration, displayElapsed + dt)
             displayElapsed = next
+        }
+    }
+
+    @ViewBuilder
+    private var mediaAccessBanner: some View {
+        let needMusicKit = !musicKit.isAuthorized
+        let needMusicApp = permissions.status(for: .automationMusic) != .granted
+        if needMusicKit || needMusicApp {
+            HStack(spacing: 8) {
+                if needMusicKit {
+                    Button("Allow Apple Music") {
+                        Task { await permissions.requestAccess(.musicKit) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+                if needMusicApp {
+                    Button("Allow Music app") {
+                        Task { await permissions.requestAccess(.automationMusic) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            }
         }
     }
 

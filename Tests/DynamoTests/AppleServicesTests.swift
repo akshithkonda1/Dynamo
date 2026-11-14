@@ -11,6 +11,14 @@ final class AppleServicesTests: XCTestCase {
         XCTAssertTrue(ids.contains("reminders"))
     }
 
+    func testAllowablePermissionsHaveInAppRequests() {
+        let settingsOnly: Set<DynamoPermission> = [.fullDiskAccess, .notificationMirror]
+        for permission in DynamoPermission.allCases where !settingsOnly.contains(permission) {
+            XCTAssertFalse(permission.displayName.isEmpty)
+        }
+        XCTAssertTrue(DynamoPermission.musicKit.detail.localizedCaseInsensitiveContains("MusicKit"))
+    }
+
     func testMusicKitIsCoreAndNotesAutomationIsNot() {
         XCTAssertTrue(DynamoPermission.musicKit.isRequiredForCore)
         XCTAssertTrue(DynamoPermission.calendar.isRequiredForCore)
