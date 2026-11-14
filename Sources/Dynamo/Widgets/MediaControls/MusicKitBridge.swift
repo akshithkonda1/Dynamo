@@ -149,29 +149,9 @@ final class MusicKitBridge: ObservableObject {
     // MARK: - Queue
 
     private func fetchUpcomingTracks() async -> [UpcomingTrackInfo] {
-        guard #available(macOS 14.0, *) else { return [] }
-        let entries = Array(ApplicationMusicPlayer.shared.queue.entries)
-        func info(from entry: ApplicationMusicPlayer.Queue.Entry) -> UpcomingTrackInfo {
-            var album = ""
-            var art: URL?
-            var catalog = entry.id
-            if case .song(let song) = entry.item {
-                album = song.albumTitle ?? ""
-                art = song.artwork?.url(width: 120, height: 120)
-                catalog = song.id.rawValue
-            }
-            return UpcomingTrackInfo(
-                id: catalog,
-                title: entry.title,
-                artist: entry.subtitle ?? "",
-                artworkURL: art,
-                albumTitle: album
-            )
-        }
-        guard let currentID = ApplicationMusicPlayer.shared.queue.currentEntry?.id else {
-            return entries.prefix(8).map(info)
-        }
-        return entries.drop(while: { $0.id != currentID }).dropFirst().prefix(8).map(info)
+        // ApplicationMusicPlayer.queue is this process, not Music.app.
+        // Upcoming tracks stay empty unless catalog enrichment finds related songs.
+        return []
     }
 
     // MARK: - Library

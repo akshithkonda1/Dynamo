@@ -364,7 +364,11 @@ private struct ExpandedMediaView: View {
     @State private var displayElapsed: Double = 0
     @State private var lastTick: Date = .now
     private var hasTrack: Bool {
-        plugin.info.isPlaying || plugin.info.title != NowPlayingInfo.empty.title
+        let title = plugin.info.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return plugin.info.isPlaying
+            || (!title.isEmpty && title != NowPlayingInfo.empty.title)
+            || !plugin.info.artist.isEmpty
+            || !plugin.info.album.isEmpty
     }
 
     private var effectiveElapsed: Double {

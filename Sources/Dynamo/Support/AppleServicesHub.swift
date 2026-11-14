@@ -26,7 +26,6 @@ final class AppleServicesHub {
         _ = registry
         if #available(macOS 12.0, *) {
             Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
-            MusicKitBridge.shared.startObservingPlayer()
         }
 
         ContactPhotoResolver.requestAccessOnLaunchIfNeeded()
