@@ -1,9 +1,12 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
+import Contacts
 import CoreLocation
 import EventKit
 import Foundation
+import Intents
+import MusicKit
 import Speech
 
 /// Every macOS permission Dynamo may need. OS TCC still owns the real grant;
@@ -15,6 +18,9 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
     case microphone
     case speech
     case location
+    case contacts
+    case musicKit
+    case appleFocus
     case fullDiskAccess
     case notificationMirror
     case automationMusic
@@ -31,9 +37,12 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .microphone: return "Microphone"
         case .speech: return "Speech Recognition"
         case .location: return "Location"
+        case .contacts: return "Contacts"
+        case .musicKit: return "Apple Music"
+        case .appleFocus: return "Apple Focus"
         case .fullDiskAccess: return "Full Disk Access"
         case .notificationMirror: return "Notification Center (mirror)"
-        case .automationMusic: return "Control Music"
+        case .automationMusic: return "Control Music app"
         case .automationSpotify: return "Control Spotify"
         case .automationNotes: return "Control Notes"
         }
@@ -43,9 +52,9 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
     var detail: String {
         switch self {
         case .calendar:
-            return "Show events, create events, Meeting context, True Focus agenda"
+            return "EventKit: events, Meeting context, True Focus agenda"
         case .reminders:
-            return "Checklist: list, create, complete, delete, due peeks"
+            return "EventKit: list, create, complete, delete, due peeks"
         case .camera:
             return "Webcam mirror (only while the Webcam tab is open)"
         case .microphone:
@@ -53,24 +62,30 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .speech:
             return "Meeting Mode notetaker (on-device preferred)"
         case .location:
-            return "Weather and World Clock “Here” — city-level location only"
+            return "WeatherKit and World Clock “Here” — city-level location only"
+        case .contacts:
+            return "Contact photos on call and text Peeks"
+        case .musicKit:
+            return "MusicKit: now playing, queue, library, play/pause/skip"
+        case .appleFocus:
+            return "Quiet the notch when Do Not Disturb or a Focus is on"
         case .fullDiskAccess:
             return "Optional Calendar local DB fallback + broader file access"
         case .notificationMirror:
             return "Mirror other apps’ Notification Center alerts into Peek"
         case .automationMusic:
-            return "Play/pause, skip, cover art, playlists, Amplify EQ"
+            return "AppleScript fallback if MusicKit cannot control Music.app"
         case .automationSpotify:
-            return "Play/pause, skip, cover art"
+            return "Play/pause, skip, cover art (Spotify has no MusicKit API)"
         case .automationNotes:
-            return "Checklist Notes tab: create, list, open, delete notes in the Dynamo folder"
+            return "AppleScript: Notes has no public framework"
         }
     }
 
     /// Whether the feature is core vs optional.
     var isRequiredForCore: Bool {
         switch self {
-        case .calendar, .reminders, .automationMusic:
+        case .calendar, .reminders, .musicKit:
             return true
         default:
             return false
@@ -85,6 +100,9 @@ enum DynamoPermission: String, CaseIterable, Codable, Identifiable {
         case .microphone: return "mic.fill"
         case .speech: return "waveform.badge.mic"
         case .location: return "location.fill"
+        case .contacts: return "person.crop.circle"
+        case .musicKit: return "music.note.house"
+        case .appleFocus: return "moon.fill"
         case .fullDiskAccess: return "internaldrive"
         case .notificationMirror: return "bell.badge"
         case .automationMusic: return "music.note"
@@ -144,6 +162,9 @@ final class PermissionsStore: ObservableObject {
         update(.microphone, to: Self.probeMicrophone())
         update(.speech, to: Self.probeSpeech())
         update(.location, to: Self.probeLocation())
+        update(.contacts, to: Self.probeContacts())
+        update(.musicKit, to: Self.probeMusicKit())
+        update(.appleFocus, to: Self.probeAppleFocus())
         update(.fullDiskAccess, to: Self.probeFullDiskAccess())
         update(.notificationMirror, to: Self.probeNotificationMirror())
         update(.automationMusic, to: Self.probeAutomation(bundleID: "com.apple.Music"))
@@ -185,6 +206,21 @@ final class PermissionsStore: ObservableObject {
             urls = [
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocationServices"
+            ]
+        case .contacts:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Contacts"
+            ]
+        case .musicKit:
+            urls = [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Media",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Media"
+            ]
+        case .appleFocus:
+            urls = [
+                "x-apple.systempreferences:com.apple.Focus-Settings.extension",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Focus"
             ]
         case .fullDiskAccess, .notificationMirror:
             // Notification mirror needs the same Group Containers / FDA-class access.
@@ -266,6 +302,34 @@ final class PermissionsStore: ObservableObject {
 
     private static func probeSpeech() -> PermissionMemoryStatus {
         switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .unknown
+        }
+    }
+
+    private static func probeContacts() -> PermissionMemoryStatus {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        switch status {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .unknown
+        }
+    }
+
+    private static func probeMusicKit() -> PermissionMemoryStatus {
+        switch MusicAuthorization.currentStatus {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .unknown
+        }
+    }
+
+    private static func probeAppleFocus() -> PermissionMemoryStatus {
+        switch INFocusStatusCenter.default.authorizationStatus {
         case .authorized: return .granted
         case .denied, .restricted: return .denied
         case .notDetermined: return .notDetermined
