@@ -154,6 +154,67 @@ final class PermissionsStore: ObservableObject {
         persist()
     }
 
+    /// Ask macOS for this grant in-app. Only Full Disk Access has to jump to Settings.
+    func requestAccess(_ permission: DynamoPermission) async {
+        switch permission {
+        case .calendar:
+            let store = EKEventStore()
+            if #available(macOS 14.0, *) {
+                _ = try? await store.requestFullAccessToEvents()
+            } else {
+                _ = try? await store.requestAccess(to: .event)
+            }
+        case .reminders:
+            let store = EKEventStore()
+            if #available(macOS 14.0, *) {
+                _ = try? await store.requestFullAccessToReminders()
+            } else {
+                _ = try? await store.requestAccess(to: .reminder)
+            }
+        case .camera:
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        case .microphone:
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+        case .speech:
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                SFSpeechRecognizer.requestAuthorization { _ in cont.resume() }
+            }
+        case .location:
+            locationPrompter.requestWhenInUseAuthorization()
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        case .contacts:
+            _ = try? await CNContactStore().requestAccess(for: .contacts)
+        case .musicKit:
+            _ = await MusicAuthorization.request()
+        case .appleFocus:
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                INFocusStatusCenter.default.requestAuthorization { _ in cont.resume() }
+            }
+        case .automationMusic:
+            await Self.pingAppleScript(application: "Music")
+        case .automationSpotify:
+            await Self.pingAppleScript(application: "Spotify")
+        case .automationNotes:
+            await Self.pingAppleScript(application: "Notes")
+        case .fullDiskAccess, .notificationMirror:
+            openSystemSettings(for: permission)
+        }
+        refreshFromSystem()
+    }
+
+    private let locationPrompter = CLLocationManager()
+
+    private static func pingAppleScript(application: String) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let source = "tell application \"\(application)\" to get name"
+                var error: NSDictionary?
+                NSAppleScript(source: source)?.executeAndReturnError(&error)
+                cont.resume()
+            }
+        }
+    }
+
     /// Re-read OS state. Safe to call often (launch, become active, Settings open).
     func refreshFromSystem() {
         update(.calendar, to: Self.probeCalendar())

@@ -13,15 +13,22 @@ final class AudioOutputController: ObservableObject {
 
     @Published private(set) var devices: [AudioOutputDevice] = []
     @Published private(set) var selectedID: AudioDeviceID?
+    private var listening = false
 
     private init() {
         refresh()
+        startListening()
     }
 
     func refresh() {
         Task.detached(priority: .userInitiated) {
-            let devices = Self.enumerateOutputs()
+            var devices = Self.enumerateOutputs()
             let selected = SystemLevelReader.defaultOutputDeviceID()
+            if let selected,
+               !devices.contains(where: { $0.id == selected }),
+               let name = SystemLevelReader.defaultOutputDeviceName() {
+                devices.insert(AudioOutputDevice(id: selected, name: name), at: 0)
+            }
             await MainActor.run {
                 AudioOutputController.shared.applyEnumeration(devices: devices, selectedID: selected)
             }
@@ -31,6 +38,30 @@ final class AudioOutputController: ObservableObject {
     fileprivate func applyEnumeration(devices: [AudioOutputDevice], selectedID: AudioDeviceID?) {
         self.devices = devices
         self.selectedID = selectedID
+    }
+
+    private func startListening() {
+        guard !listening else { return }
+        listening = true
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        let queue = DispatchQueue(label: "com.akshithkonda.Dynamo.audioOutputs")
+        let block: AudioObjectPropertyListenerBlock = { _, _ in
+            DispatchQueue.main.async {
+                AudioOutputController.shared.refresh()
+            }
+        }
+        var devicesAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var defaultAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(system, &devicesAddr, queue, block)
+        AudioObjectAddPropertyListenerBlock(system, &defaultAddr, queue, block)
     }
 
     func select(id: AudioDeviceID) {
@@ -71,6 +102,7 @@ final class AudioOutputController: ObservableObject {
         for id in ids {
             guard hasOutputChannels(id) else { continue }
             guard let name = deviceName(id) else { continue }
+            if name.localizedCaseInsensitiveContains("DynamoAmplify") { continue }
             result.append(AudioOutputDevice(id: id, name: name))
         }
         return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
