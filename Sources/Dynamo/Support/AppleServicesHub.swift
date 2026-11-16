@@ -24,11 +24,9 @@ final class AppleServicesHub {
         started = true
 
         _ = registry
-        if #available(macOS 12.0, *) {
-            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
-        }
-
-        ContactPhotoResolver.requestAccessOnLaunchIfNeeded()
+        // Do not prompt here. First-launch onboarding asks MusicKit, Control
+        // Music, and Dynamo controls separately; this only uses remembered grants.
+        PermissionsStore.shared.applyGrantedServices()
         AppleFocusMirror.shared.start()
         PermissionsStore.shared.refreshFromSystem()
     }
@@ -52,15 +50,7 @@ final class AppleFocusMirror: ObservableObject {
         started = true
         let center = INFocusStatusCenter.default
         authorization = center.authorizationStatus
-        if authorization == .notDetermined {
-            center.requestAuthorization { [weak self] status in
-                Task { @MainActor in
-                    self?.authorization = status
-                    self?.refresh()
-                    PermissionsStore.shared.refreshFromSystem()
-                }
-            }
-        } else {
+        if authorization != .notDetermined {
             refresh()
         }
         let t = Timer(timeInterval: 8, repeats: true) { [weak self] _ in

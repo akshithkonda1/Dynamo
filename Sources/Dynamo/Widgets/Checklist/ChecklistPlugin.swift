@@ -77,10 +77,22 @@ final class ChecklistPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeek
             }
         }
         reminders.start()
-        if reminders.authState == .notDetermined || reminders.authState == .writeOnly {
-            Task { await reminders.requestAccess() }
-        } else if reminders.authState == .authorized {
+        applyRememberedAccess()
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPermissionsDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyRememberedAccess() }
+        }
+    }
+
+    private func applyRememberedAccess() {
+        if PermissionsStore.shared.isGranted(.reminders) {
             reminders.refresh()
+        }
+        if PermissionsStore.shared.isGranted(.automationNotes) {
+            notes.refresh()
         }
     }
 

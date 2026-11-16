@@ -109,6 +109,10 @@ final class ExpandedIslandLayoutTests: XCTestCase {
         )
         XCTAssertTrue(text.contains("NotchTabRow.leading("))
         XCTAssertTrue(text.contains("NotchTabRow.trailing("))
+        XCTAssertTrue(
+            text.contains("WidgetExpandWindowController.shared.present"),
+            "Every expanded widget must offer an Expand window button"
+        )
     }
 
     func testWidgetCardUsesThemeInsets() throws {

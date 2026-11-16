@@ -59,6 +59,7 @@ struct SettingsView: View {
     @ObservedObject private var mirror = SystemNotificationMirror.shared
     @ObservedObject private var ambientMode = AmbientModeStore.shared
     @State private var selectedPane: SettingsPane = .general
+    @State private var permissionBusy: DynamoPermission?
 
     private enum SettingsPane: Hashable, Identifiable {
         case general, widgets, notifications, permissions, about
@@ -142,6 +143,12 @@ struct SettingsView: View {
             launchAtLogin = LaunchAtLogin.isEnabled
             launchStatus = LaunchAtLogin.statusDescription
             PermissionsStore.shared.refreshFromSystem()
+        }
+        .onDisappear {
+            permissions.stopLiveUpdates()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissions.refreshFromSystem()
         }
         .onReceive(NotificationCenter.default.publisher(for: .dynamoWidgetConfigurationDidChange)) { _ in
             WidgetSettingsStore.shared.persist(from: registry)
@@ -877,28 +884,32 @@ struct SettingsView: View {
 
     private var permissionsSection: some View {
         SettingsSection(title: "Permissions") {
-            Text("Everything Dynamo may need from macOS. Core: Calendar, Reminders, Control Music. Optional: Webcam, Meeting Listen, Amplify EQ, notification mirror (Full Disk Access), Location (optional city label for Clocks “Here”). Clocks use Apple’s time zone database offline.")
+            Text("Allow prompts macOS in Dynamo. Open Settings / Change jumps to the matching Privacy pane. The row updates as soon as the grant flips.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Core")
+            Text("Needed to work")
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 4)
-            ForEach(DynamoPermission.allCases.filter(\.isRequiredForCore)) { permission in
-                permissionRow(permission)
+            ForEach(PermissionFamily.core) { family in
+                familyGroup(family)
             }
 
-            Text("Optional")
+            Text("Also wants")
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 8)
-            ForEach(DynamoPermission.allCases.filter { !$0.isRequiredForCore }) { permission in
-                permissionRow(permission)
+            ForEach(PermissionFamily.optional) { family in
+                familyGroup(family)
             }
 
             HStack {
                 Button("Refresh permissions") {
                     permissions.refreshFromSystem()
+                }
+                .controlSize(.small)
+                Button("Ask for everything again") {
+                    PermissionOnboardingController.shared.show()
                 }
                 .controlSize(.small)
                 Spacer()
@@ -908,13 +919,30 @@ struct SettingsView: View {
             }
             .padding(.top, 6)
         }
+        .onAppear { permissions.beginLiveUpdates() }
+        .onDisappear { permissions.endLiveUpdates() }
+    }
+
+    private func familyGroup(_ family: PermissionFamily) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if family.members.count > 1 {
+                Text(family.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
+            ForEach(family.members) { permission in
+                permissionRow(permission)
+            }
+        }
     }
 
     private func permissionRow(_ permission: DynamoPermission) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let status = permissions.status(for: permission)
+        return HStack(alignment: .top, spacing: 10) {
             Image(systemName: permission.systemImage)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(statusColor(permissions.status(for: permission)))
+                .foregroundStyle(statusColor(status))
                 .frame(width: 18)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
@@ -934,28 +962,48 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(statusLabel(permissions.status(for: permission)))
+                Text(statusLabel(status))
                     .font(.caption2)
-                    .foregroundStyle(statusColor(permissions.status(for: permission)).opacity(0.9))
+                    .foregroundStyle(statusColor(status).opacity(0.9))
             }
-            Spacer(minLength: 0)
-            if permissions.status(for: permission) != .granted {
-                Button(permission == .fullDiskAccess || permission == .notificationMirror ? "System Settings" : "Allow") {
-                    if permission == .fullDiskAccess || permission == .notificationMirror {
-                        permissions.openSystemSettings(for: permission)
-                    } else {
-                        Task { await permissions.requestAccess(permission) }
-                    }
-                }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-            } else {
+            Spacer(minLength: 8)
+            permissionActions(permission, status: status)
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func permissionActions(_ permission: DynamoPermission, status: PermissionMemoryStatus) -> some View {
+        HStack(spacing: 6) {
+            if status == .granted {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.system(size: 14))
             }
+            if permission.showsAllow(for: status) {
+                Button(permissionBusy == permission ? "Waiting…" : "Allow") {
+                    Task {
+                        permissionBusy = permission
+                        await permissions.promptOrOpen(permission)
+                        permissionBusy = nil
+                    }
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(permissionBusy != nil)
+            }
+            if permission.showsOpenSettings(for: status) {
+                Button(permission.openSettingsTitle(for: status)) {
+                    Task {
+                        permissionBusy = permission
+                        await permissions.openAndWatch(permission)
+                        permissionBusy = nil
+                    }
+                }
+                .controlSize(.small)
+                .disabled(permissionBusy != nil)
+            }
         }
-        .padding(.vertical, 4)
     }
 
     private func statusColor(_ status: PermissionMemoryStatus) -> Color {
@@ -969,10 +1017,10 @@ struct SettingsView: View {
 
     private func statusLabel(_ status: PermissionMemoryStatus) -> String {
         switch status {
-        case .granted: return "Granted"
-        case .denied: return "Denied — open macOS System Settings to change"
-        case .notDetermined: return "Not asked yet — use the feature once to prompt"
-        case .unknown: return "Unknown (app may be closed / not installed)"
+        case .granted: return "Granted — Change opens System Settings"
+        case .denied: return "Denied — Open Settings to turn it on; this row updates immediately"
+        case .notDetermined: return "Not asked — Allow prompts macOS now"
+        case .unknown: return "Unknown — Allow or Open Settings"
         }
     }
 

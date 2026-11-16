@@ -117,6 +117,17 @@ final class WorldClockPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbientP
         RunLoop.main.add(t, forMode: .common)
         timer = t
         location.refreshIfAuthorized()
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPermissionsDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                if PermissionsStore.shared.isGranted(.location) {
+                    self?.location.refreshIfAuthorized()
+                }
+            }
+        }
     }
 
     func stop() {

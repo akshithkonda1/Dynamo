@@ -31,13 +31,25 @@ final class MusicKitBridge: ObservableObject {
 
     // MARK: - Authorization
 
+    /// Read the current MusicKit grant without prompting. Used after boot
+    /// onboarding and whenever PermissionsStore applies remembered access.
+    func syncFromSystem() async {
+        authStatus = MusicAuthorization.currentStatus
+        if isAuthorized {
+            Task { _ = await libraryPlaylistNames() }
+        }
+    }
+
     func requestAuthorizationIfNeeded() async {
         authStatus = MusicAuthorization.currentStatus
         guard authStatus == .notDetermined else { return }
+        // First-launch onboarding (or Settings Allow) owns the prompt.
+        if PermissionsStore.shared.hasAsked(.musicKit) { return }
+        if !PermissionsStore.shared.onboardingCompleted { return }
         authStatus = await MusicAuthorization.request()
+        PermissionsStore.shared.markAsked(.musicKit)
         PermissionsStore.shared.refreshFromSystem()
         if isAuthorized {
-            startObservingPlayer()
             Task { _ = await libraryPlaylistNames() }
         }
     }

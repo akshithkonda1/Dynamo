@@ -10,7 +10,6 @@ import Foundation
 @MainActor
 enum ContactPhotoResolver {
     private static let store = CNContactStore()
-    private static var didRequestAccess = false
 
     private static var keys: [CNKeyDescriptor] {
         [
@@ -118,9 +117,6 @@ enum ContactPhotoResolver {
         case .authorized:
             return true
         case .notDetermined:
-            guard !didRequestAccess else { return false }
-            didRequestAccess = true
-            store.requestAccess(for: .contacts) { _, _ in }
             return false
         case .denied, .restricted:
             return false
@@ -129,13 +125,8 @@ enum ContactPhotoResolver {
         }
     }
 
-    /// Prompt once early so the first message Peek can resolve a photo.
-    static func requestAccessOnLaunchIfNeeded() {
-        let status = CNContactStore.authorizationStatus(for: .contacts)
-        guard status == .notDetermined else { return }
-        didRequestAccess = true
-        store.requestAccess(for: .contacts) { _, _ in }
-    }
+    /// Launch no longer prompts. First-boot onboarding / Settings Allow own Contacts.
+    static func requestAccessOnLaunchIfNeeded() {}
 
     // MARK: - Message name parsing
 

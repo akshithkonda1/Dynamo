@@ -123,15 +123,20 @@ final class CalendarPlugin: ObservableObject, NotchWidgetPlugin, NotchSneakPeekP
         }
         provider.start()
         applyProviderSnapshot()
-        switch authState {
-        case .notDetermined, .writeOnly:
-            // Prompt (again) for full read access — write-only leaves the list empty.
-            Task { await provider.requestAccess() }
-        case .authorized:
-            provider.refresh()
-        case .denied:
-            break
+        applyRememberedAccess()
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPermissionsDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyRememberedAccess() }
         }
+    }
+
+    private func applyRememberedAccess() {
+        guard PermissionsStore.shared.isGranted(.calendar) else { return }
+        provider.refresh()
+        applyProviderSnapshot()
     }
 
     func refresh() {

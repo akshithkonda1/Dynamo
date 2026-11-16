@@ -42,6 +42,11 @@ final class NotesProvider: ObservableObject {
     }
 
     func refresh() {
+        guard PermissionsStore.shared.isGranted(.automationNotes) else {
+            isAvailable = false
+            lastStatus = "Needs Notes access"
+            return
+        }
         let script = """
         with timeout of 12 seconds
             try

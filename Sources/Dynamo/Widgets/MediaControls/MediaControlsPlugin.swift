@@ -54,7 +54,7 @@ final class MediaControlsPlugin: ObservableObject, NotchWidgetPlugin, NotchAmbie
         MediaPeekPulse.shared.sync(from: info)
         refreshPlaylists()
         if #available(macOS 12.0, *) {
-            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
+            Task { await MusicKitBridge.shared.syncFromSystem() }
         }
     }
 
@@ -442,8 +442,10 @@ private struct ExpandedMediaView: View {
             SystemVolumeController.shared.start()
             SystemVolumeController.shared.refreshFromSystem()
             AudioOutputController.shared.refresh()
-            AppleScriptMedia.shared.refreshInBackground()
-            Task { await MusicKitBridge.shared.requestAuthorizationIfNeeded() }
+            if permissions.isGranted(.automationMusic) || permissions.isGranted(.automationSpotify) {
+                AppleScriptMedia.shared.refreshInBackground()
+            }
+            Task { await MusicKitBridge.shared.syncFromSystem() }
             displayElapsed = plugin.info.elapsed
             lastTick = .now
         }

@@ -60,6 +60,14 @@ final class SystemHUDController: ObservableObject {
         startBrightnessPoll()
         refreshInterceptionMode()
 
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPermissionsDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshInterceptionMode() }
+        }
+
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: SystemOSDSuppressor.didChangeNotification,
             object: nil,
@@ -97,8 +105,8 @@ final class SystemHUDController: ObservableObject {
         let wantReplace = SystemOSDSuppressor.isEnabled
         if wantReplace {
             if !interceptor.isActive {
-                // Prompt once if needed so takeover can actually work.
-                _ = MediaKeyInterceptor.requestAccessibilityIfNeeded()
+                // Prompt lives in first-launch onboarding / Settings. Use the
+                // grant if we already have it.
                 if interceptor.start() {
                     isInterceptingKeys = true
                     // Observation monitors would double-fire with interception.
