@@ -20,7 +20,11 @@ final class WeatherErrorTextTests: XCTestCase {
     func testTimeZoneGuessesACity() {
         XCTAssertEqual(WeatherKitWeatherProvider.place(forTimeZone: "America/Chicago")?.name, "Chicago")
         XCTAssertEqual(WeatherKitWeatherProvider.place(forTimeZone: "Pacific/Honolulu")?.name, "Honolulu")
+        XCTAssertEqual(WeatherKitWeatherProvider.place(forTimeZone: "US/Central")?.name, "Chicago")
         XCTAssertNil(WeatherKitWeatherProvider.place(forTimeZone: "Mars/Olympus"))
+        let fallback = WeatherKitWeatherProvider.fallbackPlace()
+        XCTAssertFalse(fallback.name.isEmpty)
+        XCTAssertNotEqual(fallback.latitude, 0, accuracy: 0.0001)
     }
 }
 

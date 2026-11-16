@@ -47,19 +47,9 @@ final class MeetingSpeechCapture: ObservableObject {
     }
 
     func requestPermissions() async {
-        let speech: Bool = await withCheckedContinuation { cont in
-            SFSpeechRecognizer.requestAuthorization { status in
-                cont.resume(returning: status == .authorized)
-            }
-        }
-        speechAuth = speech ? .authorized : .denied
-
-        let mic: Bool = await withCheckedContinuation { cont in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                cont.resume(returning: granted)
-            }
-        }
-        micAuth = mic ? .authorized : .denied
+        await PermissionsStore.shared.requestAccess(.speech)
+        await PermissionsStore.shared.requestAccess(.microphone)
+        refreshAuth()
     }
 
     func toggleListen() {

@@ -49,8 +49,10 @@ final class AppleScriptMedia {
     func refreshInBackground() {
         guard !refreshInFlight else { return }
         refreshInFlight = true
-        let musicRunning = isRunning(bundleID: Self.musicBundle)
-        let spotifyRunning = isRunning(bundleID: Self.spotifyBundle)
+        let musicRunning = PermissionsStore.shared.isGranted(.automationMusic)
+            && isRunning(bundleID: Self.musicBundle)
+        let spotifyRunning = PermissionsStore.shared.isGranted(.automationSpotify)
+            && isRunning(bundleID: Self.spotifyBundle)
         Self.scriptQueue.async { [weak self] in
             let snapshot = Self.collectInfo(musicRunning: musicRunning, spotifyRunning: spotifyRunning)
             DispatchQueue.main.async {
@@ -465,7 +467,18 @@ final class AppleScriptMedia {
     }
 
     @discardableResult
+    private func allowsScript(_ source: String) -> Bool {
+        if source.contains(Self.musicBundle) || source.contains("tell application id \"com.apple.Music\"") {
+            return PermissionsStore.shared.isGranted(.automationMusic)
+        }
+        if source.contains(Self.spotifyBundle) {
+            return PermissionsStore.shared.isGranted(.automationSpotify)
+        }
+        return true
+    }
+
     private func runReturning(_ source: String) -> String? {
+        guard allowsScript(source) else { return nil }
         let result = Self.executeReturning(source)
         if result == nil {
             rememberAutomationFailure(for: source)
@@ -476,6 +489,7 @@ final class AppleScriptMedia {
     }
 
     private func run(_ source: String) {
+        guard allowsScript(source) else { return }
         Self.scriptQueue.async { [weak self] in
             let ok = Self.execute(source)
             DispatchQueue.main.async {

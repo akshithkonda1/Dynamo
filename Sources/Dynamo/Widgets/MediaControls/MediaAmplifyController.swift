@@ -244,6 +244,14 @@ final class MediaAmplifyController: ObservableObject {
         }
 
         // Request audio capture once (same path as live peek EQ).
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if micStatus == .notDetermined,
+           (PermissionsStore.shared.hasAsked(.microphone) || !PermissionsStore.shared.onboardingCompleted) {
+            lastError = "Allow Microphone in Dynamo permissions for Local Amplify EQ."
+            statusLine = "\(profile.title) · audio access"
+            activePresetName = nil
+            return
+        }
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
             Task { @MainActor in
                 guard let self else { return }

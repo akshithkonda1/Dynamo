@@ -82,16 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             registry.register(plugin)
         }
 
-        // World Clock “Here” needs When-In-Use Location. Prompt once on boot so
-        // distance sort + city label work without digging into Preferences.
-        // Safe if already granted/denied — Core Location no-ops appropriately.
         let clocks = production.worldClock
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            clocks.requestCurrentLocation()
-        }
-        // Contacts: so call/text Peeks can show the contact photo + matching tint.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            ContactPhotoResolver.requestAccessOnLaunchIfNeeded()
+            if PermissionsStore.shared.isGranted(.location) {
+                clocks.requestCurrentLocation()
+            }
         }
 
         WidgetSettingsStore.shared.apply(to: registry)
@@ -114,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         installStatusItem()
         installHotKeys()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            PermissionOnboardingController.shared.presentIfNeeded()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -324,8 +323,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated {
             // User may have toggled FDA / Camera / Automation / Accessibility in System Settings.
             PermissionsStore.shared.refreshFromSystem()
-            NotificationCenter.default.post(name: .dynamoPermissionsDidRefresh, object: nil)
-            // Accessibility grant → start HID key interception so system OSD stays hidden.
             hudController?.refreshInterceptionMode()
         }
     }

@@ -202,9 +202,23 @@ final class MusicAudioSampler: ObservableObject {
     }
 
     private func requestPermissionIfNeeded(completion: @escaping (Bool) -> Void) {
-        // Process taps share the recording privacy path on recent macOS.
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            completion(granted)
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            completion(true)
+        case .denied, .restricted:
+            completion(false)
+        case .notDetermined:
+            // First-launch onboarding / Settings Allow own the Microphone prompt.
+            if PermissionsStore.shared.hasAsked(.microphone)
+                || !PermissionsStore.shared.onboardingCompleted {
+                completion(false)
+                return
+            }
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                completion(granted)
+            }
+        @unknown default:
+            completion(false)
         }
     }
 }

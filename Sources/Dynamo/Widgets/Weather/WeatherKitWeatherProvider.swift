@@ -53,17 +53,26 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
                 lastLatitude = last.latitude
                 lastLongitude = last.longitude
                 Task { await refresh() }
-            } else if let guessed = Self.place(forTimeZone: TimeZone.current.identifier) {
+            } else {
+                let guessed = Self.fallbackPlace()
                 lastLatitude = guessed.latitude
                 lastLongitude = guessed.longitude
                 Task { await refresh() }
             }
-            requestLocationIfNeeded()
+            applyRememberedLocation()
         case .manual(let place):
             locationAuth = .unavailable
             lastLatitude = place.latitude
             lastLongitude = place.longitude
             Task { await refresh() }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .dynamoPermissionsDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyRememberedLocation() }
         }
 
         let t = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
@@ -85,12 +94,28 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
         locationManager.requestWhenInUseAuthorization()
     }
 
+    private func applyRememberedLocation() {
+        guard case .automatic = locationMode else { return }
+        locationAuth = Self.mapAuth(locationManager.authorizationStatus)
+        if locationAuth == .authorized {
+            locationManager.requestLocation()
+            return
+        }
+        if lastLatitude == nil {
+            let guessed = Self.fallbackPlace()
+            lastLatitude = guessed.latitude
+            lastLongitude = guessed.longitude
+            Task { await refresh() }
+        }
+    }
+
     private func requestLocationIfNeeded() {
         switch locationAuth {
         case .authorized:
             locationManager.requestLocation()
         case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
+            // First-launch onboarding / Settings Allow own the Location prompt.
+            applyRememberedLocation()
         case .denied:
             if snapshot == nil {
                 lastError = "Allow Location in System Settings, or set a city in Settings → Weather."
@@ -182,10 +207,16 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
     /// City-level fallback so Weather still loads when Location is off.
     nonisolated static func place(forTimeZone identifier: String) -> WeatherPlace? {
         switch identifier {
-        case "America/Chicago": return WeatherPlace(name: "Chicago", latitude: 41.8781, longitude: -87.6298)
-        case "America/New_York": return WeatherPlace(name: "New York", latitude: 40.7128, longitude: -74.0060)
-        case "America/Los_Angeles": return WeatherPlace(name: "Los Angeles", latitude: 34.0522, longitude: -118.2437)
-        case "America/Denver": return WeatherPlace(name: "Denver", latitude: 39.7392, longitude: -104.9903)
+        case "America/Chicago", "US/Central", "CST", "CDT":
+            return WeatherPlace(name: "Chicago", latitude: 41.8781, longitude: -87.6298)
+        case "America/New_York", "US/Eastern", "EST", "EDT",
+             "America/Indiana/Indianapolis", "America/Kentucky/Louisville",
+             "America/Detroit":
+            return WeatherPlace(name: "New York", latitude: 40.7128, longitude: -74.0060)
+        case "America/Los_Angeles", "US/Pacific", "PST", "PDT":
+            return WeatherPlace(name: "Los Angeles", latitude: 34.0522, longitude: -118.2437)
+        case "America/Denver", "US/Mountain", "MST", "MDT":
+            return WeatherPlace(name: "Denver", latitude: 39.7392, longitude: -104.9903)
         case "America/Phoenix": return WeatherPlace(name: "Phoenix", latitude: 33.4484, longitude: -112.0740)
         case "America/Vancouver": return WeatherPlace(name: "Vancouver", latitude: 49.2827, longitude: -123.1207)
         case "America/Toronto": return WeatherPlace(name: "Toronto", latitude: 43.6532, longitude: -79.3832)
@@ -193,14 +224,52 @@ final class WeatherKitWeatherProvider: NSObject, WeatherProvider, CLLocationMana
         case "America/Sao_Paulo": return WeatherPlace(name: "São Paulo", latitude: -23.5505, longitude: -46.6333)
         case "America/Buenos_Aires", "America/Argentina/Buenos_Aires":
             return WeatherPlace(name: "Buenos Aires", latitude: -34.6037, longitude: -58.3816)
-        case "Europe/London": return WeatherPlace(name: "London", latitude: 51.5074, longitude: -0.1278)
-        case "Europe/Paris": return WeatherPlace(name: "Paris", latitude: 48.8566, longitude: 2.3522)
-        case "Asia/Kolkata": return WeatherPlace(name: "Delhi", latitude: 28.6139, longitude: 77.2090)
-        case "Asia/Tokyo": return WeatherPlace(name: "Tokyo", latitude: 35.6762, longitude: 139.6503)
+        case "Europe/London", "GMT", "BST":
+            return WeatherPlace(name: "London", latitude: 51.5074, longitude: -0.1278)
+        case "Europe/Paris", "CET", "CEST", "Europe/Berlin", "Europe/Madrid", "Europe/Rome":
+            return WeatherPlace(name: "Paris", latitude: 48.8566, longitude: 2.3522)
+        case "Asia/Kolkata", "Asia/Calcutta", "IST":
+            return WeatherPlace(name: "Delhi", latitude: 28.6139, longitude: 77.2090)
+        case "Asia/Tokyo", "JST": return WeatherPlace(name: "Tokyo", latitude: 35.6762, longitude: 139.6503)
         case "Australia/Sydney": return WeatherPlace(name: "Sydney", latitude: -33.8688, longitude: 151.2093)
         case "Australia/Melbourne": return WeatherPlace(name: "Melbourne", latitude: -37.8136, longitude: 144.9631)
-        case "Pacific/Honolulu": return WeatherPlace(name: "Honolulu", latitude: 21.3069, longitude: -157.8583)
+        case "Pacific/Honolulu", "US/Hawaii", "HST":
+            return WeatherPlace(name: "Honolulu", latitude: 21.3069, longitude: -157.8583)
         default: return nil
+        }
+    }
+
+    /// Always returns a city so WeatherKit has coordinates before Location is granted.
+    nonisolated static func fallbackPlace() -> WeatherPlace {
+        let identifier = TimeZone.current.identifier
+        if let place = place(forTimeZone: identifier) { return place }
+        let hours = TimeZone.current.secondsFromGMT() / 3600
+        switch hours {
+        case ...(-9):
+            return WeatherPlace(name: "Honolulu", latitude: 21.3069, longitude: -157.8583)
+        case -8:
+            return WeatherPlace(name: "Los Angeles", latitude: 34.0522, longitude: -118.2437)
+        case -7:
+            return WeatherPlace(name: "Denver", latitude: 39.7392, longitude: -104.9903)
+        case -6:
+            return WeatherPlace(name: "Chicago", latitude: 41.8781, longitude: -87.6298)
+        case -5:
+            return WeatherPlace(name: "New York", latitude: 40.7128, longitude: -74.0060)
+        case 0:
+            return WeatherPlace(name: "London", latitude: 51.5074, longitude: -0.1278)
+        case 1, 2:
+            return WeatherPlace(name: "Paris", latitude: 48.8566, longitude: 2.3522)
+        case 5, 6:
+            return WeatherPlace(name: "Delhi", latitude: 28.6139, longitude: 77.2090)
+        case 8:
+            return WeatherPlace(name: "Singapore", latitude: 1.3521, longitude: 103.8198)
+        case 9:
+            return WeatherPlace(name: "Tokyo", latitude: 35.6762, longitude: 139.6503)
+        case 10, 11:
+            return WeatherPlace(name: "Sydney", latitude: -33.8688, longitude: 151.2093)
+        default:
+            let label = TimeZone.current.localizedName(for: .generic, locale: .current) ?? identifier
+            return WeatherPlace(name: label, latitude: 41.8781, longitude: -87.6298)
         }
     }
 

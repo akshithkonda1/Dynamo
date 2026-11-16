@@ -167,6 +167,15 @@ struct NotchContentView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
 
+                    if let active = registry.activePlugin {
+                        TrayIconButton(
+                            systemImage: "arrow.up.left.and.arrow.down.right",
+                            displayName: "Expand \(active.displayName)",
+                            isActive: false
+                        ) {
+                            WidgetExpandWindowController.shared.present(plugin: active)
+                        }
+                    }
                     TrayIconButton(
                         systemImage: "gearshape.fill",
                         displayName: "Preferences",
